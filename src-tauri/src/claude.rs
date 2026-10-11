@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 const FILE_NAME: &str = "claude-sessions.json";
 /// Oldest entries drop off beyond this.
-const MAX_SESSIONS: usize = 50;
+const MAX_SESSIONS: usize = 200;
 const TITLE_MAX_CHARS: usize = 80;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,9 +79,10 @@ impl ClaudeStore {
         Ok(sessions.clone())
     }
 
-    pub fn forget(&self, id: &str) -> Result<Vec<ClaudeSession>, String> {
+    /// Forgets several at once (e.g. a whole folder) with a single write.
+    pub fn forget(&self, ids: &[String]) -> Result<Vec<ClaudeSession>, String> {
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|s| s.id != id);
+        sessions.retain(|s| !ids.contains(&s.id));
         self.save(&sessions)?;
         Ok(sessions.clone())
     }
@@ -236,7 +237,8 @@ mod tests {
 
         let reloaded = fx.store().list();
         assert_eq!(reloaded, list);
-        assert_eq!(fx.store().forget(ID).unwrap().len(), 1);
+        assert_eq!(fx.store().forget(&[ID.to_string()]).unwrap().len(), 1);
+        assert!(fx.store().forget(&[ID.to_string(), other.to_string()]).unwrap().is_empty());
     }
 
     #[test]

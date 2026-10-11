@@ -96,7 +96,7 @@ pub fn run() {
             commands::save_session,
             commands::list_claude_sessions,
             commands::claude_session_seen,
-            commands::forget_claude_session,
+            commands::forget_claude_sessions,
             commands::save_config,
             commands::open_config_file,
             commands::get_autostart,

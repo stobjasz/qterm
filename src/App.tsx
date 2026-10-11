@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   claudeSessionSeen,
-  forgetClaudeSession,
+  forgetClaudeSessions,
   getConfig,
   hideWindow,
   listClaudeSessions,
@@ -358,7 +358,7 @@ export default function App() {
         profiles={profiles ?? []}
         claude={
           config?.claudeSessions
-            ? { sessions: claudeSessions, onResume: resumeClaude, onForget: (id) => void forgetClaudeSession(id) }
+            ? { sessions: claudeSessions, onResume: resumeClaude, onForget: (ids) => void forgetClaudeSessions(ids) }
             : undefined
         }
         onActivate={(tabId) => setWorkspace((ws) => activateTab(ws, tabId))}

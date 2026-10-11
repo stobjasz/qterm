@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent } from "react";
 
+import { ClaudeMenu } from "../claude/ClaudeMenu";
 import type { ClaudeSession, Profile } from "../ipc";
 import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
 import { Popup } from "./Popup";
@@ -14,7 +15,7 @@ interface Props {
   claude?: {
     sessions: ClaudeSession[];
     onResume(session: ClaudeSession): void;
-    onForget(id: string): void;
+    onForget(ids: string[]): void;
   };
   onActivate(tabId: TabId): void;
   onClose(tabId: TabId): void;
@@ -166,48 +167,6 @@ function RenameField({ initial, onDone }: { initial: string; onDone(value?: stri
   );
 }
 
-function ClaudeMenu({ sessions, onResume, onForget }: NonNullable<Props["claude"]>) {
-  return (
-    <Popup
-      label="Claude sessions"
-      title={`Claude sessions (${sessions.length})`}
-      icon={<span className="claude-icon">✳{sessions.length > 0 && <sup>{sessions.length}</sup>}</span>}
-      menuLabel="Claude sessions"
-      className="claude-menu"
-    >
-      {(close) =>
-        sessions.length === 0 ? (
-          <p className="menu-empty">
-            No sessions yet. They appear here when a terminal prints <code>claude --resume &lt;id&gt;</code>, as
-            Claude Code does when you quit it.
-          </p>
-        ) : (
-          sessions.map((session) => (
-            <div key={session.id} className="claude-session">
-              <button
-                role="menuitem"
-                title={`Resume in ${session.cwd ?? "your home folder"}\nclaude --resume ${session.id}`}
-                onClick={() => {
-                  close();
-                  onResume(session);
-                }}
-              >
-                <span className="claude-title">{session.title ?? session.id.slice(0, 8)}</span>
-                <span className="claude-meta">
-                  {session.cwd ?? "folder unknown"} · {timeAgo(session.seenAt)}
-                </span>
-              </button>
-              <button className="tab-close" aria-label={`Forget ${session.title ?? session.id}`} onClick={() => onForget(session.id)}>
-                ×
-              </button>
-            </div>
-          ))
-        )
-      }
-    </Popup>
-  );
-}
-
 function SplitIcon({ dir }: { dir: SplitDir }) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" aria-hidden="true">
@@ -215,13 +174,4 @@ function SplitIcon({ dir }: { dir: SplitDir }) {
       {dir === "row" ? <line x1="7" y1="1.5" x2="7" y2="12.5" /> : <line x1="1.5" y1="7" x2="12.5" y2="7" />}
     </svg>
   );
-}
-
-function timeAgo(ms: number): string {
-  const minutes = Math.round((Date.now() - ms) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return new Date(ms).toLocaleDateString();
 }

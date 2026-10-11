@@ -117,8 +117,12 @@ pub async fn claude_session_seen(
 }
 
 #[tauri::command]
-pub fn forget_claude_session(app: AppHandle, store: State<'_, ClaudeStore>, id: String) -> Result<Vec<ClaudeSession>, String> {
-    let sessions = store.forget(&id)?;
+pub fn forget_claude_sessions(
+    app: AppHandle,
+    store: State<'_, ClaudeStore>,
+    ids: Vec<String>,
+) -> Result<Vec<ClaudeSession>, String> {
+    let sessions = store.forget(&ids)?;
     let _ = app.emit("claude-sessions-changed", &sessions);
     Ok(sessions)
 }

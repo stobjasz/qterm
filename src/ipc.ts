@@ -123,8 +123,8 @@ export function claudeSessionSeen(id: string, profileId: string, paneCwd: string
   return invoke("claude_session_seen", { id, profileId, paneCwd });
 }
 
-export function forgetClaudeSession(id: string): Promise<ClaudeSession[]> {
-  return invoke("forget_claude_session", { id });
+export function forgetClaudeSessions(ids: string[]): Promise<ClaudeSession[]> {
+  return invoke("forget_claude_sessions", { ids });
 }
 
 export function onClaudeSessionsChanged(handler: (sessions: ClaudeSession[]) => void): Promise<UnlistenFn> {
