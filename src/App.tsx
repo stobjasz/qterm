@@ -20,6 +20,7 @@ import {
   type Profile,
 } from "./ipc";
 import { buildKeymap, type Command } from "./keybindings";
+import { HeightHandle } from "./HeightHandle";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
@@ -368,6 +369,7 @@ export default function App() {
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
       />
+      <HeightHandle />
     </div>
   );
 }

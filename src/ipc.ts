@@ -153,6 +153,16 @@ export function onOpenSettings(handler: () => void): Promise<UnlistenFn> {
   return listen("open-settings", () => handler());
 }
 
+/** Resizes the console to `height` CSS pixels while its bottom edge is dragged; returns the share. */
+export function resizeConsole(height: number): Promise<number> {
+  return invoke("resize_console", { height });
+}
+
+/** Saves the console height (share of the work area) as the `height` setting. */
+export function saveConsoleHeight(share: number): Promise<void> {
+  return invoke("save_console_height", { share });
+}
+
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {
   return listen<PtyExit>("pty-exit", (event) => handler(event.payload));
 }

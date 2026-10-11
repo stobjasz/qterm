@@ -6,7 +6,8 @@ translucent console down from the top of the screen.
 - Tabs and split panes for PowerShell, cmd, Git Bash and WSL; rename (double-click)
   and reorder (drag) tabs
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
-- Nine colour themes, adjustable size, opacity, font, slide speed
+- Nine colour themes, adjustable size, opacity, font, slide speed; drag the console's
+  bottom edge to change its height (double-click it for half the screen)
 - Reopens your tabs and layout, each pane in the folder it was in
 - Optional: remembers Claude Code sessions (from `claude --resume <id>` in the output)
   and resumes them in their folder from the ✳ menu

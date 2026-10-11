@@ -22,14 +22,15 @@ body,
 }
 
 .console {
+  position: relative;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   height: 100%;
-  padding: 6px 8px 0;
+  /* The bottom accent line is drawn by .height-handle. */
+  padding: 6px 8px 3px;
   color: var(--theme-fg);
   background: var(--console-bg);
-  border-bottom: 2px solid var(--console-edge);
   font: 13px/1.4 system-ui, sans-serif;
   transform: translateY(-100%);
   transition: transform var(--slide-ms) ease-out;
@@ -107,6 +108,35 @@ body,
 .terminal-wrapper .xterm-viewport {
   background-color: transparent;
   scrollbar-width: none;
+}
+
+/* Drag the bottom edge to change the console's height. It covers the accent line
+   and a few pixels above it; the line thickens while hovered or dragged. */
+.height-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  height: 7px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.height-handle::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--console-edge);
+  transition: height 120ms;
+}
+
+.height-handle:hover::after,
+.height-handle.dragging::after {
+  height: 4px;
 }
 
 /* --- buttons shared by the bars and panels ---------------------------------- */

@@ -101,6 +101,8 @@ pub fn run() {
             commands::open_config_file,
             commands::get_autostart,
             commands::set_autostart,
+            commands::resize_console,
+            commands::save_console_height,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

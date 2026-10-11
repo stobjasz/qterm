@@ -144,3 +144,18 @@ pub fn get_autostart(app: AppHandle) -> bool {
 pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     crate::tray::set_autostart(&app, enabled)
 }
+
+/// Bottom-edge drag in progress: resize to `height` CSS pixels; returns the share.
+#[tauri::command]
+pub fn resize_console(app: AppHandle, height: f64) -> Result<f64, String> {
+    window::resize_height(&app, height)
+}
+
+/// Bottom-edge drag finished (or reset): remember the height as a share of the work area.
+#[tauri::command]
+pub fn save_console_height(config: State<'_, ConfigState>, share: f64) -> Result<(), String> {
+    let share = (share.clamp(0.1, 1.0) * 100.0).round() / 100.0;
+    let mut changes = serde_json::Map::new();
+    changes.insert("height".into(), share.into());
+    config.update(&changes)
+}

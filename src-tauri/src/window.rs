@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize
 use crate::config::{Config, ConfigState, MonitorChoice};
 
 pub const LABEL: &str = "quake";
+/// Smallest console height as a share of the work area; matches the `height` setting's range.
+const MIN_HEIGHT: f64 = 0.1;
 
 #[derive(Default)]
 pub struct QuakeState {
@@ -98,19 +100,40 @@ fn show(app: &AppHandle, win: &WebviewWindow) {
 }
 
 /// Re-applies size and position, e.g. after the settings changed while the console is up.
+/// Stays on the monitor it is on: the mouse may have wandered to another one.
 pub fn replace(app: &AppHandle) {
     let Some(win) = window(app) else { return };
-    if win.is_visible().unwrap_or(false) {
-        place(app, &win, &app.state::<ConfigState>().get());
+    if win.is_visible().unwrap_or(false)
+        && let Ok(Some(monitor)) = win.current_monitor()
+    {
+        place_on(&win, &monitor, &app.state::<ConfigState>().get());
     }
 }
 
+/// Mouse resize (dragging the console's bottom edge): sets the height to
+/// `logical_height` CSS pixels, kept within the allowed share of the work area.
+/// Returns that share, which the UI saves as `height` when the drag ends.
+pub fn resize_height(app: &AppHandle, logical_height: f64) -> Result<f64, String> {
+    let win = app.get_webview_window(LABEL).ok_or("no console window")?;
+    let monitor = win.current_monitor().map_err(|e| e.to_string())?.ok_or("console is on no monitor")?;
+    let available = f64::from(monitor.work_area().size.height);
+    let height = (logical_height * monitor.scale_factor()).clamp(available * MIN_HEIGHT, available);
+    let width = win.outer_size().map_err(|e| e.to_string())?.width;
+    win.set_size(PhysicalSize::new(width, height.round() as u32)).map_err(|e| e.to_string())?;
+    Ok(height / available)
+}
+
 fn place(app: &AppHandle, win: &WebviewWindow, config: &Config) {
-    if let Some((position, size)) = target_rect(app, config) {
-        // Position first: landing on a monitor with another DPI makes Windows rescale the window.
-        let _ = win.set_position(position);
-        let _ = win.set_size(size);
+    if let Some(monitor) = target_monitor(app, config.monitor) {
+        place_on(win, &monitor, config);
     }
+}
+
+fn place_on(win: &WebviewWindow, monitor: &Monitor, config: &Config) {
+    let (position, size) = target_rect(monitor, config);
+    // Position first: landing on a monitor with another DPI makes Windows rescale the window.
+    let _ = win.set_position(position);
+    let _ = win.set_size(size);
 }
 
 fn hide(app: &AppHandle, win: WebviewWindow) {
@@ -129,14 +152,13 @@ fn hide(app: &AppHandle, win: WebviewWindow) {
     });
 }
 
-/// The top of the chosen monitor's work area, sized by the config and centered.
-fn target_rect(app: &AppHandle, config: &Config) -> Option<(PhysicalPosition<i32>, PhysicalSize<u32>)> {
-    let monitor = target_monitor(app, config.monitor)?;
+/// The top of the monitor's work area, sized by the config and centered.
+fn target_rect(monitor: &Monitor, config: &Config) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
     let area = monitor.work_area();
     let width = (f64::from(area.size.width) * config.width).round() as u32;
     let height = (f64::from(area.size.height) * config.height).round() as u32;
     let x = area.position.x + ((area.size.width - width) / 2) as i32;
-    Some((PhysicalPosition::new(x, area.position.y), PhysicalSize::new(width, height)))
+    (PhysicalPosition::new(x, area.position.y), PhysicalSize::new(width, height))
 }
 
 fn target_monitor(app: &AppHandle, choice: MonitorChoice) -> Option<Monitor> {
