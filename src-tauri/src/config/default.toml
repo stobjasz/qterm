@@ -48,6 +48,16 @@ shell_integration = true
 # qterm keeps it with its folder so you can resume it later from the tab bar.
 claude_sessions = false
 
+# Alert you (Windows notification, tab marker) when Claude Code in a qterm tab is
+# waiting for you. Needs qterm's Notification hook in Claude Code's settings:
+# Settings → "Set up Claude Code alerts" adds it.
+claude_alerts = true
+
+# Ctrl+click a file reference like src/app.ts:42 to open it with this command.
+# {file}, {line} and {col} are filled in. Without the editor installed, the file
+# opens in its default app.
+editor = "code --goto {file}:{line}:{col}"
+
 [font]
 family = '"Cascadia Mono", "Cascadia Code", Consolas, monospace'
 size = 14   # 6 - 72

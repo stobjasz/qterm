@@ -47,6 +47,9 @@ pub struct SpawnRequest {
     pub profile_id: Option<String>,
     /// Start here when the folder exists (else the profile's home).
     pub cwd: Option<String>,
+    /// Exported to the shell as QTERM_PANE, so tools in it (Claude Code's
+    /// notification hook) can say which pane they belong to.
+    pub pane_id: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -78,7 +81,10 @@ impl SessionManager {
             Some(id) => profiles.iter().find(|p| &p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
             None => profiles.first().ok_or("no shell profiles found")?,
         };
-        let cmd = profile.command(request.cwd.as_deref(), integrate);
+        let mut cmd = profile.command(request.cwd.as_deref(), integrate);
+        if let Some(pane_id) = &request.pane_id {
+            cmd.env(crate::alerts::PANE_ENV, pane_id);
+        }
         self.spawn(cmd, request.cols, request.rows, on_output, on_exit)
     }
 

@@ -18,6 +18,8 @@ export interface Draft {
   restoreSession: boolean;
   shellIntegration: boolean;
   claudeSessions: boolean;
+  claudeAlerts: boolean;
+  editor: string;
   fontFamily: string;
   fontSize: number;
   /** Effective chord per action; "" means unbound. */
@@ -40,6 +42,8 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords">, string> = {
   restoreSession: "restore_session",
   shellIntegration: "shell_integration",
   claudeSessions: "claude_sessions",
+  claudeAlerts: "claude_alerts",
+  editor: "editor",
   fontFamily: "font.family",
   fontSize: "font.size",
 };
@@ -60,6 +64,8 @@ export function toDraft(config: Config): Draft {
     restoreSession: config.restoreSession,
     shellIntegration: config.shellIntegration,
     claudeSessions: config.claudeSessions,
+    claudeAlerts: config.claudeAlerts,
+    editor: config.editor,
     fontFamily: config.font.family,
     fontSize: config.font.size,
     chords: Object.fromEntries(ACTION_LIST.map((a) => [a.name, config.keybindings[a.name] ?? a.defaultChord])),

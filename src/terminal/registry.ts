@@ -4,15 +4,29 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import "@xterm/xterm/css/xterm.css";
 
 import { findResumeIds } from "../claude/detect";
-import { onPtyExit, ptyAck, ptyKill, ptyResize, ptySpawn, ptyWrite, type SessionId } from "../ipc";
+import {
+  onPtyExit,
+  openInEditor,
+  ptyAck,
+  ptyKill,
+  ptyResize,
+  ptySpawn,
+  ptyWrite,
+  resolveFiles,
+  type SessionId,
+} from "../ipc";
 import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
 import { parseOsc7, parseOsc9 } from "./cwd";
+import { findFileLinks } from "./links";
 import { terminalOptions } from "./theme";
 import { THEMES, withAlpha, xtermTheme, type Theme } from "./themes";
 
@@ -64,6 +78,8 @@ interface Entry {
   search: SearchAddon;
   wrapper: HTMLDivElement;
   spec: PaneSpec;
+  /** Latest folder the shell reported; file links resolve against it. */
+  cwd?: string;
   opened: boolean;
   sessionId?: SessionId;
   resizeTimer?: number;
@@ -225,6 +241,7 @@ export class TerminalRegistry {
       search: new SearchAddon(),
       wrapper,
       spec,
+      cwd: spec.cwd,
       opened: false,
       pendingAck: 0,
       linesSinceScan: 0,
@@ -239,6 +256,13 @@ export class TerminalRegistry {
     const { term, fit, search } = entry;
     term.loadAddon(fit);
     term.loadAddon(search);
+    // Unicode 11 widths: emoji and symbols (Claude Code's UI is full of them) take
+    // the cells the shell expects, so lines don't drift.
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = "11";
+    // Ctrl+click, like Windows Terminal and VS Code: a plain click still selects text.
+    term.loadAddon(new WebLinksAddon((event, uri) => event.ctrlKey && void openUrl(uri)));
+    this.wireFileLinks(entry);
     term.open(entry.wrapper);
     loadWebgl(term);
     entry.opened = true;
@@ -283,7 +307,7 @@ export class TerminalRegistry {
           pendingInput = undefined;
         }
       });
-    ptySpawn(entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput)
+    ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput)
       .then((id) => {
         // The pane may have been closed while the shell was starting.
         if (this.entries.get(paneId) !== entry) return void ptyKill(id);
@@ -309,9 +333,47 @@ export class TerminalRegistry {
     });
   }
 
+  /** Ctrl+click on "src/app.ts:42" opens it in the editor; only existing files are links. */
+  private wireFileLinks(entry: Entry): void {
+    const { term } = entry;
+    term.registerLinkProvider({
+      provideLinks: (y, callback) => {
+        const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        const found = findFileLinks(text);
+        if (found.length === 0) return callback(undefined);
+        resolveFiles(
+          found.map((f) => f.path),
+          entry.cwd,
+        ).then(
+          (resolved) =>
+            callback(
+              found.flatMap((link, i) => {
+                const file = resolved[i];
+                if (!file) return [];
+                return [
+                  {
+                    range: { start: { x: link.start + 1, y }, end: { x: link.end, y } },
+                    text: text.slice(link.start, link.end),
+                    decorations: { underline: true, pointerCursor: true },
+                    activate: (event: MouseEvent) => {
+                      if (event.ctrlKey) void openInEditor(file, link.line, link.col);
+                    },
+                  },
+                ];
+              }),
+            ),
+          () => callback(undefined),
+        );
+      },
+    });
+  }
+
   private wireCwd(paneId: PaneId, entry: Entry): void {
     const report = (cwd: string | undefined) => {
-      if (cwd) this.events.onCwd(paneId, cwd);
+      if (cwd) {
+        entry.cwd = cwd;
+        this.events.onCwd(paneId, cwd);
+      }
       return cwd !== undefined;
     };
     entry.term.parser.registerOscHandler(7, (data) => report(parseOsc7(data)));

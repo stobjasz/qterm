@@ -9,8 +9,11 @@ translucent console down from the top of the screen.
 - Nine colour themes, adjustable size, opacity, font, slide speed; drag the console's
   bottom edge to change its height (double-click it for half the screen)
 - Reopens your tabs and layout, each pane in the folder it was in
-- Optional: remembers Claude Code sessions (from `claude --resume <id>` in the output)
-  and resumes them in their folder from the ✳ menu
+- Claude Code: remembers sessions (from `claude --resume <id>` in the output), grouped
+  by folder, and resumes them from the ✳ menu; alerts you (Windows notification, ✳ on
+  the tab) when Claude is waiting for you. Turn both on in Settings → Claude Code.
+- Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
+  editor (VS Code by default)
 - Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"
 
 | Keys | Action |

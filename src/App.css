@@ -204,6 +204,35 @@ body,
   box-shadow: inset 0 2px 0 var(--console-edge);
 }
 
+/* Claude Code is waiting in this tab: a pulsing mark in the accent colour. */
+.tab-attention {
+  color: var(--console-edge);
+  animation: attention-pulse 1.2s ease-in-out infinite;
+}
+
+.tab.attention:not(.active) {
+  color: var(--tab-active-fg);
+  background: color-mix(in srgb, var(--console-edge) 14%, transparent);
+}
+
+@keyframes attention-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--line) !important;
+}
+
 /* Where a dragged tab will land. */
 .tab.drop-before::before,
 .tab.drop-after::after {

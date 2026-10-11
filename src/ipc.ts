@@ -25,6 +25,8 @@ export interface Config {
   restoreSession: boolean;
   shellIntegration: boolean;
   claudeSessions: boolean;
+  claudeAlerts: boolean;
+  editor: string;
   font: { family: string; size: number };
   keybindings: Record<string, string>;
 }
@@ -59,6 +61,7 @@ export function listProfiles(): Promise<Profile[]> {
 }
 
 export function ptySpawn(
+  paneId: string,
   profileId: string,
   cols: number,
   rows: number,
@@ -68,7 +71,7 @@ export function ptySpawn(
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { request: { profileId, cwd, cols, rows }, onOutput: channel });
+  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows }, onOutput: channel });
 }
 
 export function ptyWrite(id: SessionId, data: string): Promise<void> {
@@ -161,6 +164,63 @@ export function resizeConsole(height: number): Promise<number> {
 /** Saves the console height (share of the work area) as the `height` setting. */
 export function saveConsoleHeight(share: number): Promise<void> {
   return invoke("save_console_height", { share });
+}
+
+/** Absolute paths of the candidates that exist (relative ones against `cwd`), else null. */
+export function resolveFiles(paths: string[], cwd: string | undefined): Promise<(string | null)[]> {
+  return invoke("resolve_files", { paths, cwd });
+}
+
+/** Opens a file at a line with the configured editor. */
+export function openInEditor(file: string, line?: number, col?: number): Promise<void> {
+  return invoke("open_in_editor", { file, line, col });
+}
+
+/** Claude Code in a pane is waiting for the user (its Notification hook fired). */
+export interface ClaudeAlert {
+  paneId: string;
+  title: string | null;
+  message: string;
+  /** e.g. "permission_prompt", "idle_prompt". */
+  kind: string | null;
+  sessionId: string | null;
+}
+
+export function onClaudeAttention(handler: (alert: ClaudeAlert) => void): Promise<UnlistenFn> {
+  return listen<ClaudeAlert>("claude-attention", (event) => handler(event.payload));
+}
+
+/** Windows notification for an alert; clicking it brings the console up on that pane. */
+export function showClaudeAlert(alert: ClaudeAlert): Promise<void> {
+  return invoke("show_claude_alert", { alert });
+}
+
+export function setAttentionCount(count: number): Promise<void> {
+  return invoke("set_attention_count", { count });
+}
+
+/** A notification was clicked: switch to this pane. */
+export function onFocusPane(handler: (paneId: string) => void): Promise<UnlistenFn> {
+  return listen<string>("focus-pane", (event) => handler(event.payload));
+}
+
+export interface HookStatus {
+  installed: boolean;
+  /** Installed and pointing at this qterm exe. */
+  current: boolean;
+  settingsPath: string;
+}
+
+export function claudeHookStatus(): Promise<HookStatus> {
+  return invoke("claude_hook_status");
+}
+
+export function installClaudeHook(): Promise<HookStatus> {
+  return invoke("install_claude_hook");
+}
+
+export function removeClaudeHook(): Promise<HookStatus> {
+  return invoke("remove_claude_hook");
 }
 
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {

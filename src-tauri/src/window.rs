@@ -76,6 +76,18 @@ pub fn open_settings(app: &AppHandle) {
     let _ = app.emit_to(LABEL, "open-settings", ());
 }
 
+/// A notification was clicked: bring the console up and let the UI switch to the pane.
+pub fn focus_pane(app: &AppHandle, pane_id: &str) {
+    if let Some(win) = window(app) {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.set_focus();
+        } else {
+            show(app, &win);
+        }
+    }
+    let _ = app.emit_to(LABEL, "focus-pane", pane_id);
+}
+
 /// Hides the console if it is showing, e.g. after its last tab closed.
 pub fn dismiss(app: &AppHandle) {
     let Some(win) = window(app) else { return };

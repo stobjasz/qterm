@@ -1,7 +1,7 @@
 import { useRef, useState, type PointerEvent } from "react";
 
 import { ClaudeMenu } from "../claude/ClaudeMenu";
-import type { ClaudeSession, Profile } from "../ipc";
+import type { ClaudeAlert, ClaudeSession, Profile } from "../ipc";
 import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
 import { Popup } from "./Popup";
 
@@ -24,6 +24,8 @@ interface Props {
   onRename(tabId: TabId, title: string): void;
   onMove(tabId: TabId, toIndex: number): void;
   onOpenSettings(): void;
+  /** Tabs with a pane where Claude Code is waiting, and its latest message. */
+  attention: ReadonlyMap<TabId, ClaudeAlert>;
 }
 
 // Mouse-down default is prevented (except in text fields) so clicking the bar never
@@ -70,14 +72,15 @@ export function TabBar(props: Props) {
         {workspace.tabs.map((tab, i) => {
           const title = tabTitle(workspace, tab);
           const active = tab.id === workspace.activeTab;
+          const waiting = props.attention.get(tab.id);
           const drop = dropIndex === i ? " drop-before" : dropIndex === i + 1 && i === workspace.tabs.length - 1 ? " drop-after" : "";
           return (
             <div
               key={tab.id}
               role="tab"
               aria-selected={active}
-              className={`tab${active ? " active" : ""}${drop}`}
-              title={`${title}\nDouble-click to rename, drag to move`}
+              className={`tab${active ? " active" : ""}${drop}${waiting ? " attention" : ""}`}
+              title={`${waiting ? `Claude: ${waiting.message}\n` : ""}${title}\nDouble-click to rename, drag to move`}
               onClick={() => props.onActivate(tab.id)}
               onDoubleClick={() => setEditing(tab.id)}
               onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}
@@ -96,6 +99,11 @@ export function TabBar(props: Props) {
                 />
               ) : (
                 <span className="tab-title">{title}</span>
+              )}
+              {waiting && (
+                <span className="tab-attention" role="status" aria-label={`Claude is waiting: ${waiting.message}`}>
+                  ✳
+                </span>
               )}
               <button
                 className="tab-close"

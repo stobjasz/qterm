@@ -18,6 +18,8 @@ const config: Config = {
   restoreSession: true,
   shellIntegration: true,
   claudeSessions: false,
+  claudeAlerts: true,
+  editor: "code --goto {file}:{line}:{col}",
   font: { family: "Cascadia Mono", size: 14 },
   keybindings: {},
 };

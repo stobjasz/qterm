@@ -163,3 +163,52 @@ pub fn save_console_height(config: State<'_, ConfigState>, share: f64) -> Result
     changes.insert("height".into(), share.into());
     config.update(&changes)
 }
+
+/// Which of these terminal file references exist (resolved against `cwd`).
+#[tauri::command]
+pub async fn resolve_files(paths: Vec<String>, cwd: Option<String>) -> Vec<Option<String>> {
+    crate::editor::resolve_files(&paths, cwd.as_deref())
+}
+
+#[tauri::command]
+pub fn open_in_editor(config: State<'_, ConfigState>, file: String, line: Option<u32>, col: Option<u32>) -> Result<(), String> {
+    crate::editor::open(&config.get().editor, &file, line, col)
+}
+
+/// The UI decided the user isn't looking at this pane: show a Windows notification.
+#[tauri::command]
+pub fn show_claude_alert(app: AppHandle, alert: crate::alerts::Alert) -> Result<(), String> {
+    crate::alerts::show_notification(&app, &alert)
+}
+
+/// Panes waiting for the user, for the tray tooltip.
+#[tauri::command]
+pub fn set_attention_count(app: AppHandle, count: usize) {
+    crate::tray::set_attention(&app, count);
+}
+
+fn hook_paths() -> Result<(std::path::PathBuf, String), String> {
+    let home = crate::claude::claude_home().ok_or("no home folder for Claude Code")?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok((crate::claude_hook::settings_path(&home), crate::claude_hook::command_for(&exe)))
+}
+
+#[tauri::command]
+pub fn claude_hook_status() -> Result<crate::claude_hook::HookStatus, String> {
+    let (settings, command) = hook_paths()?;
+    crate::claude_hook::status(&settings, &command)
+}
+
+#[tauri::command]
+pub fn install_claude_hook() -> Result<crate::claude_hook::HookStatus, String> {
+    let (settings, command) = hook_paths()?;
+    crate::claude_hook::install(&settings, &command)?;
+    crate::claude_hook::status(&settings, &command)
+}
+
+#[tauri::command]
+pub fn remove_claude_hook() -> Result<crate::claude_hook::HookStatus, String> {
+    let (settings, command) = hook_paths()?;
+    crate::claude_hook::remove(&settings)?;
+    crate::claude_hook::status(&settings, &command)
+}

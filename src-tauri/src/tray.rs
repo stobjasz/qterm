@@ -6,10 +6,20 @@ use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::config::{hotkey_label, ConfigState};
 use crate::{hotkey, window};
 
 const TRAY_ID: &str = "main";
+
+/// Panes where Claude Code is waiting for the user (reported by the UI).
+static ATTENTION: AtomicUsize = AtomicUsize::new(0);
+
+pub fn set_attention(app: &AppHandle, count: usize) {
+    ATTENTION.store(count, Ordering::Relaxed);
+    refresh(app);
+}
 
 /// Items whose text or check mark follows the config and other switches.
 struct TrayItems {
@@ -89,11 +99,16 @@ pub fn refresh(app: &AppHandle) {
     let _ = items.toggle.set_text(if enabled { format!("Show / Hide\t{key}") } else { "Show / Hide".into() });
     let _ = items.hotkey.set_text(format!("Hotkey {key}"));
     let _ = items.hotkey.set_checked(enabled);
-    let tooltip = match (enabled, error) {
+    let mut tooltip = match (enabled, error) {
         (_, Some(error)) => format!("qterm: hotkey {key} unavailable, {error}"),
         (true, None) => format!("qterm: press {key}"),
         (false, None) => format!("qterm: hotkey {key} is off"),
     };
+    match ATTENTION.load(Ordering::Relaxed) {
+        0 => {}
+        1 => tooltip.push_str("\nClaude is waiting for you in 1 pane"),
+        n => tooltip.push_str(&format!("\nClaude is waiting for you in {n} panes")),
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(tooltip));
     }

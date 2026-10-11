@@ -3,6 +3,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   claudeSessionSeen,
+  onClaudeAttention,
+  onFocusPane,
+  setAttentionCount,
+  showClaudeAlert,
+  type ClaudeAlert,
   forgetClaudeSessions,
   getConfig,
   hideWindow,
@@ -73,11 +78,11 @@ export default function App() {
   const [claudeSessions, setClaudeSessions] = useState<ClaudeSession[]>([]);
   const [search, setSearch] = useState<{ pane: PaneId; results?: { index: number; count: number } }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Panes where Claude Code is waiting for the user, with its latest message. */
+  const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
-  // Dev builds only: lets tests and debugging read the live workspace.
-  if (import.meta.env.DEV) (window as unknown as { __qterm: unknown }).__qterm = { workspace: () => workspaceRef.current };
   /** Typed into a pane's shell once it starts (resuming a Claude session). */
   const startupInput = useRef(new Map<PaneId, string>());
 
@@ -94,6 +99,8 @@ export default function App() {
         onSearchResults: (...args) => handlers.current.onSearchResults(...args),
       }),
   );
+  // Dev builds only: lets tests and debugging read the live workspace and terminals.
+  if (import.meta.env.DEV) (window as unknown as { __qterm: unknown }).__qterm = { workspace: () => workspaceRef.current, registry };
 
   // --- settings applied to the terminals ---------------------------------------
   const keymap = useMemo(() => buildKeymap(config?.keybindings), [config?.keybindings]);
@@ -147,6 +154,7 @@ export default function App() {
     (paneId: PaneId) => {
       registry.dispose(paneId);
       startupInput.current.delete(paneId);
+      setAttention((current) => without(current, paneId));
       setWorkspace((ws) => closePane(ws, paneId));
     },
     [registry],
@@ -234,6 +242,38 @@ export default function App() {
     onSearchResults: (paneId, results) => setSearch((s) => (s?.pane === paneId ? { ...s, results } : s)),
   };
 
+  // --- Claude attention alerts ------------------------------------------------------
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const alertsOn = useRef(true);
+  alertsOn.current = config?.claudeAlerts ?? true;
+  const onAlert = useRef<(alert: ClaudeAlert) => void>(null!);
+  onAlert.current = (alert) => {
+    const ws = workspaceRef.current;
+    if (!alertsOn.current || !ws.panes[alert.paneId]) return;
+    const consoleInFocus = shownRef.current && document.hasFocus();
+    // Already looking at that very pane: nothing to tell.
+    if (consoleInFocus && activeTab(ws)?.focusedPane === alert.paneId) return;
+    setAttention((current) => new Map(current).set(alert.paneId, alert));
+    // Console up and focused, but on another tab or pane: the tab marker is enough.
+    if (!consoleInFocus) void showClaudeAlert(alert);
+  };
+  useEffect(() => void setAttentionCount(attention.size), [attention.size]);
+  // Looking at the pane again clears its marker.
+  useEffect(() => {
+    if (shown && focusedPane && attention.has(focusedPane)) setAttention((current) => without(current, focusedPane));
+  }, [shown, focusedPane, attention]);
+  const attentionTabs = useMemo(
+    () =>
+      new Map(
+        workspace.tabs.flatMap((tab) => {
+          const alert = paneIds(tab.root).map((id) => attention.get(id)).find(Boolean);
+          return alert ? [[tab.id, alert] as const] : [];
+        }),
+      ),
+    [workspace.tabs, attention],
+  );
+
   // --- startup, events ---------------------------------------------------------
   useEffect(() => {
     void listProfiles().then(setProfiles);
@@ -243,6 +283,8 @@ export default function App() {
       onConfigChanged(setSettings),
       onClaudeSessionsChanged(setClaudeSessions),
       onOpenSettings(() => setSettingsOpen(true)),
+      onClaudeAttention((alert) => onAlert.current(alert)),
+      onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
       onQuakeVisibility(({ visible, slideMs }) => {
         setSlideMs(slideMs);
         setShown(visible);
@@ -368,8 +410,16 @@ export default function App() {
         onRename={(tabId, title) => setWorkspace((ws) => renameTab(ws, tabId, title))}
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
+        attention={attentionTabs}
       />
       <HeightHandle />
     </div>
   );
+}
+
+function without<K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> {
+  if (!map.has(key)) return map;
+  const next = new Map(map);
+  next.delete(key);
+  return next;
 }

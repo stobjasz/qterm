@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { getAutostart, openConfigFile, saveConfig, setAutostart, type ConfigSnapshot, type Profile } from "../ipc";
+import {
+  claudeHookStatus,
+  getAutostart,
+  installClaudeHook,
+  openConfigFile,
+  removeClaudeHook,
+  saveConfig,
+  setAutostart,
+  type ConfigSnapshot,
+  type HookStatus,
+  type Profile,
+} from "../ipc";
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
 import { changes, overrides, toDraft, type Draft } from "./draft";
@@ -25,8 +36,11 @@ export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [hook, setHook] = useState<HookStatus>();
 
   useEffect(() => void getAutostart().then(setAutostartState), []);
+  useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
+  const changeHook = (action: () => Promise<HookStatus>) => void action().then(setHook, (e) => setError(String(e)));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -155,12 +169,46 @@ export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
             checked={draft.shellIntegration}
             onChange={(v) => set("shellIntegration", v)}
           />
+          <Field label="Open files with" hint="Ctrl+click a file reference like src/app.ts:42. {file}, {line} and {col} are filled in.">
+            <input type="text" value={draft.editor} onChange={(e) => set("editor", e.target.value)} spellCheck={false} />
+          </Field>
+        </Group>
+
+        <Group title="Claude Code">
           <Toggle
             label="Remember Claude Code sessions"
             hint='When a terminal prints "claude --resume <id>", keep it for resuming in its folder (✳ in the tab bar).'
             checked={draft.claudeSessions}
             onChange={(v) => set("claudeSessions", v)}
           />
+          <Toggle
+            label="Alert me when Claude is waiting"
+            hint="A Windows notification and a ✳ on the tab when Claude Code in a qterm pane needs you (a permission or your next message)."
+            checked={draft.claudeAlerts}
+            onChange={(v) => set("claudeAlerts", v)}
+          />
+          <div className="settings-field">
+            <span className="settings-label">Notification hook</span>
+            <span className="settings-hint">
+              Claude Code tells qterm through a hook in {hook?.settingsPath ?? "its settings.json"}. It only acts inside
+              qterm; other terminals are unaffected. Applies to Claude sessions started afterwards.
+            </span>
+            <div className="settings-actions">
+              <span>
+                {hook === undefined
+                  ? "Checking…"
+                  : hook.current
+                    ? "✓ Set up"
+                    : hook.installed
+                      ? "Set up for another qterm location"
+                      : "Not set up"}
+              </span>
+              {hook && !hook.current && (
+                <button onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
+              )}
+              {hook?.installed && <button onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
+            </div>
+          </div>
         </Group>
 
         <Group title="Keyboard shortcuts">

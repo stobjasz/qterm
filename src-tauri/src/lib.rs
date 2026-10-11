@@ -1,6 +1,9 @@
+mod alerts;
 mod claude;
+mod claude_hook;
 mod commands;
 mod config;
+mod editor;
 mod hotkey;
 mod pty;
 mod tray;
@@ -13,11 +16,13 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use config::{ConfigState, Reload};
 
+pub use alerts::{run_hook as run_claude_hook, HOOK_ARG};
+
 /// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
 
-/// Keeps the config file watcher alive for the app's lifetime.
-struct ConfigWatcher(#[allow(dead_code)] Mutex<Option<notify::RecommendedWatcher>>);
+/// Keeps the config and alert-inbox watchers alive for the app's lifetime.
+struct Watchers(#[allow(dead_code)] Mutex<Vec<notify::RecommendedWatcher>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -64,10 +69,13 @@ pub fn run() {
             tray::create(app.handle())?;
 
             let handle = app.handle().clone();
-            let watcher = config::watch(config_path, move || on_config_file_changed(&handle))
+            let config_watcher = config::watch(config_path, move || on_config_file_changed(&handle))
                 .inspect_err(|e| eprintln!("qterm: settings will not reload live: {e}"))
                 .ok();
-            app.manage(ConfigWatcher(Mutex::new(watcher)));
+            let alert_watcher = alerts::watch_inbox(app.handle().clone())
+                .inspect_err(|e| eprintln!("qterm: Claude alerts unavailable: {e}"))
+                .ok();
+            app.manage(Watchers(Mutex::new(config_watcher.into_iter().chain(alert_watcher).collect())));
 
             if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
                 window::show_when_ready(app.handle());
@@ -103,6 +111,13 @@ pub fn run() {
             commands::set_autostart,
             commands::resize_console,
             commands::save_console_height,
+            commands::resolve_files,
+            commands::open_in_editor,
+            commands::show_claude_alert,
+            commands::set_attention_count,
+            commands::claude_hook_status,
+            commands::install_claude_hook,
+            commands::remove_claude_hook,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

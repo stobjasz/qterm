@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4, M5a and the feature round (§16) done. Next: M6 (installer, auto-update). See §11–16. Date: 2026-10-11.
+Status: M0–M4, M5a and the feature rounds (§16–17) done. Next: see roadmap.md. See §11–17. Date: 2026-10-11.
 
 ---
 
@@ -492,3 +492,55 @@ Notes:
 - **Encoding pitfall:** Python's `open()` defaults to the ANSI code page on Windows. One
   edit wrote "…" as byte 0x85 into a `.rs` file. Always pass `encoding="utf-8"`.
 - **Not verified by automation:** tray → "Settings…" (needs a real tray click).
+
+## 17. Links and Claude alerts (2026-10-11)
+
+**Links (roadmap #4).**
+- `@xterm/addon-unicode11` is active, so emoji and symbols get the widths shells expect.
+- Web links come from `@xterm/addon-web-links`.
+- File references are found by `terminal/links.ts` (tested): `path:line:col`,
+  `path(line,col)`, Windows and relative paths, skipping URLs. Rust's `resolve_files`
+  checks each candidate against the pane's folder (tracked via OSC 9;9), so only existing
+  files are underlined.
+- Links open on Ctrl+click only, as in Windows Terminal and VS Code. Files open through
+  the `editor` setting (default `code --goto {file}:{line}:{col}`). The program is looked
+  up on PATH × PATHEXT so `code.cmd` works; without it, the file goes to Explorer's
+  default app.
+- Verified over CDP: Unicode 11 active; pointer cursor over a file reference and a URL but
+  not over plain text; a plain click does nothing; Ctrl+click passed
+  `C:\Users\...\qterm\src\App.tsx:10:3` to a test editor command.
+
+**Claude alerts (roadmap #1).** By default Claude Code notifies only in iTerm2, Ghostty
+and Kitty. The terminal-independent route is its Notification hook, whose JSON input
+includes `message`, `title`, `notification_type` and `session_id`.
+- Every shell qterm starts gets `QTERM_PANE`, the pane's id.
+- The hook command is qterm's own exe with `--claude-notify`. `main` handles that mode
+  before Tauri starts: it reads stdin and drops `{paneId, title, message, kind,
+  sessionId}` into `%LOCALAPPDATA%\dev.qterm.app\alerts\` (write, then rename). Without
+  `QTERM_PANE`, meaning Claude is running in another terminal, it does nothing.
+- The running qterm watches that folder (`notify`) and emits `claude-attention`.
+  Leftovers from before the start are dropped.
+- The UI decides what to show:
+  - looking at that pane → nothing;
+  - console focused but on another tab → ✳ tab marker only;
+  - otherwise → marker + a Windows notification (`tauri-winrt-notification`, app id
+    `dev.qterm.app` registered in HKCU with name and icon).
+  Clicking the notification shows the console and emits `focus-pane`. Looking at the
+  pane clears its marker, and the tray tooltip counts waiting panes.
+- Setup (Settings → Claude Code) edits `~/.claude/settings.json` (`claude_hook.rs`,
+  tested). It adds or re-points a `hooks.Notification` entry, keeps everything else in
+  its original key order (serde_json `preserve_order`), refuses invalid JSON, backs up to
+  `settings.json.qterm-backup`, and can remove its entry again, cleaning up empty parts.
+- Verified by running the real hook command, with Claude-style JSON, inside a qterm pane:
+  - looking at the pane → no marker;
+  - console hidden → marker plus a delivered notification ("Permission needed | Claude
+    needs your permission to use Bash" in Windows' notification history for
+    `dev.qterm.app`);
+  - console up on another tab → marker, no notification;
+  - `focus-pane` (what a click sends) → switched to that tab and cleared the marker.
+- Deliberately **not** done during testing: installing the hook into the user's real
+  Claude settings (the user's choice, via the button), and physically clicking a
+  notification.
+- The hook points at the exe that installed it. With the portable exe, set it up from the
+  copy you keep. If the exe moves, Settings shows "set up for another qterm location"
+  with an Update button.

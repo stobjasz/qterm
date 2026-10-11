@@ -35,6 +35,9 @@ pub struct Config {
     pub restore_session: bool,
     pub shell_integration: bool,
     pub claude_sessions: bool,
+    pub claude_alerts: bool,
+    /// Command that opens a file at a line; {file}, {line}, {col} are filled in.
+    pub editor: String,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -71,6 +74,8 @@ impl Default for Config {
             restore_session: true,
             shell_integration: true,
             claude_sessions: false,
+            claude_alerts: true,
+            editor: "code --goto {file}:{line}:{col}".into(),
             font: Font::default(),
             keybindings: BTreeMap::new(),
         }
@@ -102,6 +107,9 @@ impl Config {
         in_range("opacity", self.opacity, 0.0, 1.0)?;
         in_range("slide_ms", self.slide_ms as f64, 0.0, 1000.0)?;
         in_range("font.size", self.font.size, 6.0, 72.0)?;
+        if self.editor.trim().is_empty() {
+            return Err("editor must not be empty (e.g. \"code --goto {file}:{line}:{col}\")".into());
+        }
         Ok(())
     }
 }
