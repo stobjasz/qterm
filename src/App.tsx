@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   claudeSessionSeen,
+  claudeRunning,
   onClaudeAttention,
   onFocusPane,
   setAttentionCount,
@@ -76,6 +77,9 @@ const DEFAULT_OPACITY = 0.82;
 const RESIZE_STEP = 0.05;
 /** The layout is saved this long after the last change. */
 const SAVE_DELAY_MS = 400;
+/** How often to look for Claude Code in the panes, and how recent output means "working". */
+const CLAUDE_POLL_MS = 2000;
+const CLAUDE_BUSY_MS = 2500;
 
 // Random, so ids from a restored session never collide with new ones.
 const nextId = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -95,6 +99,8 @@ export default function App() {
   const [activity, setActivity] = useState<ReadonlySet<PaneId>>(new Set());
   const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** Panes with Claude Code running: working (recent output) or idle. */
+  const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -204,6 +210,15 @@ export default function App() {
 
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
+  /** A fresh Claude Code session in `cwd`, in a new tab with the default shell. */
+  const newClaudeSession = useCallback(
+    (cwd: string) => {
+      const paneId = newTab(defaultProfile?.id, cwd);
+      if (paneId) startupInput.current.set(paneId, "claude\r");
+    },
+    [newTab, defaultProfile],
+  );
+
   const paneSpec = useCallback((pane: Pane): PaneSpec => {
     const profile = profilesRef.current?.find((p) => p.id === pane.profileId);
     return {
@@ -410,11 +425,36 @@ export default function App() {
     ];
   }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout]);
 
+  // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
+  // in the last moments (its spinner animates while it works).
+  const claudeFeatures = Boolean(config?.claudeSessions || config?.claudeAlerts);
+  useEffect(() => {
+    if (!claudeFeatures) {
+      setClaudeStatus(new Map());
+      return;
+    }
+    const poll = async () => {
+      const running = new Set(await claudeRunning().catch(() => []));
+      const now = Date.now();
+      const next = new Map<PaneId, "busy" | "idle">();
+      for (const paneId of Object.keys(workspaceRef.current.panes)) {
+        const session = registry.sessionOf(paneId);
+        if (session === undefined || !running.has(session)) continue;
+        next.set(paneId, now - registry.lastOutput(paneId) < CLAUDE_BUSY_MS ? "busy" : "idle");
+      }
+      setClaudeStatus((current) => (sameStatus(current, next) ? current : next));
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), CLAUDE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [claudeFeatures, registry]);
+
   const tabMarkers = useMemo(
     () =>
       new Map(
         workspace.tabs.map((tab) => {
           const ids = paneIds(tab.root);
+          const statuses = ids.map((id) => claudeStatus.get(id));
           return [
             tab.id,
             {
@@ -422,11 +462,12 @@ export default function App() {
               bell: ids.some((id) => bells.has(id)),
               zoomed: Boolean(tab.zoomed),
               broadcast: Boolean(tab.broadcast),
+              claude: statuses.includes("busy") ? ("busy" as const) : statuses.includes("idle") ? ("idle" as const) : undefined,
             },
           ] as const;
         }),
       ),
-    [workspace.tabs, activity, bells],
+    [workspace.tabs, activity, bells, claudeStatus],
   );
   const attentionTabs = useMemo(
     () =>
@@ -592,7 +633,12 @@ export default function App() {
         profiles={profiles ?? []}
         claude={
           config?.claudeSessions
-            ? { sessions: claudeSessions, onResume: resumeClaude, onForget: (ids) => void forgetClaudeSessions(ids) }
+            ? {
+                sessions: claudeSessions,
+                onResume: resumeClaude,
+                onForget: (ids) => void forgetClaudeSessions(ids),
+                onNewSession: newClaudeSession,
+              }
             : undefined
         }
         onActivate={(tabId) => setWorkspace((ws) => activateTab(ws, tabId))}
@@ -632,4 +678,8 @@ function layoutProblems(layouts: LayoutDef[], profiles: Profile[]): string[] {
   };
   layouts.forEach((layout) => visit(layout.name, layout));
   return problems;
+}
+
+function sameStatus(a: ReadonlyMap<PaneId, string>, b: ReadonlyMap<PaneId, string>): boolean {
+  return a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
 }

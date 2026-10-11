@@ -35,6 +35,8 @@ struct Session {
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     flow: Arc<Flow>,
+    /// The shell's process id, to see what runs inside it.
+    pid: Option<u32>,
 }
 
 type Sessions = Arc<Mutex<HashMap<SessionId, Session>>>;
@@ -109,12 +111,13 @@ impl SessionManager {
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
         let killer = child.clone_killer();
+        let pid = child.process_id();
 
         let flow = Arc::new(Flow::default());
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         self.sessions.lock().unwrap().insert(
             id,
-            Session { master: pair.master, writer, killer, flow: Arc::clone(&flow) },
+            Session { master: pair.master, writer, killer, flow: Arc::clone(&flow), pid },
         );
 
         pump_output(reader, flow, on_output);
@@ -145,6 +148,26 @@ impl SessionManager {
         let sessions = self.sessions.lock().unwrap();
         let session = sessions.get(&id).ok_or("no such session")?;
         session.master.resize(pty_size(cols, rows)).map_err(|e| e.to_string())
+    }
+
+    /// Sessions with `program` (e.g. "claude.exe") running inside their shell.
+    pub fn running(&self, program: &str) -> Vec<SessionId> {
+        let shells: Vec<(SessionId, u32)> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(id, s)| Some((*id, s.pid?)))
+            .collect();
+        if shells.is_empty() {
+            return Vec::new();
+        }
+        let processes = crate::procs::snapshot();
+        shells
+            .into_iter()
+            .filter(|(_, pid)| crate::procs::runs_below(&processes, *pid, program))
+            .map(|(id, _)| id)
+            .collect()
     }
 
     /// The UI has processed `bytes` of this session's output.

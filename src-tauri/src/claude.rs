@@ -5,6 +5,7 @@
 //! `<claude home>/projects/<encoded folder>/<id>.jsonl`. Its first `cwd` is
 //! where the session was started, which is where `claude --resume` must run.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -57,12 +58,12 @@ impl ClaudeStore {
             return Err(format!("not a Claude session id: {id:?}"));
         }
         let id = id.to_ascii_lowercase();
-        let (cwd, title) = self
+        let summary = self
             .claude_home
             .as_deref()
             .and_then(|home| find_transcript(home, &id))
-            .map(|path| read_transcript(&path))
-            .unwrap_or_default();
+            .map(|path| summarize(&path, &id));
+        let (cwd, title) = summary.map(|s| (s.cwd, s.title)).unwrap_or_default();
         let session = ClaudeSession {
             cwd: cwd.or(pane_cwd),
             title,
@@ -115,27 +116,116 @@ fn find_transcript(claude_home: &Path, id: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// The first `cwd` (where the session started) and the latest title. Lines are only
-/// parsed when they can contain what we need; transcripts get large.
-fn read_transcript(path: &Path) -> (Option<String>, Option<String>) {
-    let Ok(file) = std::fs::File::open(path) else { return (None, None) };
-    let (mut cwd, mut ai_title, mut last_prompt) = (None, None, None);
+/// One transcript, summarized for the session browser.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSummary {
+    pub id: String,
+    /// Where the session started: where `claude --resume` must run.
+    pub cwd: Option<String>,
+    pub title: Option<String>,
+    pub git_branch: Option<String>,
+    /// Messages the user typed (tool results and internal records don't count).
+    pub prompts: usize,
+    pub last_prompt: Option<String>,
+    /// Last change of the transcript, Unix milliseconds.
+    pub modified: u64,
+}
+
+/// Reads a transcript once, parsing only the lines that can matter (they get large):
+/// first `cwd`, latest `aiTitle`/`lastPrompt`/`gitBranch`, and typed messages.
+fn summarize(path: &Path, id: &str) -> TranscriptSummary {
+    let mut summary = TranscriptSummary {
+        id: id.to_string(),
+        cwd: None,
+        title: None,
+        git_branch: None,
+        prompts: 0,
+        last_prompt: None,
+        modified: modified_ms(path),
+    };
+    let Ok(file) = std::fs::File::open(path) else { return summary };
+    let mut ai_title = None;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let wants_cwd = cwd.is_none() && line.contains("\"cwd\"");
-        let wants_title = line.contains("\"aiTitle\"") || line.contains("\"lastPrompt\"");
-        if !wants_cwd && !wants_title {
+        let wants_cwd = summary.cwd.is_none() && line.contains("\"cwd\"");
+        let is_user = line.contains("\"type\":\"user\"");
+        let wanted = wants_cwd
+            || is_user
+            || line.contains("\"aiTitle\"")
+            || line.contains("\"lastPrompt\"")
+            || line.contains("\"gitBranch\"");
+        if !wanted {
             continue;
         }
         let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         let text = |key: &str| record.get(key).and_then(|v| v.as_str()).map(str::to_string);
         if wants_cwd {
-            cwd = text("cwd");
+            summary.cwd = text("cwd");
         }
         ai_title = text("aiTitle").or(ai_title);
-        last_prompt = text("lastPrompt").or(last_prompt);
+        summary.last_prompt = text("lastPrompt").or(summary.last_prompt.take());
+        summary.git_branch = text("gitBranch").filter(|b| !b.is_empty()).or(summary.git_branch.take());
+        let typed = is_user
+            && record.get("isMeta").and_then(|v| v.as_bool()) != Some(true)
+            && record.pointer("/message/content").is_some_and(|c| c.is_string());
+        if typed {
+            summary.prompts += 1;
+        }
     }
-    let title = ai_title.or(last_prompt).map(|t| shorten(t.trim(), TITLE_MAX_CHARS)).filter(|t| !t.is_empty());
-    (cwd, title)
+    summary.last_prompt = summary.last_prompt.map(|p| shorten(p.trim(), TITLE_MAX_CHARS * 2));
+    summary.title = ai_title
+        .or_else(|| summary.last_prompt.clone())
+        .map(|t| shorten(t.trim(), TITLE_MAX_CHARS))
+        .filter(|t| !t.is_empty());
+    summary
+}
+
+fn modified_ms(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+/// Every Claude Code session on this machine, summarized once and cached until its
+/// transcript changes.
+#[derive(Default)]
+pub struct TranscriptIndex {
+    cache: Mutex<HashMap<PathBuf, (u64, u64, TranscriptSummary)>>,
+}
+
+impl TranscriptIndex {
+    /// Newest first; sessions without a typed message (aborted starts) are left out.
+    pub fn scan(&self, claude_home: &Path) -> Vec<TranscriptSummary> {
+        let Ok(projects) = std::fs::read_dir(claude_home.join("projects")) else { return Vec::new() };
+        let mut cache = self.cache.lock().unwrap();
+        let mut found = Vec::new();
+        for project in projects.flatten() {
+            let Ok(files) = std::fs::read_dir(project.path()) else { continue };
+            for file in files.flatten() {
+                let path = file.path();
+                let Some(id) = path.file_stem().and_then(|s| s.to_str()).filter(|s| is_session_id(s)) else { continue };
+                if path.extension().is_none_or(|e| e != "jsonl") {
+                    continue;
+                }
+                let (modified, size) = (modified_ms(&path), file.metadata().map(|m| m.len()).unwrap_or_default());
+                let summary = match cache.get(&path) {
+                    Some((m, s, summary)) if *m == modified && *s == size => summary.clone(),
+                    _ => {
+                        let summary = summarize(&path, id);
+                        cache.insert(path.clone(), (modified, size, summary.clone()));
+                        summary
+                    }
+                };
+                found.push(summary);
+            }
+        }
+        found.retain(|s| s.prompts > 0);
+        found.sort_by_key(|s| std::cmp::Reverse(s.modified));
+        found
+    }
 }
 
 fn shorten(text: &str, max: usize) -> String {
@@ -257,6 +347,33 @@ mod tests {
             store.remember(&format!("00000000-0000-0000-0000-{i:012}"), "pwsh", None).unwrap();
         }
         assert_eq!(store.list().len(), MAX_SESSIONS);
+    }
+
+    #[test]
+    fn summarizes_every_transcript_and_caches_until_it_changes() {
+        let fx = Fixture::new("index");
+        let other = "0b62fa9b-7001-4bed-a5e0-7d951d9700b1";
+        fx.transcript(ID, &[
+            r#"{"type":"user","cwd":"C:\\work\\app","gitBranch":"main","message":{"role":"user","content":"add login"}}"#,
+            r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<meta>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result"}]}}"#,
+            r#"{"type":"user","gitBranch":"feat/login","message":{"role":"user","content":"now tests"}}"#,
+            r#"{"type":"ai-title","aiTitle":"Login feature"}"#,
+            r#"{"type":"last-prompt","lastPrompt":"now tests"}"#,
+        ]);
+        fx.transcript(other, &[r#"{"type":"system","cwd":"C:\\x"}"#]);
+        let index = TranscriptIndex::default();
+        let home = fx.root.join("claude");
+
+        let all = index.scan(&home);
+        assert_eq!(all.len(), 1, "a session without typed messages is left out");
+        let s = &all[0];
+        assert_eq!((s.cwd.as_deref(), s.title.as_deref()), (Some(r"C:\work\app"), Some("Login feature")));
+        assert_eq!((s.git_branch.as_deref(), s.prompts, s.last_prompt.as_deref()), (Some("feat/login"), 2, Some("now tests")));
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fx.transcript(ID, &[r#"{"type":"user","cwd":"C:\\other","message":{"role":"user","content":"hi"}}"#]);
+        assert_eq!(index.scan(&home)[0].cwd.as_deref(), Some(r"C:\other"), "re-read after a change");
     }
 
     #[test]

@@ -14,6 +14,15 @@ translucent console down from the top of the screen.
   the tab) when Claude is waiting for you. Turn both on in Settings → Claude Code.
 - Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
   editor (VS Code by default)
+- Command palette (Ctrl+Shift+P) for every action, tab, profile, layout, theme and
+  Claude session
+- Pane tools: zoom a pane, swap panes, type into all panes of a tab at once; dots and
+  bells on background tabs that printed something
+- Your own profiles (`[[profiles]]`: SSH hosts, dev servers, each with its own look) and
+  named layouts (`[[layouts]]`, or "Save this tab as a layout")
+- Claude Code: browse every session on the PC grouped by folder (with branch and
+  prompt count), start a new one in a folder, see per tab whether Claude is working or
+  idle
 - Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"
 
 | Keys | Action |
@@ -29,6 +38,9 @@ translucent console down from the top of the screen.
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Ctrl+Shift+F | Find in scrollback |
 | Ctrl+, | Settings |
+| Ctrl+Shift+P | Command palette |
+| Alt+Shift+Z | Zoom the focused pane |
+| Alt+Shift+B | Type into every pane of the tab |
 
 Settings: the ⚙ button, Ctrl+, or tray → **Settings…** open the settings panel. Everything
 lives in `%APPDATA%\dev.qterm.app\config.toml`, which the panel edits for you (keeping its

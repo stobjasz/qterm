@@ -33,6 +33,7 @@ base64 = "0.23.1"
 toml_edit = "0.25.17"
 tauri-winrt-notification = "0.8.1"
 windows-registry = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_System_Diagnostics_ToolHelp", "Win32_Foundation"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -250,6 +250,28 @@ export function deleteLayout(name: string): Promise<void> {
   return invoke("delete_layout", { name });
 }
 
+/** A Claude Code transcript, for the "All sessions" view. */
+export interface TranscriptSummary {
+  id: string;
+  cwd: string | null;
+  title: string | null;
+  gitBranch: string | null;
+  /** Messages the user typed. */
+  prompts: number;
+  lastPrompt: string | null;
+  /** Unix milliseconds. */
+  modified: number;
+}
+
+export function listAllClaudeSessions(): Promise<TranscriptSummary[]> {
+  return invoke("list_all_claude_sessions");
+}
+
+/** Sessions with Claude Code running inside their shell. */
+export function claudeRunning(): Promise<SessionId[]> {
+  return invoke("claude_running");
+}
+
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {
   return listen<PtyExit>("pty-exit", (event) => handler(event.payload));
 }

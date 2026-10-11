@@ -233,6 +233,50 @@ body,
   border: 1px solid var(--line) !important;
 }
 
+/* Claude Code in the tab: spinning while it works, dim while idle at its prompt. */
+.tab-claude {
+  display: inline-block;
+  color: var(--console-edge);
+  font-size: 11px;
+}
+
+.tab-claude.busy {
+  animation: claude-spin 1.6s linear infinite;
+}
+
+.tab-claude.idle {
+  opacity: 0.45;
+}
+
+@keyframes claude-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.claude-views {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  background: var(--field-bg);
+}
+
+.claude-views button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.claude-views button[aria-selected="true"] {
+  color: var(--theme-bg) !important;
+  background: var(--console-edge) !important;
+}
+
+.claude-new {
+  color: var(--console-edge) !important;
+  opacity: 0.8 !important;
+}
+
 /* Tab markers: activity dot, bell, zoom, broadcast. */
 .tab-mark {
   flex: none;

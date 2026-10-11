@@ -1,7 +1,13 @@
 // Remembered Claude sessions, grouped by the folder they ran in.
-import type { ClaudeSession } from "../ipc";
+/** What grouping needs; remembered sessions and transcript summaries both fit. */
+export interface GroupableSession {
+  id: string;
+  cwd: string | null;
+  title: string | null;
+  seenAt: number;
+}
 
-export interface SessionGroup {
+export interface SessionGroup<T extends GroupableSession = GroupableSession> {
   /** Identity of the folder (case-folded for Windows paths). */
   key: string;
   /** As the newest session reported it; null when unknown. */
@@ -9,17 +15,17 @@ export interface SessionGroup {
   /** Last path segment, for the header. */
   label: string;
   /** Newest first. */
-  sessions: ClaudeSession[];
+  sessions: T[];
 }
 
 /** Groups newest folder first, each with its sessions newest first; `filter` matches title, folder or id. */
-export function groupSessions(sessions: ClaudeSession[], filter = ""): SessionGroup[] {
+export function groupSessions<T extends GroupableSession>(sessions: T[], filter = ""): SessionGroup<T>[] {
   const needle = filter.trim().toLowerCase();
   const matching = needle
     ? sessions.filter((s) => [s.title, s.cwd, s.id].some((field) => field?.toLowerCase().includes(needle)))
     : sessions;
 
-  const groups = new Map<string, SessionGroup>();
+  const groups = new Map<string, SessionGroup<T>>();
   for (const session of [...matching].sort((a, b) => b.seenAt - a.seenAt)) {
     const key = folderKey(session.cwd);
     const group = groups.get(key);

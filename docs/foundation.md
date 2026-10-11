@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4, M5a and the feature rounds (§16–17) done. Next: see roadmap.md. See §11–17. Date: 2026-10-11.
+Status: M0–M4, M5a and the feature rounds (§16–18) done. Next: see roadmap.md. See §11–18. Date: 2026-10-11.
 
 ---
 
@@ -544,3 +544,63 @@ includes `message`, `title`, `notification_type` and `session_id`.
 - The hook points at the exe that installed it. With the portable exe, set it up from the
   copy you keep. If the exe moves, Settings shows "set up for another qterm location"
   with an Update button.
+
+## 18. Feature batch: roadmap #2, #3, #5–#9 (2026-10-11)
+
+- **Pane tools (#9).** `toggleZoom`, `swapPane` (`layout.swapLeaves`) and
+  `toggleBroadcast` are pure functions; zoom and broadcast are transient (not saved).
+  - Moving focus, splitting, or closing the zoomed pane leaves zoom.
+  - A broadcasting tab's panes get an outline. The registry maps each pane to its whole
+    group, so one keystroke is written to every shell.
+  - Swapping has no default keys (good combos are scarce): bind it, or use the palette.
+- **Fix found while testing:** moving a terminal's element (zoom, split, swap) dropped
+  keyboard focus, and focus was only restored when the focused *pane* changed. It's now
+  restored on any layout change of the active tab. As a safety net, app shortcuts also
+  work while focus is outside every terminal and field.
+- **Activity / bell (#6).** The registry is told which panes are in background tabs. Each
+  reports its first output once (no event per write). Bells are throttled to one a
+  second. Looking at the tab clears both markers.
+- **Command palette (#5).** Fuzzy ranking over actions (with shortcuts), tabs, new-tab
+  profiles, layouts, themes, remembered Claude sessions and the settings file.
+  - The matcher started greedy and missed "layout test" in "Layout: test-layout" (it
+    jumped a `t` ahead to a word start). It now finds the best alignment by dynamic
+    programming, and that case is a regression test.
+- **Custom profiles (#8).**
+  - `[[profiles]]` takes a quote-aware `command`, plus `cwd`, `env`, `theme` and
+    `font_size`. The kind follows the program, so `pwsh`/`cmd`/`bash` keep shell
+    integration.
+  - An `id` equal to a detected profile restyles that profile.
+  - The UI applies a profile's theme and font size to its own panes only.
+- **Layouts (#7).** `[[layouts]]` are nestable row/column splits whose panes have a
+  profile (id or name), `cwd` and start `command`. `layouts.ts`
+  (`buildLayout`/`layoutFromTab`, tested) converts both ways.
+  - "Save this tab as a layout" writes a `[[layouts]]` table through `toml_edit`: comments
+    kept, same name replaced, deletable from the ▾ menu.
+  - Unknown profile references show in the settings banner.
+- **All Claude sessions (#2).** `TranscriptIndex` summarizes each
+  `projects/*/<uuid>.jsonl`, cached by mtime and size:
+  - start folder, AI title, latest git branch, last prompt;
+  - prompt count = user records with plain-text content, not meta. Measured on the
+    current session: 15, against 575 user records and 170 last-prompt records.
+  - On this PC that's 53 transcripts / 72 MB; a plain read of all of them takes about
+    0.1 s.
+  - The ✳ menu has "Remembered | All on this PC", and each folder has a + that starts
+    `claude` there.
+- **Claude status (#3).** Sessions remember their shell's pid. `claude_running` walks a
+  ToolHelp process snapshot (`procs.rs`, tested) to find `claude.exe` below each shell.
+  The UI polls every 2 s while Claude features are on.
+  - Status: busy when the pane printed in the last 2.5 s (Claude's spinner animates while
+    it works), else idle; waiting comes from the alert hook. The tab shows a spinning or
+    dim ✳.
+  - Limitation: detection matches `claude.exe` (the native install). An npm install runs
+    under `node.exe` and is not recognised yet.
+- **Verified over CDP** on the running app:
+  - zoom, swap (via the palette), broadcast (one `echo` ran in both panes), activity dot
+    and bell;
+  - palette theme switch, and layout search after the matcher fix;
+  - custom profile (command ran, own theme and 18 pt font, starting folder);
+  - layout tab (title, 2 panes, start command ran in its folder), save and delete;
+  - "All on this PC" listing 53 sessions in 10 folders, with this session's title,
+    branch and 15 prompts;
+  - the status chip going working → idle → gone, using a renamed `cmd.exe` as a stand-in
+    `claude.exe`. Real Claude was never launched.

@@ -229,3 +229,16 @@ pub fn save_layout(config: State<'_, ConfigState>, layout: serde_json::Value) ->
 pub fn delete_layout(config: State<'_, ConfigState>, name: String) -> Result<(), String> {
     config.delete_layout(&name)
 }
+
+/// Every Claude Code session on this machine (the ✳ menu's "All" view).
+#[tauri::command]
+pub async fn list_all_claude_sessions(index: State<'_, crate::claude::TranscriptIndex>) -> Result<Vec<crate::claude::TranscriptSummary>, String> {
+    let home = crate::claude::claude_home().ok_or("no home folder for Claude Code")?;
+    Ok(index.scan(&home))
+}
+
+/// Sessions with Claude Code running inside them (per-tab status).
+#[tauri::command]
+pub async fn claude_running(sessions: State<'_, SessionManager>) -> Result<Vec<SessionId>, String> {
+    Ok(sessions.running("claude.exe"))
+}

@@ -103,6 +103,8 @@ interface Entry {
   background: boolean;
   activityReported: boolean;
   lastBell: number;
+  /** Date.now() of the latest output (busy/idle status). */
+  lastOutput: number;
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -181,6 +183,16 @@ export class TerminalRegistry {
       entry.background = background.has(paneId);
       if (!entry.background) entry.activityReported = false;
     }
+  }
+
+  /** The pane's PTY session, once its shell is running. */
+  sessionOf(paneId: PaneId): SessionId | undefined {
+    return this.entries.get(paneId)?.sessionId;
+  }
+
+  /** Date.now() of the pane's latest output, 0 if none. */
+  lastOutput(paneId: PaneId): number {
+    return this.entries.get(paneId)?.lastOutput ?? 0;
   }
 
   setKeymap(keymap: Keymap): void {
@@ -281,6 +293,7 @@ export class TerminalRegistry {
       background: false,
       activityReported: false,
       lastBell: 0,
+      lastOutput: 0,
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -346,6 +359,7 @@ export class TerminalRegistry {
     const onOutput = (data: Uint8Array) =>
       term.write(data, () => {
         this.processed(entry, data.length);
+        entry.lastOutput = Date.now();
         if (entry.background && !entry.activityReported) {
           entry.activityReported = true;
           this.events.onActivity(paneId);

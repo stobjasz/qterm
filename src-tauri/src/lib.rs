@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod editor;
 mod hotkey;
+mod procs;
 mod pty;
 mod tray;
 mod window;
@@ -44,6 +45,7 @@ pub fn run() {
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
+        .manage(claude::TranscriptIndex::default())
         .setup(|app| {
             // Before anything can open a PTY: the first one fixes which ConPTY is used.
             match pty::conpty::install(&app.path().app_local_data_dir()?) {
@@ -120,6 +122,8 @@ pub fn run() {
             commands::remove_claude_hook,
             commands::save_layout,
             commands::delete_layout,
+            commands::list_all_claude_sessions,
+            commands::claude_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
