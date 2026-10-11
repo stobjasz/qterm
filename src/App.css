@@ -304,6 +304,12 @@ body,
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
 }
 
+/* Where files dragged from Explorer will be typed. */
+.pane[data-drop-target] {
+  border-color: var(--console-edge);
+  box-shadow: inset 0 0 0 1px var(--console-edge);
+}
+
 /* Where a dragged tab will land. */
 .tab.drop-before::before,
 .tab.drop-after::after {

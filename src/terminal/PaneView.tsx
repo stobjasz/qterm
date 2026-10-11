@@ -35,6 +35,7 @@ export function PaneView({ pane, registry, spec, focused, broadcast, onFocus }: 
     <div
       className={`pane${focused ? " focused" : ""}${broadcast ? " broadcast" : ""}`}
       ref={hostRef}
+      data-pane-id={pane.id}
       onFocus={() => onFocus(pane.id)}
     />
   );

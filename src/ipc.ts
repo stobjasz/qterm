@@ -1,14 +1,19 @@
 // Typed wrappers for every Rust command and event. The only module that calls invoke/listen.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import type { LayoutDef } from "./workspace/layouts";
 
 export type SessionId = number;
 
+/** Which shell a profile runs; decides how dropped file paths are written. */
+export type ShellKind = "powershell" | "cmd" | "bash" | "wsl" | "other";
+
 export interface Profile {
   id: string;
   name: string;
+  kind: ShellKind;
   /** Custom profiles may bring their own look. */
   theme?: string;
   fontSize?: number;
@@ -308,4 +313,20 @@ export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn>
 
 export function onQuakeVisibility(handler: (change: QuakeVisibility) => void): Promise<UnlistenFn> {
   return listen<QuakeVisibility>("quake-visibility", (event) => handler(event.payload));
+}
+
+/** Files dragged from Explorer over the console; positions in CSS pixels of the page. */
+export type FileDrag =
+  | { type: "over"; x: number; y: number }
+  | { type: "drop"; x: number; y: number; paths: string[] }
+  | { type: "leave" };
+
+export function onFileDrag(handler: (drag: FileDrag) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().onDragDropEvent(({ payload }) => {
+    if (payload.type === "leave") return handler({ type: "leave" });
+    // Tauri reports physical pixels.
+    const x = payload.position.x / window.devicePixelRatio;
+    const y = payload.position.y / window.devicePixelRatio;
+    handler(payload.type === "drop" ? { type: "drop", x, y, paths: payload.paths } : { type: "over", x, y });
+  });
 }

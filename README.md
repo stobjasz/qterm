@@ -6,6 +6,7 @@ translucent console down from the top of the screen.
 - Tabs and split panes for PowerShell, cmd, Git Bash and WSL; rename (double-click)
   and reorder (drag) tabs
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
+- Drop files from Explorer on a pane to type their paths, quoted for its shell
 - Nine colour themes, adjustable size, opacity, font, slide speed; drag the console's
   bottom edge to change its height (double-click it for half the screen)
 - Reopens your tabs and layout, each pane in the folder it was in, with its earlier

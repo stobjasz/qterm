@@ -654,3 +654,37 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
   - Command Prompt switched off → not saved, while PowerShell was;
   - Quit → the latest output saved, then exited by itself after 1.7 s, inside the 3 s
     grace.
+
+## 20. Dropping files on a pane (2026-10-11)
+
+- **What it does:** files dragged from Explorer onto a pane are typed at its prompt, like
+  Windows Terminal does it. Paths are separated by spaces, followed by a trailing space,
+  and Enter is not pressed. The pane under the cursor gets an outline while dragging. On
+  drop that pane and the window take focus, even if another pane had it.
+- **How:**
+  - Tauri's own drop handler (on by default) reports `onDragDropEvent` with physical
+    pixels. `ipc.onFileDrag` converts them to CSS pixels, and `elementFromPoint` finds the
+    `[data-pane-id]` under them. Overlays (settings, palette) cover the panes, so they
+    take no drops.
+  - The paths go through `term.paste`: they are broadcast like typing, and bracketed when
+    the shell asked for it.
+  - The profile's shell kind (`Profile.kind`: powershell, cmd, bash, wsl, other) is now
+    sent to the UI and picks the spelling.
+- **Quoting** (`terminal/drop.ts`): a path made only of letters, digits and `_ - . : \ / +`
+  stays bare, so a dropped `.exe` still runs. Otherwise:
+  - PowerShell: `'…'` with `'` doubled (curly quotes too).
+  - cmd and other: `"…"`.
+  - Git Bash: `/c/…`, in `'…'`.
+  - WSL: `/mnt/c/…` (`\wsl$\Distro\…` becomes the Linux path), in `'…'`.
+- **Limits:**
+  - With "hide on blur" on, clicking into Explorer hides the console first.
+  - An elevated qterm gets no drops from a normal Explorer (Windows' UIPI).
+  - A custom profile running `wsl.exe` counts as "other" and gets Windows paths.
+- **Verified:**
+  - Unit tests cover the quoting and path translation.
+  - In a dev instance with its own identifier, events were emitted the way Tauri emits an
+    OS drop. The outline followed the cursor between two split panes and cleared on
+    leave. A drop on the right pane while the left had focus typed
+    `'C:\My Files\it''s a.txt' C:\tools\x.exe` there and focused it, and the left pane
+    stayed clean.
+  - Not yet checked: a real drag from Explorer.

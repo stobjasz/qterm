@@ -16,8 +16,10 @@ use crate::config::CustomProfile;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Which shell a profile runs: decides how it starts in a folder and how shell
-/// integration makes it report its working directory.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// integration makes it report its working directory. The UI uses it to quote
+/// dropped file paths.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 enum Kind {
     PowerShell,
     Cmd,
@@ -36,7 +38,6 @@ pub struct Profile {
     program: OsString,
     #[serde(skip)]
     args: Vec<String>,
-    #[serde(skip)]
     kind: Kind,
     /// Start here unless the pane asks for another folder (custom profiles).
     #[serde(skip)]

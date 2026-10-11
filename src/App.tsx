@@ -6,6 +6,7 @@ import {
   claudeRunning,
   onClaudeAttention,
   onFocusPane,
+  onFileDrag,
   setAttentionCount,
   showClaudeAlert,
   type ClaudeAlert,
@@ -40,6 +41,7 @@ import { HeightHandle } from "./HeightHandle";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
+import { dropText } from "./terminal/drop";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { SearchBar } from "./terminal/SearchBar";
 import { THEMES, themeOrDefault, withAlpha } from "./terminal/themes";
@@ -522,6 +524,38 @@ export default function App() {
     return () => {
       listeners.forEach((l) => void l.then((unlisten) => unlisten()));
       window.removeEventListener("beforeunload", disposeAll);
+    };
+  }, [registry]);
+
+  // Files dragged from Explorer: the pane under the cursor is outlined, and a drop
+  // types the paths at its prompt, quoted for its shell.
+  useEffect(() => {
+    let target: HTMLElement | undefined;
+    const mark = (pane: HTMLElement | undefined) => {
+      if (pane === target) return;
+      delete target?.dataset.dropTarget;
+      target = pane;
+      if (pane) pane.dataset.dropTarget = "";
+    };
+    // Overlays (settings, palette) hide the panes from elementFromPoint, so they take no drops.
+    const paneAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-pane-id]") ?? undefined;
+    const unlisten = onFileDrag((drag) => {
+      if (drag.type === "leave") return mark(undefined);
+      const pane = paneAt(drag.x, drag.y);
+      mark(drag.type === "over" ? pane : undefined);
+      const paneId = pane?.dataset.paneId;
+      if (drag.type !== "drop" || !paneId) return;
+      const profileId = workspaceRef.current.panes[paneId]?.profileId;
+      const kind = profilesRef.current?.find((p) => p.id === profileId)?.kind ?? "other";
+      setWorkspace((ws) => focusPane(ws, paneId));
+      registry.focus(paneId);
+      registry.pasteText(paneId, dropText(drag.paths, kind));
+      // Explorer had the focus; take it so typing goes on at the prompt.
+      void getCurrentWindow().setFocus();
+    });
+    return () => {
+      mark(undefined);
+      void unlisten.then((u) => u());
     };
   }, [registry]);
 

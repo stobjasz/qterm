@@ -243,10 +243,13 @@ export class TerminalRegistry {
   }
 
   async paste(paneId: PaneId): Promise<void> {
-    const entry = this.entries.get(paneId);
-    const text = entry && (await readText().catch(() => ""));
-    // term.paste wraps it in bracketed-paste markers when the shell asked for them.
-    if (entry && text) entry.term.paste(text);
+    const text = this.entries.has(paneId) && (await readText().catch(() => ""));
+    if (text) this.pasteText(paneId, text);
+  }
+
+  /** Types `text` as a paste: broadcast like typing, and bracketed when the shell asked for it. */
+  pasteText(paneId: PaneId, text: string): void {
+    this.entries.get(paneId)?.term.paste(text);
   }
 
   /** Finds the next (or previous) match; results arrive through onSearchResults. */
