@@ -4,7 +4,8 @@ use serde::Serialize;
 use tauri::ipc::{Channel, Response};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::pty::{SessionId, SessionManager};
+use crate::pty::{Profile, SessionId, SessionManager};
+use crate::window;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,15 +14,23 @@ struct PtyExit {
     code: u32,
 }
 
+/// Async so the first call, which detects profiles, runs off the main thread.
 #[tauri::command]
-pub fn pty_spawn(
+pub async fn list_profiles(sessions: State<'_, SessionManager>) -> Result<Vec<Profile>, String> {
+    Ok(sessions.profiles().to_vec())
+}
+
+#[tauri::command]
+pub async fn pty_spawn(
     app: AppHandle,
     sessions: State<'_, SessionManager>,
+    profile_id: Option<String>,
     cols: u16,
     rows: u16,
     on_output: Channel<Response>,
 ) -> Result<SessionId, String> {
-    sessions.spawn_default(
+    sessions.spawn_profile(
+        profile_id.as_deref(),
         cols,
         rows,
         // Raw bytes reach the UI as an ArrayBuffer, with no JSON/base64 encoding.
@@ -50,4 +59,9 @@ pub fn pty_resize(
 #[tauri::command]
 pub fn pty_kill(sessions: State<'_, SessionManager>, id: SessionId) {
     sessions.kill(id);
+}
+
+#[tauri::command]
+pub fn hide_window(app: AppHandle) {
+    window::dismiss(&app);
 }

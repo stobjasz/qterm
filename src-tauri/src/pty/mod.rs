@@ -6,11 +6,13 @@
 
 mod profiles;
 
+pub use profiles::Profile;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -36,22 +38,30 @@ type Sessions = Arc<Mutex<HashMap<SessionId, Session>>>;
 pub struct SessionManager {
     next_id: AtomicU32,
     sessions: Sessions,
+    profiles: OnceLock<Vec<Profile>>,
 }
 
 impl SessionManager {
-    /// Starts the default shell in its home directory.
-    pub fn spawn_default(
+    /// Detected on first use: listing WSL distros runs `wsl.exe`, which takes a moment.
+    pub fn profiles(&self) -> &[Profile] {
+        self.profiles.get_or_init(profiles::detect)
+    }
+
+    /// Starts the given profile, or the default (first) one when `profile_id` is `None`.
+    pub fn spawn_profile(
         &self,
+        profile_id: Option<&str>,
         cols: u16,
         rows: u16,
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
-        let mut cmd = CommandBuilder::new(profiles::default_shell());
-        if let Some(home) = std::env::var_os("USERPROFILE") {
-            cmd.cwd(home);
-        }
-        self.spawn(cmd, cols, rows, on_output, on_exit)
+        let profiles = self.profiles();
+        let profile = match profile_id {
+            Some(id) => profiles.iter().find(|p| p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
+            None => profiles.first().ok_or("no shell profiles found")?,
+        };
+        self.spawn(profile.command(), cols, rows, on_output, on_exit)
     }
 
     /// `on_output` receives batched bytes and returns `false` once nobody is listening.

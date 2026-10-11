@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0 in progress (see §11). Date: 2026-10-11.
+Status: M0–M2 done, M3 (splits) next (see §11–12). Date: 2026-10-11.
 
 ---
 
@@ -345,3 +345,26 @@ Lessons:
   script only presses the hotkey; typing benchmarks are run by hand.
 - The window does not take focus when launched at login. That's expected, because Windows'
   foreground lock blocks it; the first hotkey press focuses it.
+
+## 12. M1 + M2 results (2026-10-11)
+
+- **M1:** "Start with Windows" tray checkbox (HKCU `Run` key via `tauri-plugin-autostart`,
+  launched with `--background`). It's off by default, so dev builds don't register
+  `target\debug\qterm.exe`. Turning it on by default belongs with the M4 settings or the
+  M5 installer.
+- **M2:** profiles detected in Rust (`pwsh`, Windows PowerShell, cmd, Git Bash, WSL distros
+  via `wsl --list --quiet`, which prints UTF-16LE; `docker-desktop*` is skipped). The tab
+  bar sits at the bottom edge, with `+` and a ▾ profile menu. Shortcuts follow Windows
+  Terminal; Ctrl+Alt+N is skipped when AltGr is held, since AltGr arrives as Ctrl+Alt.
+  A clean exit closes the tab (a failed one stays open so the error is readable), and
+  closing the last tab opens a fresh one and hides the console.
+- **Terminal registry** (§5.3) is in place. Inactive tabs stay mounted but `hidden`, and
+  `fit` skips zero-size panes.
+- **Verified** over CDP with Playwright driving the real WebView
+  (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`). Input goes into
+  the page only, never to the OS. Checked: new tab, profile menu, cmd output, Ctrl+Tab
+  wrap, Ctrl+Alt+N, Ctrl+Shift+W, `exit`, and last-tab close → respawn + hide.
+- **Not yet verified:** the autostart toggle (needs a tray click) and a reboot test.
+- **Testability gap for E2E:** the WebGL renderer draws to a canvas, so terminal text
+  isn't in the DOM. Real E2E assertions on output need a test hook (e.g. reading
+  `term.buffer`) or a screen-reader mode toggle.

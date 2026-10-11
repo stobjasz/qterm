@@ -6,8 +6,9 @@
 .EXAMPLE
   pwsh scripts/smoke.ps1            # report state, then hide/show via Ctrl+`
   pwsh scripts/smoke.ps1 -StateOnly # just report
+  pwsh scripts/smoke.ps1 -Show      # bring the console up (e.g. before a CDP check)
 #>
-param([switch]$StateOnly)
+param([switch]$StateOnly, [switch]$Show)
 
 $ErrorActionPreference = 'Stop'
 
@@ -75,6 +76,14 @@ function Invoke-Hotkey {
 $initial = Get-QuakeState
 "initial:       $initial"
 if ($StateOnly) { return }
+if ($Show) {
+    # Hotkey semantics need at most two presses: hidden -> shown, or behind -> focused.
+    $s = $initial
+    for ($i = 0; $i -lt 2 -and -not ($s.Visible -and $s.Focused); $i++) { $s = Invoke-Hotkey }
+    "shown:         $s"
+    if (-not $s.Visible) { exit 1 }
+    return
+}
 
 $failures = 0
 # Hotkey semantics: hidden -> show+focus; visible+unfocused -> focus; visible+focused -> hide.

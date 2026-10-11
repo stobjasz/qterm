@@ -5,7 +5,7 @@ mod window;
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-/// Launched this way by autostart: stay hidden until the hotkey is pressed.
+/// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +25,11 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg(BACKGROUND_ARG)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
@@ -40,10 +45,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_profiles,
             commands::pty_spawn,
             commands::pty_write,
             commands::pty_resize,
             commands::pty_kill,
+            commands::hide_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

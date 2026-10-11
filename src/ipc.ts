@@ -4,6 +4,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SessionId = number;
 
+export interface Profile {
+  id: string;
+  name: string;
+}
+
 export interface PtyExit {
   id: SessionId;
   code: number;
@@ -14,7 +19,12 @@ export interface QuakeVisibility {
   slideMs: number;
 }
 
+export function listProfiles(): Promise<Profile[]> {
+  return invoke("list_profiles");
+}
+
 export function ptySpawn(
+  profileId: string,
   cols: number,
   rows: number,
   onOutput: (data: Uint8Array) => void,
@@ -22,7 +32,7 @@ export function ptySpawn(
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { cols, rows, onOutput: channel });
+  return invoke("pty_spawn", { profileId, cols, rows, onOutput: channel });
 }
 
 export function ptyWrite(id: SessionId, data: string): Promise<void> {
@@ -35,6 +45,10 @@ export function ptyResize(id: SessionId, cols: number, rows: number): Promise<vo
 
 export function ptyKill(id: SessionId): Promise<void> {
   return invoke("pty_kill", { id });
+}
+
+export function hideWindow(): Promise<void> {
+  return invoke("hide_window");
 }
 
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {

@@ -49,6 +49,14 @@ pub fn flip(app: &AppHandle) {
     }
 }
 
+/// Hides the console if it is showing, e.g. after its last tab closed.
+pub fn dismiss(app: &AppHandle) {
+    let Some(win) = window(app) else { return };
+    if win.is_visible().unwrap_or(false) {
+        hide(app, win);
+    }
+}
+
 fn window(app: &AppHandle) -> Option<WebviewWindow> {
     if app.state::<QuakeState>().hiding.load(Ordering::Acquire) {
         return None;

@@ -1,7 +1,16 @@
 # qterm
 
 A quake-style drop-down terminal for Windows 11: **Ctrl+`** slides a translucent
-console down from the top of the screen. Tauri 2 + xterm.js + ConPTY.
+console down from the top of the screen. Tabs for PowerShell, cmd, Git Bash and WSL;
+tray icon with "Start with Windows". Tauri 2 + xterm.js + ConPTY.
+
+| Keys | Action |
+|---|---|
+| Ctrl+` | Show / hide (global) |
+| Ctrl+Shift+T / Ctrl+Shift+1..9 | New tab (default / Nth profile) |
+| Ctrl+Shift+W | Close tab |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
+| Ctrl+Alt+1..9 | Go to tab N |
 
 Design and roadmap: [docs/foundation.md](docs/foundation.md).
 
@@ -12,7 +21,8 @@ Prerequisites: Node + pnpm, Rust (MSVC toolchain), Visual Studio C++ build tools
 ```sh
 pnpm install
 pnpm tauri dev                     # run the app (tray icon → Quit to exit)
-cd src-tauri && cargo test         # PTY session tests
+pnpm test                          # workspace + keybinding unit tests (Vitest)
+cd src-tauri && cargo test         # PTY session and profile tests
 pwsh scripts/smoke.ps1             # hotkey/window smoke check against the running app
 ```
 
