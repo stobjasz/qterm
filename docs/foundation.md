@@ -710,3 +710,19 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
   - The active tab shows Claude Code's last screen, the divider and a new prompt.
   - The background tab, once shown, shows the same.
   - Changing rows or columns afterwards keeps the restored lines.
+
+### 20b. Prompt-only panes aren't kept (2026-10-11)
+
+- **Saving:** a pane is saved only if something was run in it since its shell started,
+  or it brought back earlier output. Running something means Enter, a pasted line, or
+  startup input such as a Claude resume. Even then the screen must hold more than blank
+  lines, bare prompts and startup banners (`terminal/content.ts`). Those are the cmd
+  banner, the PowerShell profile timing line, and bare PowerShell, cmd, Git Bash and
+  bash/WSL prompts, plus qterm's own divider and exit notes.
+- **Prompt-only panes** get no file, and an older one is pruned. A restored tab not
+  shown yet (shell not started) keeps its file untouched.
+- **Restoring** skips a file whose plain text is only noise, e.g. one saved before this
+  change.
+- **Verified live:** an untouched pane and an `echo` pane. Only the `echo` pane got a
+  file, a planted prompt-only file was pruned, and after a reload only the `echo` pane
+  came back (a re-planted prompt-only file was skipped).

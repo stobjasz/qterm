@@ -41,6 +41,7 @@ import { HeightHandle } from "./HeightHandle";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
+import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { SearchBar } from "./terminal/SearchBar";
@@ -579,7 +580,8 @@ export default function App() {
           .filter((pane) => keepsOutput(config, pane.profileId))
           .map(async (pane) => {
             const text = await loadScrollback(pane.id).catch(() => null);
-            if (text) restoredOutput.current.set(pane.id, text);
+            // A file saved before empty panes were skipped may hold just a prompt.
+            if (text && hasContent(plainLines(text))) restoredOutput.current.set(pane.id, text);
           }),
       );
       setWorkspace(restored);
@@ -597,7 +599,12 @@ export default function App() {
     const saves: Promise<void>[] = [];
     for (const pane of Object.values(workspaceRef.current.panes)) {
       if (!cfg.restoreSession || !keepsOutput(cfg, pane.profileId)) continue;
+      const worth = registry.worthSaving(pane.id);
+      // Nothing but prompts: no file, and an older one is pruned below.
+      if (worth === false) continue;
       keep.push(pane.id);
+      // Not started yet (a restored tab not shown so far): its file stays as it is.
+      if (worth === undefined) continue;
       const changed = registry.lastOutput(pane.id) > (lastScrollbackSave.current.get(pane.id) ?? 0);
       const text = changed ? registry.serialize(pane.id, cfg.scrollback.lines) : undefined;
       if (text === undefined) continue;

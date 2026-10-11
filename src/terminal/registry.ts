@@ -26,6 +26,7 @@ import {
 } from "../ipc";
 import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
+import { hasContent } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
 import { findFileLinks } from "./links";
 import { terminalOptions } from "./theme";
@@ -113,6 +114,8 @@ interface Entry {
   lastOutput: number;
   /** Input produced before the shell's session id was known, e.g. the reply to ConPTY's cursor query. */
   earlyInput: string[];
+  /** Lines sent to the shell (Enter, pasted lines, startup input) since it started. */
+  commands: number;
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -197,6 +200,22 @@ export class TerminalRegistry {
   /** The pane's output (normal screen, colours included), last `lines` rows. */
   serialize(paneId: PaneId, lines: number): string | undefined {
     return this.entries.get(paneId)?.serialize.serialize({ scrollback: lines, excludeAltBuffer: true, excludeModes: true });
+  }
+
+  /**
+   * Whether the pane's output is worth keeping across a restart: something was run
+   * in it (or it brought back earlier output) and it shows more than prompts and
+   * banners. Undefined until its shell has started (a restored tab not yet shown).
+   */
+  worthSaving(paneId: PaneId): boolean | undefined {
+    const entry = this.entries.get(paneId);
+    if (!entry?.started) return undefined;
+    if (entry.commands === 0 && !entry.spec.restored) return false;
+    const buffer = entry.term.buffer.normal;
+    function* lines() {
+      for (let y = 0; y < buffer.length; y++) yield buffer.getLine(y)?.translateToString(true) ?? "";
+    }
+    return hasContent(lines());
   }
 
   /** The pane's PTY session, once its shell is running. */
@@ -314,6 +333,7 @@ export class TerminalRegistry {
       lastBell: 0,
       lastOutput: 0,
       earlyInput: [],
+      commands: 0,
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -347,7 +367,9 @@ export class TerminalRegistry {
     term.onData((data) => {
       // A broadcasting tab sends keystrokes to every pane in it.
       for (const target of this.broadcast.get(paneId) ?? [paneId]) {
-        const session = this.entries.get(target)?.sessionId;
+        const targetEntry = this.entries.get(target);
+        if (targetEntry && data.includes("\r")) targetEntry.commands++;
+        const session = targetEntry?.sessionId;
         if (session !== undefined) void ptyWrite(session, data);
         else if (target === paneId) entry.earlyInput.push(data);
       }
@@ -400,6 +422,7 @@ export class TerminalRegistry {
         // The shell has started talking, so it is up: type the startup input now.
         if (pendingInput && entry.sessionId !== undefined) {
           void ptyWrite(entry.sessionId, pendingInput);
+          entry.commands++;
           pendingInput = undefined;
         }
       });
