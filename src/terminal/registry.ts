@@ -40,6 +40,8 @@ const COPY_ON_SELECT_DELAY_MS = 150;
 const CLAUDE_SCAN_DELAY_MS = 300;
 /** Never scan more than this many lines back in one go. */
 const CLAUDE_SCAN_MAX_LINES = 2000;
+/** A shell ringing over and over reports one bell per this interval. */
+const BELL_INTERVAL_MS = 1000;
 
 export interface RegistryEvents {
   onCommand(paneId: PaneId, command: Command): void;
@@ -50,6 +52,9 @@ export interface RegistryEvents {
   /** The terminal printed "claude --resume <id>" (only while detection is on). */
   onClaudeSession(paneId: PaneId, sessionId: string): void;
   onSearchResults(paneId: PaneId, results: { index: number; count: number }): void;
+  /** First output since the pane went into the background (see setBackground). */
+  onActivity(paneId: PaneId): void;
+  onBell(paneId: PaneId): void;
 }
 
 /** How to start a pane's shell. */
@@ -91,6 +96,10 @@ interface Entry {
   linesSinceScan: number;
   scanTimer?: number;
   claudeSeen: Set<string>;
+  /** In a background tab, and output has been reported since. */
+  background: boolean;
+  activityReported: boolean;
+  lastBell: number;
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -106,6 +115,8 @@ export class TerminalRegistry {
   private font: FontSettings = { family: terminalOptions.fontFamily!, size: terminalOptions.fontSize! };
   private theme: Theme = THEMES.qterm;
   private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false };
+  /** Pane → every pane its typing goes to (broadcasting tabs only). */
+  private broadcast = new Map<PaneId, PaneId[]>();
 
   constructor(private events: RegistryEvents) {
     void onPtyExit(({ id, code }) => {
@@ -151,6 +162,22 @@ export class TerminalRegistry {
 
   disposeAll(): void {
     for (const paneId of [...this.entries.keys()]) this.dispose(paneId);
+  }
+
+  /** Panes of broadcasting tabs, each mapped to all panes of its tab. */
+  setBroadcast(groups: Map<PaneId, PaneId[]>): void {
+    this.broadcast = groups;
+  }
+
+  /**
+   * Panes in background tabs. Each reports its first output (onActivity) once;
+   * coming to the foreground resets that.
+   */
+  setBackground(background: ReadonlySet<PaneId>): void {
+    for (const [paneId, entry] of this.entries) {
+      entry.background = background.has(paneId);
+      if (!entry.background) entry.activityReported = false;
+    }
   }
 
   setKeymap(keymap: Keymap): void {
@@ -246,6 +273,9 @@ export class TerminalRegistry {
       pendingAck: 0,
       linesSinceScan: 0,
       claudeSeen: new Set(),
+      background: false,
+      activityReported: false,
+      lastBell: 0,
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -276,7 +306,17 @@ export class TerminalRegistry {
       return false;
     });
     term.onData((data) => {
-      if (entry.sessionId !== undefined) void ptyWrite(entry.sessionId, data);
+      // A broadcasting tab sends keystrokes to every pane in it.
+      for (const target of this.broadcast.get(paneId) ?? [paneId]) {
+        const session = this.entries.get(target)?.sessionId;
+        if (session !== undefined) void ptyWrite(session, data);
+      }
+    });
+    term.onBell(() => {
+      const now = Date.now();
+      if (now - entry.lastBell < BELL_INTERVAL_MS) return;
+      entry.lastBell = now;
+      this.events.onBell(paneId);
     });
     term.onTitleChange((title) => this.events.onTitle(paneId, title));
     term.onResize(({ cols, rows }) => {
@@ -301,6 +341,10 @@ export class TerminalRegistry {
     const onOutput = (data: Uint8Array) =>
       term.write(data, () => {
         this.processed(entry, data.length);
+        if (entry.background && !entry.activityReported) {
+          entry.activityReported = true;
+          this.events.onActivity(paneId);
+        }
         // The shell has started talking, so it is up: type the startup input now.
         if (pendingInput && entry.sessionId !== undefined) {
           void ptyWrite(entry.sessionId, pendingInput);

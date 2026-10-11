@@ -18,13 +18,16 @@ import {
   onConfigChanged,
   onOpenSettings,
   onQuakeVisibility,
+  openConfigFile,
+  saveConfig,
   saveSession,
   uiReady,
   type ClaudeSession,
   type ConfigSnapshot,
   type Profile,
 } from "./ipc";
-import { buildKeymap, type Command } from "./keybindings";
+import { ACTION_LIST, buildKeymap, keyInput, resolveKey, type Command } from "./keybindings";
+import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { HeightHandle } from "./HeightHandle";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { TabBar } from "./tabs/TabBar";
@@ -53,6 +56,10 @@ import {
   setPaneCwd,
   setPaneTitle,
   splitPane,
+  tabTitle,
+  swapPane,
+  toggleBroadcast,
+  toggleZoom,
   type Pane,
   type PaneId,
   type SplitDir,
@@ -80,6 +87,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
   const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
+  /** Background panes that printed something, or rang the bell, since last seen. */
+  const [activity, setActivity] = useState<ReadonlySet<PaneId>>(new Set());
+  const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -97,6 +108,8 @@ export default function App() {
         onCwd: (...args) => handlers.current.onCwd(...args),
         onClaudeSession: (...args) => handlers.current.onClaudeSession(...args),
         onSearchResults: (...args) => handlers.current.onSearchResults(...args),
+        onActivity: (...args) => handlers.current.onActivity(...args),
+        onBell: (...args) => handlers.current.onBell(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -228,6 +241,18 @@ export default function App() {
         case "settings":
           setSettingsOpen((open) => !open);
           break;
+        case "zoomPane":
+          setWorkspace(toggleZoom);
+          break;
+        case "toggleBroadcast":
+          setWorkspace(toggleBroadcast);
+          break;
+        case "swapPane":
+          setWorkspace((ws) => swapPane(ws, command.direction));
+          break;
+        case "commandPalette":
+          setPaletteOpen((open) => !open);
+          break;
       }
     },
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
@@ -240,7 +265,35 @@ export default function App() {
       if (pane) void claudeSessionSeen(id, pane.profileId, pane.cwd);
     },
     onSearchResults: (paneId, results) => setSearch((s) => (s?.pane === paneId ? { ...s, results } : s)),
+    onActivity: (paneId) => setActivity((current) => new Set(current).add(paneId)),
+    onBell: (paneId) => {
+      // A bell in the pane you are looking at needs no marker.
+      if (shownRef.current && activeTab(workspaceRef.current)?.focusedPane === paneId) return;
+      setBells((current) => new Set(current).add(paneId));
+    },
   };
+
+  // --- background activity, broadcast ----------------------------------------------
+  const activeTabPanes = useMemo(() => {
+    const tab = activeTab(workspace);
+    return new Set(tab ? paneIds(tab.root) : []);
+  }, [workspace]);
+  useEffect(() => {
+    registry.setBackground(new Set(Object.keys(workspace.panes).filter((id) => !activeTabPanes.has(id))));
+    // Looking at a tab clears its markers.
+    const unseen = (set: ReadonlySet<PaneId>) => new Set([...set].filter((id) => !activeTabPanes.has(id) && workspace.panes[id]));
+    setActivity((current) => ([...current].some((id) => activeTabPanes.has(id) || !workspace.panes[id]) ? unseen(current) : current));
+    setBells((current) => (shown && [...current].some((id) => activeTabPanes.has(id) || !workspace.panes[id]) ? unseen(current) : current));
+  }, [registry, workspace.panes, activeTabPanes, shown]);
+  useEffect(() => {
+    const groups = new Map<PaneId, PaneId[]>();
+    for (const tab of workspace.tabs) {
+      if (!tab.broadcast) continue;
+      const ids = paneIds(tab.root);
+      for (const id of ids) groups.set(id, ids);
+    }
+    registry.setBroadcast(groups);
+  }, [registry, workspace.tabs]);
 
   // --- Claude attention alerts ------------------------------------------------------
   const shownRef = useRef(shown);
@@ -263,6 +316,72 @@ export default function App() {
   useEffect(() => {
     if (shown && focusedPane && attention.has(focusedPane)) setAttention((current) => without(current, focusedPane));
   }, [shown, focusedPane, attention]);
+  // --- command palette: everything you can do, by name ------------------------------
+  const paletteItems = useMemo((): PaletteItem[] => {
+    const chordFor = (name: string) => {
+      const chord = config?.keybindings[name] ?? ACTION_LIST.find((a) => a.name === name)?.defaultChord;
+      return chord || undefined;
+    };
+    const target = () => activeTab(workspaceRef.current)?.focusedPane;
+    return [
+      ...ACTION_LIST.filter((a) => a.name !== "command_palette").map((action) => ({
+        id: `action:${action.name}`,
+        group: "Action",
+        label: action.label,
+        hint: chordFor(action.name),
+        run: () => {
+          const pane = target();
+          if (pane) handlers.current.onCommand(pane, action.command);
+        },
+      })),
+      ...workspace.tabs.map((tab, i) => ({
+        id: `tab:${tab.id}`,
+        group: "Tab",
+        label: tabTitle(workspace, tab),
+        hint: i < 9 ? `Ctrl+Alt+${i + 1}` : undefined,
+        run: () => setWorkspace((ws) => activateTab(ws, tab.id)),
+      })),
+      ...(profiles ?? []).map((profile) => ({
+        id: `profile:${profile.id}`,
+        group: "New tab",
+        label: profile.name,
+        run: () => void newTab(profile.id),
+      })),
+      ...Object.entries(THEMES).map(([name, theme]) => ({
+        id: `theme:${name}`,
+        group: "Theme",
+        label: theme.label,
+        hint: name === config?.theme ? "current" : undefined,
+        run: () => void saveConfig({ theme: name }),
+      })),
+      ...(config?.claudeSessions ? claudeSessions : []).map((session) => ({
+        id: `claude:${session.id}`,
+        group: "Resume Claude",
+        label: `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`,
+        run: () => resumeClaude(session),
+      })),
+      { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
+    ];
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude]);
+
+  const tabMarkers = useMemo(
+    () =>
+      new Map(
+        workspace.tabs.map((tab) => {
+          const ids = paneIds(tab.root);
+          return [
+            tab.id,
+            {
+              activity: ids.some((id) => activity.has(id)),
+              bell: ids.some((id) => bells.has(id)),
+              zoomed: Boolean(tab.zoomed),
+              broadcast: Boolean(tab.broadcast),
+            },
+          ] as const;
+        }),
+      ),
+    [workspace.tabs, activity, bells],
+  );
   const attentionTabs = useMemo(
     () =>
       new Map(
@@ -336,9 +455,30 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [workspace]);
 
+  // Re-parenting a terminal (zoom, split, swap) drops its keyboard focus, so focus
+  // again whenever the active tab's layout changes, not only the focused pane.
+  const activeLayout = useMemo(() => {
+    const tab = activeTab(workspace);
+    return tab ? `${tab.id}|${tab.zoomed ?? ""}|${JSON.stringify(tab.root)}` : "";
+  }, [workspace]);
   useEffect(() => {
-    if (shown && focusedPane && !search && !settingsOpen) registry.focus(focusedPane);
-  }, [registry, shown, focusedPane, search, settingsOpen]);
+    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen) registry.focus(focusedPane);
+  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen]);
+
+  // Safety net: app shortcuts also work while focus is outside any terminal or field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".xterm") || target?.closest("input, textarea, select, [role=dialog]")) return;
+      const command = resolveKey(keyInput(e), keymap);
+      const pane = activeTab(workspaceRef.current)?.focusedPane;
+      if (!command || !pane) return;
+      e.preventDefault();
+      handlers.current.onCommand(pane, command);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keymap]);
 
   const closeSearch = () => {
     if (search) registry.clearSearch(search.pane);
@@ -362,11 +502,12 @@ export default function App() {
         {workspace.tabs.map((tab) => (
           <div key={tab.id} className="tab-panel" role="tabpanel" hidden={tab.id !== workspace.activeTab}>
             <LayoutView
-              node={tab.root}
+              node={tab.zoomed ? { kind: "leaf", pane: tab.zoomed } : tab.root}
               path={[]}
               panes={workspace.panes}
               focusedPane={tab.focusedPane}
-              showFocus={tab.root.kind === "split"}
+              showFocus={tab.root.kind === "split" && !tab.zoomed}
+              broadcast={tab.broadcast}
               registry={registry}
               spec={paneSpec}
               onFocusPane={(paneId) => setWorkspace((ws) => focusPane(ws, paneId))}
@@ -381,6 +522,7 @@ export default function App() {
             onClose={closeSearch}
           />
         )}
+        {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
         {settingsOpen && settings && profiles && (
           <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} />
         )}
@@ -411,6 +553,7 @@ export default function App() {
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
         attention={attentionTabs}
+        markers={tabMarkers}
       />
       <HeightHandle />
     </div>

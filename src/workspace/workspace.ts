@@ -8,6 +8,7 @@ import {
   removePane,
   resizeAt,
   resizeToward,
+  swapLeaves,
   type Direction,
   type LayoutNode,
   type PaneId,
@@ -34,6 +35,10 @@ export interface Tab {
   focusedPane: PaneId;
   /** Set by renaming the tab; wins over the shell's title. */
   title?: string;
+  /** This pane fills the tab for now (not saved). */
+  zoomed?: PaneId;
+  /** Typing goes to every pane of the tab (not saved). */
+  broadcast?: boolean;
 }
 
 export interface Workspace {
@@ -73,8 +78,9 @@ export function splitPane(
 ): Workspace {
   const tab = tabOf(ws, paneId);
   if (!tab) return ws;
+  const { zoomed: _zoom, ...unzoomed } = tab;
   return {
-    ...replaceTab(ws, { ...tab, root: insertSplit(tab.root, paneId, dir, newPane), focusedPane: newPane }),
+    ...replaceTab(ws, { ...unzoomed, root: insertSplit(tab.root, paneId, dir, newPane), focusedPane: newPane }),
     panes: withPane(ws.panes, newPane, profile, cwd),
   };
 }
@@ -95,7 +101,9 @@ export function closePane(ws: Workspace, paneId: PaneId): Workspace {
       tab.focusedPane !== paneId
         ? tab.focusedPane
         : (order.slice(0, order.indexOf(paneId)).reverse().find((id) => remaining.includes(id)) ?? remaining[0]);
-    return { ...replaceTab(ws, { ...tab, root, focusedPane }), panes };
+    const { zoomed, ...rest } = tab;
+    const kept = zoomed === paneId ? rest : tab;
+    return { ...replaceTab(ws, { ...kept, root, focusedPane }), panes };
   }
 
   const tabs = ws.tabs.filter((_, i) => i !== index);
@@ -116,7 +124,33 @@ export function focusPane(ws: Workspace, paneId: PaneId): Workspace {
 export function moveFocus(ws: Workspace, direction: Direction): Workspace {
   const tab = activeTab(ws);
   const target = tab && neighbor(tab.root, tab.focusedPane, direction);
-  return target ? focusPane(ws, target) : ws;
+  if (!tab || !target) return ws;
+  const { zoomed: _zoom, ...unzoomed } = tab;
+  return focusPane(replaceTab(ws, unzoomed), target);
+}
+
+/** Lets the focused pane fill the tab, or back. Only with more than one pane. */
+export function toggleZoom(ws: Workspace): Workspace {
+  const tab = activeTab(ws);
+  if (!tab || tab.root.kind === "leaf") return ws;
+  const { zoomed, ...rest } = tab;
+  return replaceTab(ws, zoomed ? rest : { ...rest, zoomed: tab.focusedPane });
+}
+
+/** Swaps the focused pane with its neighbour in `direction`; focus stays with it. */
+export function swapPane(ws: Workspace, direction: Direction): Workspace {
+  const tab = activeTab(ws);
+  const other = tab && neighbor(tab.root, tab.focusedPane, direction);
+  if (!tab || !other) return ws;
+  return replaceTab(ws, { ...tab, root: swapLeaves(tab.root, tab.focusedPane, other) });
+}
+
+/** Typing into one pane of the active tab goes to all of them, or back. */
+export function toggleBroadcast(ws: Workspace): Workspace {
+  const tab = activeTab(ws);
+  if (!tab) return ws;
+  const { broadcast, ...rest } = tab;
+  return replaceTab(ws, broadcast ? rest : { ...rest, broadcast: true });
 }
 
 export function resizeFocused(ws: Workspace, direction: Direction, step: number): Workspace {

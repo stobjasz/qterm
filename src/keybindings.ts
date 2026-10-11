@@ -14,7 +14,11 @@ export type Command =
   | { type: "copy" }
   | { type: "paste" }
   | { type: "find" }
-  | { type: "settings" };
+  | { type: "settings" }
+  | { type: "zoomPane" }
+  | { type: "toggleBroadcast" }
+  | { type: "swapPane"; direction: Direction }
+  | { type: "commandPalette" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -36,6 +40,14 @@ const ACTIONS = {
   paste: { command: { type: "paste" }, chord: "ctrl+shift+v" },
   find: { command: { type: "find" }, chord: "ctrl+shift+f" },
   settings: { command: { type: "settings" }, chord: "ctrl+," },
+  command_palette: { command: { type: "commandPalette" }, chord: "ctrl+shift+p" },
+  zoom_pane: { command: { type: "zoomPane" }, chord: "alt+shift+z" },
+  toggle_broadcast: { command: { type: "toggleBroadcast" }, chord: "alt+shift+b" },
+  // Unbound by default (good combos are scarce); bind in settings or use the palette.
+  swap_left: { command: { type: "swapPane", direction: "left" }, chord: "" },
+  swap_right: { command: { type: "swapPane", direction: "right" }, chord: "" },
+  swap_up: { command: { type: "swapPane", direction: "up" }, chord: "" },
+  swap_down: { command: { type: "swapPane", direction: "down" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -60,12 +72,20 @@ const LABELS: Record<Action, string> = {
   paste: "Paste",
   find: "Find",
   settings: "Settings",
+  command_palette: "Command palette",
+  zoom_pane: "Zoom pane",
+  toggle_broadcast: "Type into all panes of the tab",
+  swap_left: "Swap pane left",
+  swap_right: "Swap pane right",
+  swap_up: "Swap pane up",
+  swap_down: "Swap pane down",
 };
 
-/** Every rebindable action with its config name, label and default chord. */
+/** Every rebindable action with its config name, label, command and default chord. */
 export const ACTION_LIST = (Object.keys(ACTIONS) as Action[]).map((name) => ({
   name,
   label: LABELS[name],
+  command: ACTIONS[name].command as Command,
   defaultChord: ACTIONS[name].chord as string,
 }));
 
@@ -100,7 +120,10 @@ export function keyInput(e: KeyboardEvent): KeyInput {
 export function buildKeymap(overrides: Record<string, string> = {}): Keymap {
   const errors: string[] = [];
   const chordOf = new Map<Action, string | undefined>();
-  for (const action of Object.keys(ACTIONS) as Action[]) chordOf.set(action, parseChord(ACTIONS[action].chord).chord);
+  for (const action of Object.keys(ACTIONS) as Action[]) {
+    const chord: string = ACTIONS[action].chord;
+    chordOf.set(action, chord ? parseChord(chord).chord : undefined);
+  }
 
   for (const [name, text] of Object.entries(overrides)) {
     if (!(name in ACTIONS)) {

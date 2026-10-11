@@ -95,6 +95,7 @@ export function changes(config: Config, draft: Draft): Record<string, unknown> {
 }
 
 function normalize(chord: string): string {
+  // "" (unbound) and whitespace mean the same.
   return chord.toLowerCase().replace(/\s+/g, "");
 }
 

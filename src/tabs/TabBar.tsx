@@ -26,6 +26,15 @@ interface Props {
   onOpenSettings(): void;
   /** Tabs with a pane where Claude Code is waiting, and its latest message. */
   attention: ReadonlyMap<TabId, ClaudeAlert>;
+  markers: ReadonlyMap<TabId, TabMarkers>;
+}
+
+export interface TabMarkers {
+  /** A background pane printed something since the tab was last looked at. */
+  activity: boolean;
+  bell: boolean;
+  zoomed: boolean;
+  broadcast: boolean;
 }
 
 // Mouse-down default is prevented (except in text fields) so clicking the bar never
@@ -73,6 +82,7 @@ export function TabBar(props: Props) {
           const title = tabTitle(workspace, tab);
           const active = tab.id === workspace.activeTab;
           const waiting = props.attention.get(tab.id);
+          const marks = props.markers.get(tab.id);
           const drop = dropIndex === i ? " drop-before" : dropIndex === i + 1 && i === workspace.tabs.length - 1 ? " drop-after" : "";
           return (
             <div
@@ -99,6 +109,24 @@ export function TabBar(props: Props) {
                 />
               ) : (
                 <span className="tab-title">{title}</span>
+              )}
+              {marks?.broadcast && (
+                <span className="tab-mark broadcast" title="Typing goes to every pane (Alt+Shift+B)" aria-label="Broadcasting input">
+                  ⇶
+                </span>
+              )}
+              {marks?.zoomed && (
+                <span className="tab-mark" title="A pane is zoomed (Alt+Shift+Z)" aria-label="Pane zoomed">
+                  ⤢
+                </span>
+              )}
+              {marks?.bell && (
+                <span className="tab-mark bell" title="Bell" aria-label="Bell rang">
+                  🔔
+                </span>
+              )}
+              {marks?.activity && !marks.bell && !waiting && (
+                <span className="tab-mark activity" title="New output" aria-label="New output" />
               )}
               {waiting && (
                 <span className="tab-attention" role="status" aria-label={`Claude is waiting: ${waiting.message}`}>

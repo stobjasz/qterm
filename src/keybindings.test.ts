@@ -54,6 +54,16 @@ describe("default keymap", () => {
     expect(resolveKey(key("Comma", { ctrlKey: true }), defaults)).toEqual({ type: "settings" });
   });
 
+  it("maps the pane tools and the palette; swapping is unbound by default", () => {
+    expect(resolveKey(key("KeyZ", { altKey: true, shiftKey: true }), defaults)).toEqual({ type: "zoomPane" });
+    expect(resolveKey(key("KeyB", { altKey: true, shiftKey: true }), defaults)).toEqual({ type: "toggleBroadcast" });
+    expect(resolveKey(key("KeyP", { ctrlKey: true, shiftKey: true }), defaults)).toEqual({ type: "commandPalette" });
+    expect(buildKeymap({ swap_left: "ctrl+alt+shift+left" }).chords.get("ctrl+alt+shift+ArrowLeft")).toEqual({
+      type: "swapPane",
+      direction: "left",
+    });
+  });
+
   it("leaves AltGr combinations to the shell (AltGr reports as Ctrl+Alt)", () => {
     expect(resolveKey(key("Digit7", { ctrlKey: true, altKey: true, altGraph: true }), defaults)).toBeUndefined();
   });

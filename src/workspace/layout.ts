@@ -154,6 +154,16 @@ export function resizeToward(node: LayoutNode, pane: PaneId, direction: Directio
   return node;
 }
 
+/** Exchanges two panes' places; the tree's shape and sizes stay. */
+export function swapLeaves(node: LayoutNode, a: PaneId, b: PaneId): LayoutNode {
+  if (node.kind === "leaf") {
+    if (node.pane === a) return { kind: "leaf", pane: b };
+    if (node.pane === b) return { kind: "leaf", pane: a };
+    return node;
+  }
+  return { ...node, children: node.children.map((child) => swapLeaves(child, a, b)) };
+}
+
 export function equalized(node: LayoutNode): LayoutNode {
   if (node.kind === "leaf") return node;
   return split(node.dir, node.children.map(equalized));

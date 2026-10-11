@@ -12,6 +12,8 @@ interface Props {
   panes: Record<PaneId, Pane>;
   focusedPane: PaneId;
   showFocus: boolean;
+  /** Outline every pane: the tab is broadcasting input. */
+  broadcast?: boolean;
   registry: TerminalRegistry;
   spec(pane: Pane): PaneSpec;
   onFocusPane(paneId: PaneId): void;
@@ -28,6 +30,7 @@ export function LayoutView(props: Props) {
         registry={props.registry}
         spec={props.spec}
         focused={props.showFocus && node.pane === props.focusedPane}
+        broadcast={props.broadcast}
         onFocus={props.onFocusPane}
       />
     );

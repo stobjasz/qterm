@@ -9,6 +9,7 @@ import {
   removePane,
   resizeAt,
   resizeToward,
+  swapLeaves,
   type LayoutNode,
 } from "./layout";
 
@@ -151,5 +152,12 @@ describe("resizing", () => {
   it("equalizes every split", () => {
     const tree = row([leaf("a"), column([leaf("b"), leaf("c")], [0.9, 0.1])], [0.2, 0.8]);
     expect(equalized(tree)).toEqual(row([leaf("a"), column([leaf("b"), leaf("c")])]));
+  });
+});
+
+describe("swapLeaves", () => {
+  it("exchanges two panes and keeps the shape and sizes", () => {
+    const tree = row([leaf("a"), column([leaf("b"), leaf("c")], [0.3, 0.7])], [0.4, 0.6]);
+    expect(swapLeaves(tree, "a", "c")).toEqual(row([leaf("c"), column([leaf("b"), leaf("a")], [0.3, 0.7])], [0.4, 0.6]));
   });
 });

@@ -20,7 +20,10 @@ import {
   resizeFocused,
   setPaneTitle,
   splitPane,
+  swapPane,
   tabTitle,
+  toggleBroadcast,
+  toggleZoom,
   type Workspace,
 } from "./workspace";
 
@@ -256,3 +259,49 @@ describe("save and restore", () => {
     expect(restoreWorkspace(saveWorkspace(withTabs(1)), [])).toBeUndefined();
   });
 });
+
+describe("pane tools", () => {
+  const twoPanes = () => splitPane(withTabs(1), "p1", "row", "p2", pwsh); // p2 focused, right
+
+  it("zooms the focused pane and toggles back", () => {
+    let ws = toggleZoom(twoPanes());
+    expect(ws.tabs[0].zoomed).toBe("p2");
+    ws = toggleZoom(ws);
+    expect(ws.tabs[0].zoomed).toBeUndefined();
+  });
+
+  it("does not zoom a tab with a single pane", () => {
+    const ws = withTabs(1);
+    expect(toggleZoom(ws)).toBe(ws);
+  });
+
+  it("leaves zoom when moving focus, splitting, or closing the zoomed pane", () => {
+    expect(moveFocus(toggleZoom(twoPanes()), "left").tabs[0].zoomed).toBeUndefined();
+    expect(splitPane(toggleZoom(twoPanes()), "p2", "row", "p3", pwsh).tabs[0].zoomed).toBeUndefined();
+    expect(closePane(toggleZoom(twoPanes()), "p2").tabs[0].zoomed).toBeUndefined();
+  });
+
+  it("swaps the focused pane with its neighbour and keeps focus on it", () => {
+    const ws = swapPane(twoPanes(), "left");
+    expect(paneOrder(ws)).toEqual(["p2", "p1"]);
+    expect(ws.tabs[0].focusedPane).toBe("p2");
+    expect(swapPane(ws, "left")).toBe(ws);
+  });
+
+  it("toggles broadcast for the active tab only", () => {
+    let ws = openTab(twoPanes(), { tab: "t2", pane: "p3" }, pwsh);
+    ws = toggleBroadcast(activateTab(ws, "t1"));
+    expect(ws.tabs.map((t) => Boolean(t.broadcast))).toEqual([true, false]);
+    expect(toggleBroadcast(ws).tabs[0].broadcast).toBeUndefined();
+  });
+
+  it("does not save zoom or broadcast", () => {
+    const ws = toggleBroadcast(toggleZoom(twoPanes()));
+    expect(restoreWorkspace(saveWorkspace(ws), [pwsh])!.tabs[0]).not.toHaveProperty("zoomed");
+    expect(restoreWorkspace(saveWorkspace(ws), [pwsh])!.tabs[0]).not.toHaveProperty("broadcast");
+  });
+});
+
+function paneOrder(ws: Workspace): string[] {
+  return JSON.stringify(ws.tabs[0].root).match(/p\d+/g) ?? [];
+}
