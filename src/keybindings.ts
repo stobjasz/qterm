@@ -1,4 +1,5 @@
-// App shortcuts, checked before a key reaches the shell. Defaults follow Windows Terminal.
+// App shortcuts, checked before a key reaches the shell. Defaults follow Windows
+// Terminal; the [keybindings] table in config.toml overrides them by action name.
 import type { Direction, SplitDir } from "./workspace/layout";
 
 export type Command =
@@ -11,6 +12,26 @@ export type Command =
   | { type: "resizePane"; direction: Direction }
   | { type: "equalize" };
 
+const ACTIONS = {
+  new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
+  close_pane: { command: { type: "closePane" }, chord: "ctrl+shift+w" },
+  next_tab: { command: { type: "cycleTab", delta: 1 }, chord: "ctrl+tab" },
+  prev_tab: { command: { type: "cycleTab", delta: -1 }, chord: "ctrl+shift+tab" },
+  split_right: { command: { type: "split", dir: "row" }, chord: "alt+shift+=" },
+  split_down: { command: { type: "split", dir: "column" }, chord: "alt+shift+-" },
+  equalize: { command: { type: "equalize" }, chord: "alt+shift+0" },
+  focus_left: { command: { type: "moveFocus", direction: "left" }, chord: "alt+left" },
+  focus_right: { command: { type: "moveFocus", direction: "right" }, chord: "alt+right" },
+  focus_up: { command: { type: "moveFocus", direction: "up" }, chord: "alt+up" },
+  focus_down: { command: { type: "moveFocus", direction: "down" }, chord: "alt+down" },
+  resize_left: { command: { type: "resizePane", direction: "left" }, chord: "alt+shift+left" },
+  resize_right: { command: { type: "resizePane", direction: "right" }, chord: "alt+shift+right" },
+  resize_up: { command: { type: "resizePane", direction: "up" }, chord: "alt+shift+up" },
+  resize_down: { command: { type: "resizePane", direction: "down" }, chord: "alt+shift+down" },
+} satisfies Record<string, { command: Command; chord: string }>;
+
+type Action = keyof typeof ACTIONS;
+
 /** The parts of a KeyboardEvent that matter; `altGraph` is getModifierState("AltGraph"). */
 export interface KeyInput {
   code: string;
@@ -19,6 +40,13 @@ export interface KeyInput {
   altKey: boolean;
   metaKey: boolean;
   altGraph: boolean;
+}
+
+export interface Keymap {
+  /** Normalized chord ("ctrl+shift+KeyT") → command. */
+  chords: Map<string, Command>;
+  /** Problems in the overrides; the affected actions keep their defaults. */
+  errors: string[];
 }
 
 export function keyInput(e: KeyboardEvent): KeyInput {
@@ -32,39 +60,118 @@ export function keyInput(e: KeyboardEvent): KeyInput {
   };
 }
 
-const ARROWS: Record<string, Direction> = {
-  ArrowLeft: "left",
-  ArrowRight: "right",
-  ArrowUp: "up",
-  ArrowDown: "down",
-};
+export function buildKeymap(overrides: Record<string, string> = {}): Keymap {
+  const errors: string[] = [];
+  const chordOf = new Map<Action, string | undefined>();
+  for (const action of Object.keys(ACTIONS) as Action[]) chordOf.set(action, parseChord(ACTIONS[action].chord).chord);
 
-// Physical keys (`code`), so bindings don't move with the keyboard layout.
-export function resolveKey(k: KeyInput): Command | undefined {
+  for (const [name, text] of Object.entries(overrides)) {
+    if (!(name in ACTIONS)) {
+      errors.push(`keybindings: unknown action "${name}"`);
+      continue;
+    }
+    if (text.trim() === "") {
+      chordOf.set(name as Action, undefined);
+      continue;
+    }
+    const parsed = parseChord(text);
+    if (parsed.error) errors.push(`keybindings.${name}: ${parsed.error}`);
+    else chordOf.set(name as Action, parsed.chord);
+  }
+
+  const chords = new Map<string, Command>();
+  const owner = new Map<string, Action>();
+  // Overridden actions first, so an override wins a clash with another action's default.
+  const order = [...chordOf.keys()].sort((a, b) => Number(b in overrides) - Number(a in overrides));
+  for (const action of order) {
+    const chord = chordOf.get(action);
+    if (!chord) continue;
+    const taken = owner.get(chord);
+    if (taken) {
+      errors.push(`keybindings: "${overrides[taken] ?? overrides[action]}" is bound to both ${taken} and ${action}`);
+      continue;
+    }
+    owner.set(chord, action);
+    chords.set(chord, ACTIONS[action].command);
+  }
+  return { chords, errors };
+}
+
+export function resolveKey(k: KeyInput, keymap: Keymap): Command | undefined {
   // AltGr arrives as Ctrl+Alt and types characters on many layouts (e.g. { on German AltGr+7).
   if (k.metaKey || k.altGraph) return undefined;
-  return k.ctrlKey ? resolveCtrl(k) : k.altKey ? resolveAlt(k) : undefined;
-}
+  const chord = [k.ctrlKey && "ctrl", k.altKey && "alt", k.shiftKey && "shift", k.code].filter(Boolean).join("+");
+  const bound = keymap.chords.get(chord);
+  if (bound) return bound;
 
-function resolveCtrl(k: KeyInput): Command | undefined {
+  // Fixed numbered shortcuts: Ctrl+Alt+N goes to tab N, Ctrl+Shift+N opens profile N.
   const digit = /^Digit([1-9])$/.exec(k.code);
-  if (k.shiftKey && !k.altKey) {
-    if (k.code === "KeyT") return { type: "newTab" };
-    if (k.code === "KeyW") return { type: "closePane" };
-    if (k.code === "Tab") return { type: "cycleTab", delta: -1 };
-    if (digit) return { type: "newTab", profileIndex: Number(digit[1]) - 1 };
-  }
-  if (!k.shiftKey && !k.altKey && k.code === "Tab") return { type: "cycleTab", delta: 1 };
-  if (k.altKey && !k.shiftKey && digit) return { type: "goToTab", index: Number(digit[1]) - 1 };
+  if (!digit || !k.ctrlKey) return undefined;
+  const n = Number(digit[1]) - 1;
+  if (k.altKey && !k.shiftKey) return { type: "goToTab", index: n };
+  if (k.shiftKey && !k.altKey) return { type: "newTab", profileIndex: n };
   return undefined;
 }
 
-function resolveAlt(k: KeyInput): Command | undefined {
-  const arrow = ARROWS[k.code];
-  if (!k.shiftKey) return arrow ? { type: "moveFocus", direction: arrow } : undefined;
-  if (k.code === "Equal") return { type: "split", dir: "row" };
-  if (k.code === "Minus") return { type: "split", dir: "column" };
-  if (k.code === "Digit0") return { type: "equalize" };
-  if (arrow) return { type: "resizePane", direction: arrow };
-  return undefined;
+const KEY_ALIASES: Record<string, string> = {
+  tab: "Tab",
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  "=": "Equal",
+  equal: "Equal",
+  plus: "Equal",
+  "-": "Minus",
+  minus: "Minus",
+  "`": "Backquote",
+  "~": "Backquote",
+  backquote: "Backquote",
+  pageup: "PageUp",
+  pagedown: "PageDown",
+  home: "Home",
+  end: "End",
+  insert: "Insert",
+  delete: "Delete",
+  space: "Space",
+  enter: "Enter",
+  ",": "Comma",
+  ".": "Period",
+  "/": "Slash",
+  "\\": "Backslash",
+  "[": "BracketLeft",
+  "]": "BracketRight",
+  ";": "Semicolon",
+  "'": "Quote",
+};
+
+/** "Shift+Alt+Plus" → "alt+shift+Equal"; modifiers in a fixed order, key as a KeyboardEvent.code. */
+function parseChord(text: string): { chord?: string; error?: string } {
+  const parts = text.toLowerCase().split("+").map((p) => p.trim());
+  // "ctrl++" means ctrl and the "+" key, which sits on Equal.
+  if (text.trim().endsWith("++")) parts.splice(parts.length - 2, 2, "plus");
+  const mods = new Set<string>();
+  let code: string | undefined;
+  for (const part of parts) {
+    if (part === "ctrl" || part === "control") mods.add("ctrl");
+    else if (part === "alt") mods.add("alt");
+    else if (part === "shift") mods.add("shift");
+    else if (code) return { error: `"${text}" has more than one key` };
+    else {
+      code = keyCode(part);
+      if (!code) return { error: `unknown key "${part}" in "${text}"` };
+    }
+  }
+  if (!code) return { error: `"${text}" has no key` };
+  if (!mods.has("ctrl") && !mods.has("alt") && !/^F\d+$/.test(code)) {
+    return { error: `"${text}" needs ctrl or alt (only F-keys work alone)` };
+  }
+  return { chord: [...["ctrl", "alt", "shift"].filter((m) => mods.has(m)), code].join("+") };
+}
+
+function keyCode(name: string): string | undefined {
+  if (/^[a-z]$/.test(name)) return `Key${name.toUpperCase()}`;
+  if (/^[0-9]$/.test(name)) return `Digit${name}`;
+  if (/^f([1-9]|1[0-9]|2[0-4])$/.test(name)) return name.toUpperCase();
+  return KEY_ALIASES[name];
 }

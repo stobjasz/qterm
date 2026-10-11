@@ -1,0 +1,44 @@
+# qterm settings. Changes apply as soon as you save this file.
+# If a value is invalid, qterm keeps the previous settings and shows the error.
+
+# The key that shows and hides the console: one key, no modifiers.
+# "Backquote" (or "~") is the key left of 1. Other good choices: "ScrollLock",
+# "Pause", "F13" - "F24". (F12 can't be used: Windows reserves it.) The tray
+# menu can switch the hotkey off when you need to type that key in another app.
+hotkey = "Backquote"
+
+# Console size as a share of the monitor's work area. Width is centered.
+height = 0.5   # 0.1 - 1.0
+width = 1.0    # 0.2 - 1.0
+
+# Which monitor the console drops onto: "cursor" (where the mouse is) or "primary".
+monitor = "cursor"
+
+# Background opacity, 0.0 (clear) - 1.0 (solid).
+opacity = 0.82
+
+# Slide animation in milliseconds, 0 - 1000 (0 = no animation).
+slide_ms = 150
+
+# Hide the console when you click into another window.
+hide_on_blur = false
+
+# Profile for new tabs: "pwsh", "powershell", "cmd", "git-bash" or "wsl:<distro>".
+# Empty means the first one found (PowerShell 7 if installed).
+default_profile = ""
+
+[font]
+family = '"Cascadia Mono", "Cascadia Code", Consolas, monospace'
+size = 14   # 6 - 72
+
+# Override shortcuts as  action = "ctrl+shift+t"  ("" unbinds it).
+# Modifiers: ctrl, alt, shift. Keys: a-z, 0-9, f1-f24, tab, left, right, up,
+# down, "=", "-", "`", pageup, pagedown, home, end, insert, delete, space, enter.
+# Actions and defaults:
+#   new_tab      = "ctrl+shift+t"     split_right  = "alt+shift+="
+#   close_pane   = "ctrl+shift+w"     split_down   = "alt+shift+-"
+#   next_tab     = "ctrl+tab"         equalize     = "alt+shift+0"
+#   prev_tab     = "ctrl+shift+tab"   focus_left   = "alt+left"    (also _right/_up/_down)
+#                                     resize_left  = "alt+shift+left"  (also _right/_up/_down)
+# Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
+[keybindings]

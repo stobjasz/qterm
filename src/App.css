@@ -216,6 +216,22 @@ body,
   background: rgba(255, 255, 255, 0.08);
 }
 
+.settings-errors {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid #e06c75;
+  border-radius: 3px;
+  color: #f2d5d8;
+  background: rgba(224, 108, 117, 0.15);
+  font: 12px/1.5 system-ui, sans-serif;
+}
+
+.settings-errors ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
 .menu kbd {
   color: var(--tab-fg);
   font: inherit;

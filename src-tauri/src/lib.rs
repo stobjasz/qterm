@@ -1,50 +1,78 @@
 mod commands;
+mod config;
+mod hotkey;
 mod pty;
 mod tray;
 mod window;
 
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri_plugin_global_shortcut::ShortcutState;
+
+use config::{ConfigState, Reload};
 
 /// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
 
+/// Keeps the config file watcher alive for the app's lifetime.
+struct ConfigWatcher(#[allow(dead_code)] Mutex<Option<notify::RecommendedWatcher>>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Code::Backquote is the physical key left of `1` on any layout.
-    let toggle_key = Shortcut::new(Some(Modifiers::CONTROL), Code::Backquote);
-
     tauri::Builder::default()
         // Must be registered first: a second launch only toggles the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::toggle(app)))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
-                    if event.state == ShortcutState::Pressed && *shortcut == toggle_key {
+                .with_handler(|app, shortcut, event| {
+                    if event.state == ShortcutState::Pressed && hotkey::is_console_key(app, shortcut) {
                         window::toggle(app);
                     }
                 })
                 .build(),
         )
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .arg(BACKGROUND_ARG)
-                .build(),
-        )
+        .plugin(tauri_plugin_autostart::Builder::new().arg(BACKGROUND_ARG).build())
         .plugin(tauri_plugin_opener::init())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
-        .setup(move |app| {
-            // Another app may already own the combo; the tray still works without it.
-            if let Err(e) = app.global_shortcut().register(toggle_key) {
-                eprintln!("qterm: could not register Ctrl+`: {e}");
+        .manage(hotkey::HotkeyState::default())
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir()?;
+            let config = ConfigState::load(&config_dir);
+            if let Some(error) = config.snapshot().error {
+                eprintln!("qterm: {error}");
+            }
+            let config_path = config.path().to_owned();
+            app.manage(config);
+
+            // Another app may already own the key; the tray says so and still toggles.
+            if let Err(e) = hotkey::apply(app.handle()) {
+                eprintln!("qterm: could not register the hotkey: {e}");
             }
             tray::create(app.handle())?;
+
+            let handle = app.handle().clone();
+            let watcher = config::watch(config_path, move || on_config_file_changed(&handle))
+                .inspect_err(|e| eprintln!("qterm: settings will not reload live: {e}"))
+                .ok();
+            app.manage(ConfigWatcher(Mutex::new(watcher)));
+
             if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
                 window::toggle(app.handle());
             }
             Ok(())
         })
+        .on_window_event(|win, event| {
+            if let WindowEvent::Focused(false) = event {
+                let app = win.app_handle();
+                if app.state::<ConfigState>().get().hide_on_blur {
+                    window::dismiss(app);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            commands::get_config,
             commands::list_profiles,
             commands::pty_spawn,
             commands::pty_write,
@@ -54,4 +82,26 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn on_config_file_changed(app: &AppHandle) {
+    let state = app.state::<ConfigState>();
+    match state.reload() {
+        Reload::Unchanged => return,
+        Reload::Invalid => eprintln!("qterm: {}", state.snapshot().error.unwrap_or_default()),
+        Reload::ErrorCleared => {}
+        Reload::Changed(old) => {
+            let new = state.get();
+            if new.hotkey != old.hotkey {
+                if let Err(e) = hotkey::apply(app) {
+                    eprintln!("qterm: could not register the hotkey: {e}");
+                }
+                tray::refresh(app);
+            }
+            if (new.height, new.width, new.monitor) != (old.height, old.width, old.monitor) {
+                window::replace(app);
+            }
+        }
+    }
+    let _ = app.emit_to(window::LABEL, "config-changed", state.snapshot());
 }

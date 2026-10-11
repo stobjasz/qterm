@@ -9,6 +9,27 @@ export interface Profile {
   name: string;
 }
 
+/** Mirrors config.toml (see src-tauri/src/config/default.toml), in camelCase. */
+export interface Config {
+  hotkey: string;
+  height: number;
+  width: number;
+  monitor: "cursor" | "primary";
+  opacity: number;
+  slideMs: number;
+  hideOnBlur: boolean;
+  defaultProfile: string;
+  font: { family: string; size: number };
+  keybindings: Record<string, string>;
+}
+
+/** The config in effect, plus why the file on disk was rejected if it was. */
+export interface ConfigSnapshot {
+  config: Config;
+  error: string | null;
+  path: string;
+}
+
 export interface PtyExit {
   id: SessionId;
   code: number;
@@ -17,6 +38,14 @@ export interface PtyExit {
 export interface QuakeVisibility {
   visible: boolean;
   slideMs: number;
+}
+
+export function getConfig(): Promise<ConfigSnapshot> {
+  return invoke("get_config");
+}
+
+export function onConfigChanged(handler: (snapshot: ConfigSnapshot) => void): Promise<UnlistenFn> {
+  return listen<ConfigSnapshot>("config-changed", (event) => handler(event.payload));
 }
 
 export function listProfiles(): Promise<Profile[]> {

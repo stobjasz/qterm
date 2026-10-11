@@ -7,7 +7,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 import { onPtyExit, ptyKill, ptyResize, ptySpawn, ptyWrite, type SessionId } from "../ipc";
-import { keyInput, resolveKey, type Command } from "../keybindings";
+import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
 import { terminalOptions } from "./theme";
 
@@ -29,8 +29,15 @@ interface Entry {
   resizeTimer?: number;
 }
 
+export interface FontSettings {
+  family: string;
+  size: number;
+}
+
 export class TerminalRegistry {
   private entries = new Map<PaneId, Entry>();
+  private keymap: Keymap = buildKeymap();
+  private font: FontSettings = { family: terminalOptions.fontFamily!, size: terminalOptions.fontSize! };
 
   constructor(private events: RegistryEvents) {
     void onPtyExit(({ id, code }) => {
@@ -76,10 +83,26 @@ export class TerminalRegistry {
     for (const paneId of [...this.entries.keys()]) this.dispose(paneId);
   }
 
+  setKeymap(keymap: Keymap): void {
+    this.keymap = keymap;
+  }
+
+  /** Applies to open terminals (re-fitting them) and to terminals created later. */
+  setFont(font: FontSettings): void {
+    if (font.family === this.font.family && font.size === this.font.size) return;
+    this.font = font;
+    for (const [paneId, entry] of this.entries) {
+      entry.term.options.fontFamily = font.family;
+      entry.term.options.fontSize = font.size;
+      this.fit(paneId);
+    }
+  }
+
   private create(paneId: PaneId, profileId: string): Entry {
     const wrapper = document.createElement("div");
     wrapper.className = "terminal-wrapper";
-    const entry: Entry = { term: new Terminal(terminalOptions), fit: new FitAddon(), wrapper, profileId, opened: false };
+    const term = new Terminal({ ...terminalOptions, fontFamily: this.font.family, fontSize: this.font.size });
+    const entry: Entry = { term, fit: new FitAddon(), wrapper, profileId, opened: false };
     this.entries.set(paneId, entry);
     return entry;
   }
@@ -94,7 +117,7 @@ export class TerminalRegistry {
     if (entry.wrapper.clientWidth > 0) fit.fit();
 
     term.attachCustomKeyEventHandler((e) => {
-      const command = resolveKey(keyInput(e));
+      const command = resolveKey(keyInput(e), this.keymap);
       if (!command) return true;
       e.preventDefault(); // e.g. keep Ctrl+Tab from moving DOM focus
       if (e.type === "keydown") this.events.onCommand(paneId, command);

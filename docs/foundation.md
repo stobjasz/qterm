@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M3 done; M4 (config) next (see §11–13). Date: 2026-10-11.
+Status: M0–M4 done; M5 (hardening) next (see §11–14). Date: 2026-10-11.
 
 ---
 
@@ -111,6 +111,10 @@ One main window, created hidden at startup:
   wallpaper), so it doesn't meet the "semi-transparent" look.
 
 ### 4.3 Hotkey (`hotkey/`)
+
+> **Superseded in M4 (§14):** by request, the console key is a single bare key
+> (default `~`), registered with `RegisterHotKey`, plus a tray switch to turn it off
+> when you need to type that key elsewhere. The table below is the original plan.
 Two backends behind one trait:
 
 | Mode | Mechanism | Trade-off |
@@ -386,3 +390,37 @@ Lessons:
 - **Fix:** xterm 6 leaves its legacy `.xterm-viewport` (`overflow-y: scroll`) under the
   themed scrollbar layer. A see-through terminal shows its native scrollbar, so it's
   hidden with `scrollbar-width: none`.
+
+## 14. M4 results (2026-10-11)
+
+- **Settings file:** `%APPDATA%\dev.qterm.app\config.toml` (Tauri's app config dir).
+  I chose TOML over the JSON in §4.5 so the file written on first run can carry a comment
+  for every option. Parsing uses `deny_unknown_fields` (typos are reported, not ignored)
+  plus range checks. A unit test asserts the commented default file parses to exactly
+  `Config::default()`.
+- **Hot reload:** `notify` watches the directory (editors save by replacing the file) and
+  reloads after 150 ms of quiet. An invalid file never replaces the last good config: the
+  UI shows a "Settings problem" banner until it's fixed. Changes to the hotkey re-register
+  it, changes to height/width/monitor re-place a visible console, and everything else is
+  pushed to the UI as `config-changed`.
+- **Hotkey:** one bare key, default `Backquote` (the `~` key left of 1). Modifiers are
+  rejected by design. `RegisterHotKey` matches modifiers exactly, so Shift+that key still
+  types `~` everywhere; only the bare key is taken. Tray: **"Hotkey ~"** checkbox switches
+  it off/on (not persisted, so it's on again after a restart). The tooltip says whether the
+  key is on, off, or taken by another app. F12 is rejected because Windows reserves it for
+  the debugger (found by probing, see below).
+- **Window:** `height`, `width` (centered), `monitor = cursor|primary`, `slide_ms`,
+  `hide_on_blur`.
+- **UI:** `opacity`, `font.family/size` (applied to open terminals, which re-fit),
+  `default_profile` (an unknown id is reported with the valid ones), and `[keybindings]`
+  overrides by action name. Overrides are parsed and checked in TS: unknown actions or
+  keys, chords without Ctrl/Alt (F-keys excepted), and clashes are reported, and the
+  affected action keeps its default.
+- **Verified:** `smoke.ps1` presses the bare `~`, but only after checking qterm owns the
+  key (otherwise the press would type into another app). The config was edited live while
+  observing over CDP: opacity, a `new_tab = "ctrl+t"` override, an out-of-range banner,
+  a bad keybinding banner, font 14 → 22 (screenshots), and height 0.5 → 0.4 (window
+  720 → 576 px). Key-ownership probes confirmed the registration moves when `hotkey`
+  changes.
+- **Not verified:** clicking the tray "Hotkey ~" item. It can't be automated here, but it
+  runs the same unregister/register path that was checked.

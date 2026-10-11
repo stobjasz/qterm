@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { hideWindow, listProfiles, onQuakeVisibility, type Profile } from "./ipc";
-import type { Command } from "./keybindings";
+import {
+  getConfig,
+  hideWindow,
+  listProfiles,
+  onConfigChanged,
+  onQuakeVisibility,
+  type ConfigSnapshot,
+  type Profile,
+} from "./ipc";
+import { buildKeymap, type Command } from "./keybindings";
 import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
 import { TerminalRegistry, type RegistryEvents } from "./terminal/registry";
@@ -28,6 +36,7 @@ import {
 } from "./workspace/workspace";
 
 const DEFAULT_SLIDE_MS = 150;
+const DEFAULT_OPACITY = 0.82;
 /** Share of the split one Alt+Shift+Arrow press moves a divider. */
 const RESIZE_STEP = 0.05;
 
@@ -38,6 +47,8 @@ export default function App() {
   const [shown, setShown] = useState(false);
   const [slideMs, setSlideMs] = useState(DEFAULT_SLIDE_MS);
   const [profiles, setProfiles] = useState<Profile[]>();
+  const [settings, setSettings] = useState<ConfigSnapshot>();
+  const config = settings?.config;
   const [workspace, setWorkspace] = useState(emptyWorkspace);
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -53,24 +64,39 @@ export default function App() {
       }),
   );
 
+  const keymap = useMemo(() => buildKeymap(config?.keybindings), [config?.keybindings]);
+  useEffect(() => registry.setKeymap(keymap), [registry, keymap]);
+  useEffect(() => {
+    if (config) registry.setFont(config.font);
+  }, [registry, config]);
+
+  const defaultProfile = profiles?.find((p) => p.id === config?.defaultProfile) ?? profiles?.[0];
+  const errors = [
+    settings?.error,
+    ...keymap.errors,
+    config?.defaultProfile && profiles && !profiles.some((p) => p.id === config.defaultProfile)
+      ? `default_profile = "${config.defaultProfile}" is not one of: ${profiles.map((p) => p.id).join(", ")}`
+      : undefined,
+  ].filter((e): e is string => Boolean(e));
+
   const newTab = useCallback(
     (profileId?: string) => {
-      const profile = profileId ? profiles?.find((p) => p.id === profileId) : profiles?.[0];
+      const profile = profileId ? profiles?.find((p) => p.id === profileId) : defaultProfile;
       if (!profile) return;
       setWorkspace((ws) => openTab(ws, { tab: nextId("tab"), pane: nextId("pane") }, profile));
     },
-    [profiles],
+    [profiles, defaultProfile],
   );
 
   // The new pane runs the same profile as the one being split (a WSL pane splits into WSL).
   const split = useCallback(
     (paneId: PaneId, dir: SplitDir) => {
       const source = workspaceRef.current.panes[paneId];
-      const profile = profiles?.find((p) => p.id === source?.profileId) ?? profiles?.[0];
+      const profile = profiles?.find((p) => p.id === source?.profileId) ?? defaultProfile;
       if (!profile) return;
       setWorkspace((ws) => splitPane(ws, paneId, dir, nextId("pane"), profile));
     },
-    [profiles],
+    [profiles, defaultProfile],
   );
 
   const closePaneById = useCallback(
@@ -127,6 +153,8 @@ export default function App() {
 
   useEffect(() => {
     void listProfiles().then(setProfiles);
+    void getConfig().then(setSettings);
+    const unlistenConfig = onConfigChanged(setSettings);
     const unlisten = onQuakeVisibility(({ visible, slideMs }) => {
       setSlideMs(slideMs);
       setShown(visible);
@@ -140,6 +168,7 @@ export default function App() {
     window.addEventListener("beforeunload", disposeAll);
     return () => {
       void unlisten.then((fn) => fn());
+      void unlistenConfig.then((fn) => fn());
       window.removeEventListener("beforeunload", disposeAll);
     };
   }, [registry]);
@@ -152,10 +181,10 @@ export default function App() {
       hadTabs.current = true;
       return;
     }
-    if (!profiles) return;
+    if (!profiles || !settings) return;
     newTab();
     if (hadTabs.current) void hideWindow();
-  }, [workspace.tabs.length, profiles, newTab]);
+  }, [workspace.tabs.length, profiles, settings, newTab]);
 
   const focusedPane = activeTab(workspace)?.focusedPane;
   useEffect(() => {
@@ -163,7 +192,15 @@ export default function App() {
   }, [registry, shown, focusedPane]);
 
   return (
-    <div className={`console${shown ? " shown" : ""}`} style={{ "--slide-ms": `${slideMs}ms` } as CSSProperties}>
+    <div
+      className={`console${shown ? " shown" : ""}`}
+      style={
+        {
+          "--slide-ms": `${slideMs}ms`,
+          "--console-bg": `rgba(14, 16, 22, ${config?.opacity ?? DEFAULT_OPACITY})`,
+        } as CSSProperties
+      }
+    >
       <div className="tab-panels">
         {workspace.tabs.map((tab) => (
           <div key={tab.id} className="tab-panel" role="tabpanel" hidden={tab.id !== workspace.activeTab}>
@@ -180,6 +217,16 @@ export default function App() {
           </div>
         ))}
       </div>
+      {errors.length > 0 && (
+        <div className="settings-errors" role="alert">
+          <strong>Settings problem</strong> (previous values stay in effect until it is fixed):
+          <ul>
+            {errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <TabBar
         workspace={workspace}
         profiles={profiles ?? []}

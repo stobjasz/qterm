@@ -1,10 +1,13 @@
 <#
 .SYNOPSIS
   Win32 smoke checks for the things a DOM test can't see: is the quake window
-  on screen, where, and does the global hotkey toggle it.
+  on screen, where, and does the global hotkey (the bare ~ key) toggle it.
+
+  Before pressing the key it checks that qterm owns it: if it didn't, a
+  simulated key press would type into whatever window has focus.
 
 .EXAMPLE
-  pwsh scripts/smoke.ps1            # report state, then hide/show via Ctrl+`
+  pwsh scripts/smoke.ps1            # report state, then hide/show via the ~ key
   pwsh scripts/smoke.ps1 -StateOnly # just report
   pwsh scripts/smoke.ps1 -Show      # bring the console up (e.g. before a CDP check)
 #>
@@ -27,6 +30,17 @@ public static class QtermWin32 {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
+    [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
+
+    const byte VK_OEM_3 = 0xC0, SC_OEM_3 = 0x29; const uint KEYUP = 2, MOD_NOREPEAT = 0x4000;
+
+    // If we can register the bare ~ key ourselves, qterm does not own it.
+    public static bool QtermOwnsTilde() {
+        if (!RegisterHotKey(IntPtr.Zero, 0x5154, MOD_NOREPEAT, VK_OEM_3)) return true;
+        UnregisterHotKey(IntPtr.Zero, 0x5154);
+        return false;
+    }
 
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -41,12 +55,9 @@ public static class QtermWin32 {
         return found;
     }
 
-    public static void PressCtrlBacktick() {
-        const byte VK_CONTROL = 0x11, VK_OEM_3 = 0xC0, SC_OEM_3 = 0x29; const uint UP = 2;
-        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+    public static void PressTilde() {
         keybd_event(VK_OEM_3, SC_OEM_3, 0, UIntPtr.Zero);
-        keybd_event(VK_OEM_3, SC_OEM_3, UP, UIntPtr.Zero);
-        keybd_event(VK_CONTROL, 0, UP, UIntPtr.Zero);
+        keybd_event(VK_OEM_3, SC_OEM_3, KEYUP, UIntPtr.Zero);
     }
 }
 '@
@@ -68,7 +79,10 @@ function Get-QuakeState {
 }
 
 function Invoke-Hotkey {
-    [QtermWin32]::PressCtrlBacktick()
+    if (-not [QtermWin32]::QtermOwnsTilde()) {
+        throw 'qterm does not own the ~ key (hotkey off, changed in config.toml, or taken); not pressing it'
+    }
+    [QtermWin32]::PressTilde()
     Start-Sleep -Milliseconds 400 # slide is 150 ms; leave room for the hide timer
     Get-QuakeState
 }

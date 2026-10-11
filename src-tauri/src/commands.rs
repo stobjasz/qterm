@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::ipc::{Channel, Response};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::config::{ConfigState, Snapshot};
 use crate::pty::{Profile, SessionId, SessionManager};
 use crate::window;
 
@@ -12,6 +13,11 @@ use crate::window;
 struct PtyExit {
     id: SessionId,
     code: u32,
+}
+
+#[tauri::command]
+pub fn get_config(config: State<'_, ConfigState>) -> Snapshot {
+    config.snapshot()
 }
 
 /// Async so the first call, which detects profiles, runs off the main thread.
