@@ -22,6 +22,8 @@ const config: Config = {
   editor: "code --goto {file}:{line}:{col}",
   font: { family: "Cascadia Mono", size: 14 },
   keybindings: {},
+  profiles: [],
+  layouts: [],
 };
 
 describe("settings draft", () => {

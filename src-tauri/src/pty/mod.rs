@@ -8,7 +8,7 @@ pub mod conpty;
 mod flow;
 mod profiles;
 
-pub use profiles::Profile;
+pub use profiles::{merge as merge_profiles, split_command, Profile};
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -63,20 +63,20 @@ pub struct SessionManager {
 
 impl SessionManager {
     /// Detected on first use: listing WSL distros runs `wsl.exe`, which takes a moment.
-    pub fn profiles(&self) -> &[Profile] {
+    pub fn detected_profiles(&self) -> &[Profile] {
         self.profiles.get_or_init(profiles::detect)
     }
 
-    /// Starts the requested profile, or the default (first) one, with shell
+    /// Starts the requested profile from `profiles` (or the first one), with shell
     /// integration when `integrate` is set.
     pub fn spawn_profile(
         &self,
         request: &SpawnRequest,
+        profiles: &[Profile],
         integrate: bool,
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
-        let profiles = self.profiles();
         let profile = match &request.profile_id {
             Some(id) => profiles.iter().find(|p| &p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
             None => profiles.first().ok_or("no shell profiles found")?,

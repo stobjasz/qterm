@@ -118,6 +118,8 @@ pub fn run() {
             commands::claude_hook_status,
             commands::install_claude_hook,
             commands::remove_claude_hook,
+            commands::save_layout,
+            commands::delete_layout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,10 +21,15 @@ pub fn get_config(config: State<'_, ConfigState>) -> Snapshot {
     config.snapshot()
 }
 
+/// Detected shells plus the [[profiles]] from the settings.
+fn all_profiles(sessions: &SessionManager, config: &ConfigState) -> Vec<Profile> {
+    crate::pty::merge_profiles(sessions.detected_profiles(), &config.get().profiles)
+}
+
 /// Async so the first call, which detects profiles, runs off the main thread.
 #[tauri::command]
-pub async fn list_profiles(sessions: State<'_, SessionManager>) -> Result<Vec<Profile>, String> {
-    Ok(sessions.profiles().to_vec())
+pub async fn list_profiles(sessions: State<'_, SessionManager>, config: State<'_, ConfigState>) -> Result<Vec<Profile>, String> {
+    Ok(all_profiles(&sessions, &config))
 }
 
 #[tauri::command]
@@ -37,6 +42,7 @@ pub async fn pty_spawn(
 ) -> Result<SessionId, String> {
     sessions.spawn_profile(
         &request,
+        &all_profiles(&sessions, &config),
         config.get().shell_integration,
         // Raw bytes reach the UI as an ArrayBuffer, with no JSON/base64 encoding.
         move |bytes| on_output.send(Response::new(bytes)).is_ok(),
@@ -211,4 +217,15 @@ pub fn remove_claude_hook() -> Result<crate::claude_hook::HookStatus, String> {
     let (settings, command) = hook_paths()?;
     crate::claude_hook::remove(&settings)?;
     crate::claude_hook::status(&settings, &command)
+}
+
+/// Saves (or replaces by name) a [[layouts]] entry in config.toml.
+#[tauri::command]
+pub fn save_layout(config: State<'_, ConfigState>, layout: serde_json::Value) -> Result<(), String> {
+    config.save_layout(&layout)
+}
+
+#[tauri::command]
+pub fn delete_layout(config: State<'_, ConfigState>, name: String) -> Result<(), String> {
+    config.delete_layout(&name)
 }

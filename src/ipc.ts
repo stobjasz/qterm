@@ -2,11 +2,27 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import type { LayoutDef } from "./workspace/layouts";
+
 export type SessionId = number;
 
 export interface Profile {
   id: string;
   name: string;
+  /** Custom profiles may bring their own look. */
+  theme?: string;
+  fontSize?: number;
+}
+
+/** A [[profiles]] entry as written in config.toml. */
+export interface CustomProfile {
+  id: string | null;
+  name: string;
+  command: string;
+  cwd: string | null;
+  env: Record<string, string>;
+  theme: string | null;
+  fontSize: number | null;
 }
 
 /** Mirrors config.toml (see src-tauri/src/config/default.toml), in camelCase. */
@@ -29,6 +45,8 @@ export interface Config {
   editor: string;
   font: { family: string; size: number };
   keybindings: Record<string, string>;
+  profiles: CustomProfile[];
+  layouts: LayoutDef[];
 }
 
 /** The config in effect, plus why the file on disk was rejected if it was. */
@@ -221,6 +239,15 @@ export function installClaudeHook(): Promise<HookStatus> {
 
 export function removeClaudeHook(): Promise<HookStatus> {
   return invoke("remove_claude_hook");
+}
+
+/** Saves (or replaces by name) a [[layouts]] entry. */
+export function saveLayout(layout: LayoutDef): Promise<void> {
+  return invoke("save_layout", { layout });
+}
+
+export function deleteLayout(name: string): Promise<void> {
+  return invoke("delete_layout", { name });
 }
 
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {

@@ -10,6 +10,8 @@ use base64::Engine;
 use portable_pty::CommandBuilder;
 use serde::Serialize;
 
+use crate::config::CustomProfile;
+
 /// Keeps `wsl.exe -l` from flashing a console window in release (GUI-subsystem) builds.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -21,6 +23,8 @@ enum Kind {
     Cmd,
     Bash,
     Wsl,
+    /// Anything else (ssh, python, ...): started as is, no shell integration.
+    Other,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -34,6 +38,16 @@ pub struct Profile {
     args: Vec<String>,
     #[serde(skip)]
     kind: Kind,
+    /// Start here unless the pane asks for another folder (custom profiles).
+    #[serde(skip)]
+    cwd: Option<String>,
+    #[serde(skip)]
+    env: Vec<(String, String)>,
+    /// Per-profile look (custom profiles), applied by the UI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f64>,
 }
 
 /// Shell integration for PowerShell: wraps whatever prompt the user's profile set up
@@ -59,6 +73,38 @@ impl Profile {
             program: program.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
             kind,
+            cwd: None,
+            env: Vec::new(),
+            theme: None,
+            font_size: None,
+        }
+    }
+
+    /// A [[profiles]] entry. Its kind follows the program, so `pwsh ...` still gets
+    /// shell integration while `ssh ...` is left alone.
+    pub fn custom(def: &CustomProfile) -> Self {
+        let mut words = split_command(&def.command).into_iter();
+        let program = words.next().unwrap_or_default();
+        let stem = Path::new(&program)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let kind = match stem.as_str() {
+            "pwsh" | "powershell" => Kind::PowerShell,
+            "cmd" => Kind::Cmd,
+            "bash" => Kind::Bash,
+            _ => Kind::Other,
+        };
+        Self {
+            id: def.id(),
+            name: def.name.clone(),
+            program: program.into(),
+            args: words.collect(),
+            kind,
+            cwd: def.cwd.clone(),
+            env: def.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            theme: def.theme.clone(),
+            font_size: def.font_size,
         }
     }
 
@@ -67,6 +113,10 @@ impl Profile {
     pub fn command(&self, cwd: Option<&str>, integrate: bool) -> CommandBuilder {
         let mut cmd = CommandBuilder::new(&self.program);
         let mut args = self.args.clone();
+        let cwd = cwd.or(self.cwd.as_deref());
+        for (key, value) in &self.env {
+            cmd.env(key, value);
+        }
 
         if self.kind == Kind::Wsl {
             // WSL takes its folder as the `--cd` argument and speaks Linux paths.
@@ -98,12 +148,56 @@ impl Profile {
                 }
                 Kind::Bash => cmd.env("PROMPT_COMMAND", BASH_INTEGRATION),
                 // Environment variables don't cross into WSL without WSLENV; not wired yet.
-                Kind::Wsl => {}
+                Kind::Wsl | Kind::Other => {}
             }
         }
         cmd.args(&args);
         cmd
     }
+}
+
+/// Detected profiles plus the user's [[profiles]]. A custom profile with a detected
+/// id ("pwsh") replaces that one in place; the rest are added after.
+pub fn merge(detected: &[Profile], custom: &[CustomProfile]) -> Vec<Profile> {
+    let mut all: Vec<Profile> = detected.to_vec();
+    for def in custom {
+        let profile = Profile::custom(def);
+        match all.iter_mut().find(|p| p.id == profile.id) {
+            Some(existing) => *existing = profile,
+            None => all.push(profile),
+        }
+    }
+    all
+}
+
+/// "pwsh -NoExit -Command \"npm run dev\"" → [pwsh, -NoExit, -Command, npm run dev].
+/// Double quotes group words; there is no other escaping.
+pub fn split_command(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let (mut quoted, mut started) = (false, false);
+    for ch in command.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// Git Bash reports "/c/Users/me"; Windows wants "C:\Users\me". Other paths pass through.
@@ -248,6 +342,56 @@ mod tests {
         let cmd = Profile::new("cmd", "cmd", "cmd.exe", &[], Kind::Cmd).command(None, true);
         let prompt = cmd.get_env("PROMPT").unwrap().to_string_lossy().into_owned();
         assert!(prompt.starts_with("$e]9;9;$P$e\\"), "{prompt}");
+    }
+
+    #[test]
+    fn splits_command_lines_with_quotes() {
+        assert_eq!(split_command(r#"pwsh -NoExit -Command "npm run dev""#), ["pwsh", "-NoExit", "-Command", "npm run dev"]);
+        assert_eq!(split_command(r#""C:\Program Files\Git\bin\bash.exe" --login"#), [r"C:\Program Files\Git\bin\bash.exe", "--login"]);
+        assert_eq!(split_command("  ssh   me@host  "), ["ssh", "me@host"]);
+        assert_eq!(split_command(r#"echo """#), ["echo", ""]);
+        assert!(split_command("   ").is_empty());
+    }
+
+    #[test]
+    fn custom_profiles_start_in_their_folder_with_their_environment() {
+        let def = CustomProfile {
+            id: None,
+            name: "API".into(),
+            command: r#"pwsh -NoExit -Command "npm run dev""#.into(),
+            cwd: std::env::var("SystemRoot").ok(),
+            env: [("NODE_ENV".to_string(), "development".to_string())].into(),
+            theme: Some("nord".into()),
+            font_size: None,
+        };
+        let profile = Profile::custom(&def);
+        assert_eq!(profile.id, "custom:API");
+        assert_eq!(profile.kind, Kind::PowerShell, "pwsh keeps shell integration");
+        let cmd = profile.command(None, false);
+        assert_eq!(argv(&cmd), ["pwsh", "-NoExit", "-Command", "npm run dev"]);
+        assert_eq!(cmd.get_cwd().unwrap(), &OsString::from(std::env::var("SystemRoot").unwrap()));
+        assert_eq!(cmd.get_env("NODE_ENV").unwrap(), "development");
+
+        let ssh = CustomProfile { command: "ssh me@host".into(), ..def };
+        assert_eq!(Profile::custom(&ssh).kind, Kind::Other);
+    }
+
+    #[test]
+    fn custom_profiles_restyle_detected_ones_or_are_added() {
+        let detected = vec![Profile::new("pwsh", "PowerShell", "pwsh.exe", &[], Kind::PowerShell)];
+        let restyle = CustomProfile {
+            id: Some("pwsh".into()),
+            name: "PowerShell".into(),
+            command: "pwsh.exe -NoLogo".into(),
+            cwd: None,
+            env: Default::default(),
+            theme: Some("dracula".into()),
+            font_size: Some(13.0),
+        };
+        let extra = CustomProfile { id: None, name: "Box".into(), command: "ssh box".into(), theme: None, font_size: None, ..restyle.clone() };
+        let all = merge(&detected, &[restyle, extra]);
+        assert_eq!(all.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pwsh", "custom:Box"]);
+        assert_eq!(all[0].theme.as_deref(), Some("dracula"));
     }
 
     #[test]

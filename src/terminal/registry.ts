@@ -64,6 +64,9 @@ export interface PaneSpec {
   cwd?: string;
   /** Typed into the shell once it has started, e.g. "claude --resume <id>\r". */
   startupInput?: string;
+  /** The profile's own look, instead of the global theme / font size. */
+  theme?: Theme;
+  fontSize?: number;
 }
 
 export interface Behavior {
@@ -190,7 +193,7 @@ export class TerminalRegistry {
     this.font = font;
     for (const [paneId, entry] of this.entries) {
       entry.term.options.fontFamily = font.family;
-      entry.term.options.fontSize = font.size;
+      entry.term.options.fontSize = entry.spec.fontSize ?? font.size;
       this.fit(paneId);
     }
   }
@@ -198,7 +201,9 @@ export class TerminalRegistry {
   setTheme(theme: Theme): void {
     if (theme === this.theme) return;
     this.theme = theme;
-    for (const entry of this.entries.values()) entry.term.options.theme = xtermTheme(theme);
+    for (const entry of this.entries.values()) {
+      if (!entry.spec.theme) entry.term.options.theme = xtermTheme(theme);
+    }
   }
 
   setBehavior(behavior: Behavior): void {
@@ -259,8 +264,8 @@ export class TerminalRegistry {
     const term = new Terminal({
       ...terminalOptions,
       fontFamily: this.font.family,
-      fontSize: this.font.size,
-      theme: xtermTheme(this.theme),
+      fontSize: spec.fontSize ?? this.font.size,
+      theme: xtermTheme(spec.theme ?? this.theme),
     });
     const entry: Entry = {
       term,

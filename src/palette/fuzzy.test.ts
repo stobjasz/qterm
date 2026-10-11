@@ -13,6 +13,11 @@ describe("fuzzyMatch", () => {
     expect(fuzzyMatch("nt", "New tab")!.indices).toEqual([0, 4]);
   });
 
+  it("finds matches a greedy left-to-right choice would miss", () => {
+    expect(fuzzyMatch("layout test", "Layout: test-layout")).toBeDefined();
+    expect(fuzzyMatch("ttest", "Layout: test")).toBeDefined();
+  });
+
   it("matches everything with an empty query", () => {
     expect(fuzzyMatch("", "anything")).toEqual({ score: 0, indices: [] });
   });

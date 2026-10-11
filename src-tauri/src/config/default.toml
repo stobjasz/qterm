@@ -75,3 +75,33 @@ size = 14   # 6 - 72
 #   settings     = "ctrl+,"
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]
+
+# Your own shells, next to the detected ones (▾ menu, palette). Double quotes keep
+# spaces together in `command`. `theme` and `font_size` give its panes their own
+# look. An `id` of a detected profile ("pwsh", "cmd", ...) restyles that one.
+#
+# [[profiles]]
+# name = "API server"
+# command = 'pwsh -NoExit -Command "npm run dev"'
+# cwd = "C:/work/api"
+# env = { NODE_ENV = "development" }
+# theme = "dracula"
+# font_size = 13
+#
+# [[profiles]]
+# name = "Build box"
+# command = "ssh me@build-box"
+
+# Named layouts open as a new tab (▾ menu → Layouts, or the palette). A pane with
+# `panes` is a split: "row" side by side, "column" stacked. `profile` is an id or a
+# name; `command` is typed into the shell once it starts. "Save this tab as a
+# layout" in the ▾ menu writes one of these for you.
+#
+# [[layouts]]
+# name = "dev"
+# split = "row"
+# panes = [
+#   { profile = "API server" },
+#   { cwd = "C:/work/web", command = "npm start" },
+#   { split = "column", panes = [ {}, { profile = "wsl:Ubuntu" } ] },
+# ]

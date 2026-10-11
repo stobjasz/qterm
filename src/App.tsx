@@ -18,6 +18,8 @@ import {
   onConfigChanged,
   onOpenSettings,
   onQuakeVisibility,
+  deleteLayout,
+  saveLayout,
   openConfigFile,
   saveConfig,
   saveSession,
@@ -35,6 +37,7 @@ import { LayoutView } from "./terminal/LayoutView";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { SearchBar } from "./terminal/SearchBar";
 import { THEMES, themeOrDefault, withAlpha } from "./terminal/themes";
+import { buildLayout, findProfile, layoutFromTab, type LayoutDef, type LayoutPane } from "./workspace/layouts";
 import {
   activateIndex,
   activateTab,
@@ -47,6 +50,7 @@ import {
   moveFocus,
   moveTab,
   openTab,
+  openTabWith,
   paneIds,
   renameTab,
   resizeDivider,
@@ -138,6 +142,10 @@ export default function App() {
       ? `default_profile = "${config.defaultProfile}" is not one of: ${profiles.map((p) => p.id).join(", ")}`
       : undefined,
     config && !THEMES[config.theme] ? `theme = "${config.theme}" is not one of: ${Object.keys(THEMES).join(", ")}` : undefined,
+    ...(config?.profiles ?? [])
+      .filter((p) => p.theme && !THEMES[p.theme])
+      .map((p) => `profile "${p.name}": theme = "${p.theme}" is not one of: ${Object.keys(THEMES).join(", ")}`),
+    ...(config && profiles ? layoutProblems(config.layouts, profiles) : []),
   ].filter((e): e is string => Boolean(e));
 
   // --- workspace actions -------------------------------------------------------
@@ -194,10 +202,41 @@ export default function App() {
     [profiles, defaultProfile, newTab],
   );
 
-  const paneSpec = useCallback(
-    (pane: Pane): PaneSpec => ({ profileId: pane.profileId, cwd: pane.cwd, startupInput: startupInput.current.get(pane.id) }),
-    [],
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
+  const paneSpec = useCallback((pane: Pane): PaneSpec => {
+    const profile = profilesRef.current?.find((p) => p.id === pane.profileId);
+    return {
+      profileId: pane.profileId,
+      cwd: pane.cwd,
+      startupInput: startupInput.current.get(pane.id),
+      theme: profile?.theme ? THEMES[profile.theme] : undefined,
+      fontSize: profile?.fontSize,
+    };
+  }, []);
+
+  /** Opens a [[layouts]] entry as a new tab named after it; commands run once shells start. */
+  const openLayout = useCallback(
+    (def: LayoutDef) => {
+      if (!profiles || !defaultProfile) return;
+      const built = buildLayout(def, profiles, defaultProfile, () => nextId("pane"));
+      for (const [paneId, command] of built.commands) startupInput.current.set(paneId, `${command}\r`);
+      setWorkspace((ws) => openTabWith(ws, nextId("tab"), built.root, built.panes, def.name));
+    },
+    [profiles, defaultProfile],
   );
+
+  /** Saves the active tab as a layout named after it (made unique). */
+  const saveTabAsLayout = useCallback(() => {
+    const ws = workspaceRef.current;
+    const tab = activeTab(ws);
+    if (!tab) return;
+    const taken = new Set(config?.layouts.map((l) => l.name));
+    const base = tabTitle(ws, tab);
+    let name = base;
+    for (let i = 2; taken.has(name); i++) name = `${base} ${i}`;
+    void saveLayout(layoutFromTab(ws, tab, name));
+  }, [config]);
 
   const focusedPane = activeTab(workspace)?.focusedPane;
 
@@ -354,6 +393,13 @@ export default function App() {
         hint: name === config?.theme ? "current" : undefined,
         run: () => void saveConfig({ theme: name }),
       })),
+      ...(config?.layouts ?? []).map((layout) => ({
+        id: `layout:${layout.name}`,
+        group: "Layout",
+        label: layout.name,
+        run: () => openLayout(layout),
+      })),
+      { id: "layout:save", group: "Layout", label: "Save this tab as a layout", run: saveTabAsLayout },
       ...(config?.claudeSessions ? claudeSessions : []).map((session) => ({
         id: `claude:${session.id}`,
         group: "Resume Claude",
@@ -362,7 +408,7 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout]);
 
   const tabMarkers = useMemo(
     () =>
@@ -399,7 +445,11 @@ export default function App() {
     void getConfig().then(setSettings);
     void listClaudeSessions().then(setClaudeSessions);
     const listeners = [
-      onConfigChanged(setSettings),
+      // Custom profiles live in the settings too.
+      onConfigChanged((snapshot) => {
+        setSettings(snapshot);
+        void listProfiles().then(setProfiles);
+      }),
       onClaudeSessionsChanged(setClaudeSessions),
       onOpenSettings(() => setSettingsOpen(true)),
       onClaudeAttention((alert) => onAlert.current(alert)),
@@ -554,6 +604,10 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen((open) => !open)}
         attention={attentionTabs}
         markers={tabMarkers}
+        layouts={config?.layouts ?? []}
+        onOpenLayout={openLayout}
+        onSaveLayout={saveTabAsLayout}
+        onDeleteLayout={(name) => void deleteLayout(name)}
       />
       <HeightHandle />
     </div>
@@ -565,4 +619,17 @@ function without<K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> {
   const next = new Map(map);
   next.delete(key);
   return next;
+}
+
+/** Layout panes that name a profile that doesn't exist. */
+function layoutProblems(layouts: LayoutDef[], profiles: Profile[]): string[] {
+  const problems: string[] = [];
+  const visit = (layout: string, pane: LayoutPane) => {
+    if (pane.profile && !findProfile(profiles, pane.profile)) {
+      problems.push(`layout "${layout}": profile "${pane.profile}" not found (the default shell is used)`);
+    }
+    pane.panes?.forEach((child) => visit(layout, child));
+  };
+  layouts.forEach((layout) => visit(layout.name, layout));
+  return problems;
 }

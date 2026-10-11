@@ -1,5 +1,7 @@
 // Fuzzy matching for the command palette: every query letter must appear in
-// order; word starts and runs of consecutive letters score higher.
+// order; word starts and runs of consecutive letters score higher. The best
+// alignment is found by dynamic programming, so a greedy early choice can never
+// hide a match (e.g. "layout test" in "Layout: test-layout").
 
 export interface Match {
   score: number;
@@ -16,29 +18,44 @@ export function fuzzyMatch(query: string, text: string): Match | undefined {
   const q = query.toLowerCase().replace(/\s+/g, "");
   if (!q) return { score: 0, indices: [] };
   const t = text.toLowerCase();
-  const indices: number[] = [];
-  let score = 0;
-  let from = 0;
-  for (const ch of q) {
-    // Prefer the next occurrence at a word start (typing initials), else the next one.
-    let at = t.indexOf(ch, from);
-    for (let i = at; i >= 0; i = t.indexOf(ch, i + 1)) {
-      if (isWordStart(text, i)) {
-        at = i;
-        break;
+  const n = t.length;
+
+  // best[i][p]: best score with q[0..=i] matched and q[i] at text position p.
+  const best: Float64Array[] = [];
+  const from: Int32Array[] = [];
+  for (let i = 0; i < q.length; i++) {
+    const row = new Float64Array(n).fill(-Infinity);
+    const back = new Int32Array(n).fill(-1);
+    for (let p = i; p < n; p++) {
+      if (t[p] !== q[i]) continue;
+      const base = 1 + (isWordStart(text, p) ? WORD_START_BONUS : 0) + (p === 0 ? FIRST_LETTER_BONUS : 0);
+      if (i === 0) {
+        row[p] = base;
+        continue;
+      }
+      const previous = best[i - 1];
+      for (let k = i - 1; k < p; k++) {
+        if (previous[k] === -Infinity) continue;
+        const link = k === p - 1 ? CONSECUTIVE_BONUS : -(p - k - 1) * GAP_PENALTY;
+        const score = previous[k] + base + link;
+        if (score > row[p]) {
+          row[p] = score;
+          back[p] = k;
+        }
       }
     }
-    if (at < 0) return undefined;
-    const previous = indices[indices.length - 1];
-    score += 1;
-    if (isWordStart(text, at)) score += WORD_START_BONUS;
-    if (previous !== undefined && at === previous + 1) score += CONSECUTIVE_BONUS;
-    if (at === 0) score += FIRST_LETTER_BONUS;
-    if (previous !== undefined) score -= (at - previous - 1) * GAP_PENALTY;
-    indices.push(at);
-    from = at + 1;
+    best.push(row);
+    from.push(back);
   }
-  return { score, indices };
+
+  const last = best[q.length - 1];
+  let end = -1;
+  for (let p = 0; p < n; p++) if (last[p] > (end < 0 ? -Infinity : last[end])) end = p;
+  if (end < 0 || last[end] === -Infinity) return undefined;
+
+  const indices: number[] = [];
+  for (let i = q.length - 1, p = end; i >= 0; p = from[i][p], i--) indices.unshift(p);
+  return { score: last[end], indices };
 }
 
 /** Matching items, best first; with an empty query, all items in their order. */

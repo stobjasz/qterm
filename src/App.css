@@ -362,6 +362,28 @@ body,
   background: var(--hover-bg);
 }
 
+.menu-heading {
+  margin: 6px 10px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--console-edge);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+}
+
+.menu-row button[role="menuitem"] {
+  flex: 1;
+}
+
+.menu-secondary {
+  color: var(--tab-fg) !important;
+}
+
 .menu kbd {
   color: var(--tab-fg);
   font: inherit;

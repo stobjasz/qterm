@@ -67,6 +67,16 @@ export function openTab(
   return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes: withPane(ws.panes, ids.pane, profile, cwd) };
 }
 
+/** A new tab with a prepared layout (see layouts.ts), focused on its first pane. */
+export function openTabWith(ws: Workspace, tabId: TabId, root: LayoutNode, panes: Pane[], title?: string): Workspace {
+  const tab: Tab = { id: tabId, root, focusedPane: paneIds(root)[0], ...(title ? { title } : {}) };
+  return {
+    tabs: [...ws.tabs, tab],
+    activeTab: tabId,
+    panes: { ...ws.panes, ...Object.fromEntries(panes.map((p) => [p.id, p])) },
+  };
+}
+
 /** Splits `paneId` in `dir`, opening `profile` (in `cwd`) in the new pane and focusing it. */
 export function splitPane(
   ws: Workspace,

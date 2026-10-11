@@ -2,6 +2,7 @@ import { useRef, useState, type PointerEvent } from "react";
 
 import { ClaudeMenu } from "../claude/ClaudeMenu";
 import type { ClaudeAlert, ClaudeSession, Profile } from "../ipc";
+import type { LayoutDef } from "../workspace/layouts";
 import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
 import { Popup } from "./Popup";
 
@@ -27,6 +28,10 @@ interface Props {
   /** Tabs with a pane where Claude Code is waiting, and its latest message. */
   attention: ReadonlyMap<TabId, ClaudeAlert>;
   markers: ReadonlyMap<TabId, TabMarkers>;
+  layouts: LayoutDef[];
+  onOpenLayout(layout: LayoutDef): void;
+  onSaveLayout(): void;
+  onDeleteLayout(name: string): void;
 }
 
 export interface TabMarkers {
@@ -152,21 +157,50 @@ export function TabBar(props: Props) {
         +
       </button>
       <Popup label="Choose profile" icon="▾" menuLabel="Profiles">
-        {(close) =>
-          profiles.map((profile, i) => (
+        {(close) => (
+          <>
+            {profiles.map((profile, i) => (
+              <button
+                key={profile.id}
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  props.onNewTab(profile.id);
+                }}
+              >
+                <span>{profile.name}</span>
+                {i < 9 && <kbd>Ctrl+Shift+{i + 1}</kbd>}
+              </button>
+            ))}
+            <div className="menu-heading">Layouts</div>
+            {props.layouts.map((layout) => (
+              <div key={layout.name} className="menu-row">
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    close();
+                    props.onOpenLayout(layout);
+                  }}
+                >
+                  <span>{layout.name}</span>
+                </button>
+                <button className="tab-close" aria-label={`Delete layout ${layout.name}`} onClick={() => props.onDeleteLayout(layout.name)}>
+                  ×
+                </button>
+              </div>
+            ))}
             <button
-              key={profile.id}
               role="menuitem"
+              className="menu-secondary"
               onClick={() => {
                 close();
-                props.onNewTab(profile.id);
+                props.onSaveLayout();
               }}
             >
-              <span>{profile.name}</span>
-              {i < 9 && <kbd>Ctrl+Shift+{i + 1}</kbd>}
+              <span>Save this tab as a layout</span>
             </button>
-          ))
-        }
+          </>
+        )}
       </Popup>
       <div className="tabbar-spacer" />
       {claude && <ClaudeMenu {...claude} />}

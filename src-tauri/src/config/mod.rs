@@ -41,6 +41,86 @@ pub struct Config {
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
+    /// Extra shells next to the detected ones ([[profiles]]).
+    pub profiles: Vec<CustomProfile>,
+    /// Named tab layouts ([[layouts]]).
+    pub layouts: Vec<LayoutDef>,
+}
+
+/// A user-defined shell, e.g. an SSH host or `npm run dev` in a folder.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct CustomProfile {
+    /// Defaults to "custom:<name>". Reusing a detected id ("pwsh") restyles that shell.
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    /// Program and arguments; double quotes keep spaces together.
+    pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Look of this profile's panes, overriding the global settings.
+    #[serde(default)]
+    pub theme: Option<String>,
+    #[serde(default)]
+    pub font_size: Option<f64>,
+}
+
+impl CustomProfile {
+    pub fn id(&self) -> String {
+        self.id.clone().unwrap_or_else(|| format!("custom:{}", self.name))
+    }
+}
+
+/// A named arrangement of panes for a new tab: a pane (or split) with a name.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct LayoutDef {
+    pub name: String,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub split: Option<SplitDir>,
+    #[serde(default)]
+    pub panes: Vec<LayoutPane>,
+}
+
+impl LayoutDef {
+    pub fn root(&self) -> LayoutPane {
+        LayoutPane {
+            profile: self.profile.clone(),
+            cwd: self.cwd.clone(),
+            command: self.command.clone(),
+            split: self.split,
+            panes: self.panes.clone(),
+        }
+    }
+}
+
+/// One pane, or (with `panes`) a split of several, side by side ("row") or stacked.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct LayoutPane {
+    /// Profile id or name; the default profile when empty.
+    pub profile: Option<String>,
+    pub cwd: Option<String>,
+    /// Typed into the shell once it starts.
+    pub command: Option<String>,
+    pub split: Option<SplitDir>,
+    pub panes: Vec<LayoutPane>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDir {
+    Row,
+    Column,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -78,6 +158,8 @@ impl Default for Config {
             editor: "code --goto {file}:{line}:{col}".into(),
             font: Font::default(),
             keybindings: BTreeMap::new(),
+            profiles: Vec::new(),
+            layouts: Vec::new(),
         }
     }
 }
@@ -107,6 +189,31 @@ impl Config {
         in_range("opacity", self.opacity, 0.0, 1.0)?;
         in_range("slide_ms", self.slide_ms as f64, 0.0, 1000.0)?;
         in_range("font.size", self.font.size, 6.0, 72.0)?;
+        let mut ids = std::collections::BTreeSet::new();
+        for profile in &self.profiles {
+            if profile.name.trim().is_empty() {
+                return Err("[[profiles]] entries need a name".into());
+            }
+            if crate::pty::split_command(&profile.command).is_empty() {
+                return Err(format!("profile \"{}\" has an empty command", profile.name));
+            }
+            if !ids.insert(profile.id()) {
+                return Err(format!("two [[profiles]] share the id \"{}\"", profile.id()));
+            }
+            if let Some(size) = profile.font_size {
+                in_range(&format!("profile \"{}\" font_size", profile.name), size, 6.0, 72.0)?;
+            }
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for layout in &self.layouts {
+            if layout.name.trim().is_empty() {
+                return Err("[[layouts]] entries need a name".into());
+            }
+            if !names.insert(layout.name.as_str()) {
+                return Err(format!("two [[layouts]] are named \"{}\"", layout.name));
+            }
+            check_layout(&layout.name, &layout.root(), 0)?;
+        }
         if self.editor.trim().is_empty() {
             return Err("editor must not be empty (e.g. \"code --goto {file}:{line}:{col}\")".into());
         }
@@ -143,6 +250,18 @@ pub fn hotkey_label(shortcut: &Shortcut) -> String {
         Code::Backquote => "~".into(),
         key => format!("{key:?}"),
     }
+}
+
+/// Splits need a direction and nest at most a few levels.
+fn check_layout(name: &str, pane: &LayoutPane, depth: usize) -> Result<(), String> {
+    const MAX_DEPTH: usize = 6;
+    if depth > MAX_DEPTH {
+        return Err(format!("layout \"{name}\" nests splits deeper than {MAX_DEPTH} levels"));
+    }
+    if !pane.panes.is_empty() && pane.split.is_none() {
+        return Err(format!("layout \"{name}\": a pane with `panes` needs split = \"row\" or \"column\""));
+    }
+    pane.panes.iter().try_for_each(|child| check_layout(name, child, depth + 1))
 }
 
 fn in_range(name: &str, value: f64, min: f64, max: f64) -> Result<(), String> {
@@ -204,7 +323,7 @@ impl ConfigState {
                 if config == inner.0 {
                     if had_error { Reload::ErrorCleared } else { Reload::Unchanged }
                 } else {
-                    Reload::Changed(std::mem::replace(&mut inner.0, config))
+                    Reload::Changed(Box::new(std::mem::replace(&mut inner.0, config)))
                 }
             }
             Err(e) => {
@@ -292,11 +411,115 @@ fn set_value(table: &mut toml_edit::Table, key: &str, value: &serde_json::Value)
     Ok(())
 }
 
+impl ConfigState {
+    /// Adds a [[layouts]] entry, replacing one with the same name. `layout` is the UI's
+    /// layout JSON (name, split, panes, profile, cwd, command), written as TOML.
+    pub fn save_layout(&self, layout: &serde_json::Value) -> Result<(), String> {
+        let name = layout.get("name").and_then(|n| n.as_str()).ok_or("a layout needs a name")?.to_string();
+        self.edit_layouts(|layouts| {
+            let table = layout_table(layout)?;
+            match position(layouts, &name) {
+                Some(i) => *layouts.get_mut(i).expect("index from position") = table,
+                None => layouts.push(table),
+            }
+            Ok(())
+        })
+    }
+
+    pub fn delete_layout(&self, name: &str) -> Result<(), String> {
+        self.edit_layouts(|layouts| {
+            if let Some(i) = position(layouts, name) {
+                layouts.remove(i);
+            }
+            Ok(())
+        })
+    }
+
+    fn edit_layouts(&self, change: impl FnOnce(&mut toml_edit::ArrayOfTables) -> Result<(), String>) -> Result<(), String> {
+        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;
+        let item = doc.entry("layouts").or_insert(toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
+        let layouts = item.as_array_of_tables_mut().ok_or("`layouts` is not a list of [[layouts]] tables")?;
+        change(layouts)?;
+        if layouts.is_empty() {
+            doc.remove("layouts");
+        }
+        let updated = doc.to_string();
+        Config::parse(&updated)?;
+        crate::claude::write_atomically(&self.path, &updated)
+    }
+}
+
+fn position(layouts: &toml_edit::ArrayOfTables, name: &str) -> Option<usize> {
+    layouts.iter().position(|t| t.get("name").and_then(|n| n.as_str()) == Some(name))
+}
+
+/// The layout's top level becomes a [[layouts]] table; nested panes inline tables.
+fn layout_table(layout: &serde_json::Value) -> Result<toml_edit::Table, String> {
+    let object = layout.as_object().ok_or("a layout must be an object")?;
+    let mut table = toml_edit::Table::new();
+    for (key, value) in object {
+        if let Some(value) = toml_value(value)? {
+            table.insert(&snake(key), toml_edit::Item::Value(value));
+        }
+    }
+    Ok(table)
+}
+
+/// JSON → TOML value; nulls and empty lists are left out.
+fn toml_value(value: &serde_json::Value) -> Result<Option<toml_edit::Value>, String> {
+    use serde_json::Value as J;
+    Ok(match value {
+        J::Null => None,
+        J::Bool(b) => Some((*b).into()),
+        J::Number(n) => Some(match n.as_i64() {
+            Some(i) => i.into(),
+            None => n.as_f64().ok_or("number out of range")?.into(),
+        }),
+        J::String(s) => Some(s.as_str().into()),
+        J::Array(items) if items.is_empty() => None,
+        J::Array(items) => {
+            let mut array = toml_edit::Array::new();
+            for item in items {
+                if let Some(v) = toml_value(item)? {
+                    array.push_formatted(v.decorated("\n  ", ""));
+                }
+            }
+            array.set_trailing("\n");
+            array.set_trailing_comma(true);
+            Some(toml_edit::Value::Array(array))
+        }
+        J::Object(map) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (key, value) in map {
+                if let Some(value) = toml_value(value)? {
+                    inline.insert(snake(key), value);
+                }
+            }
+            Some(toml_edit::Value::InlineTable(inline))
+        }
+    })
+}
+
+/// fontSize → font_size (the UI speaks camelCase, the file snake_case).
+fn snake(key: &str) -> String {
+    let mut out = String::new();
+    for ch in key.chars() {
+        if ch.is_ascii_uppercase() {
+            out.push('_');
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 pub enum Reload {
     Unchanged,
     ErrorCleared,
     Invalid,
-    Changed(Config),
+    Changed(Box<Config>),
 }
 
 fn read(path: &Path) -> Result<Config, String> {
@@ -357,6 +580,76 @@ mod tests {
         assert!(Config::parse("height = 1.5").unwrap_err().contains("height"));
         assert!(Config::parse("opacity = -0.1").unwrap_err().contains("opacity"));
         assert!(Config::parse("[font]\nsize = 200").unwrap_err().contains("font.size"));
+    }
+
+    #[test]
+    fn reads_custom_profiles_and_layouts() {
+        let config = Config::parse(
+            r#"
+[[profiles]]
+name = "API server"
+command = 'pwsh -NoExit -Command "npm run dev"'
+cwd = "C:/work/api"
+theme = "dracula"
+font_size = 13
+env = { NODE_ENV = "development" }
+
+[[layouts]]
+name = "dev"
+split = "row"
+panes = [
+  { profile = "API server" },
+  { cwd = "C:/work/web", command = "npm start" },
+  { split = "column", panes = [ {}, { profile = "wsl:Ubuntu" } ] },
+]
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.profiles[0].id(), "custom:API server");
+        assert_eq!(config.profiles[0].env["NODE_ENV"], "development");
+        let root = &config.layouts[0].root();
+        assert_eq!(root.split, Some(SplitDir::Row));
+        assert_eq!(root.panes.len(), 3);
+        assert_eq!(root.panes[2].panes[1].profile.as_deref(), Some("wsl:Ubuntu"));
+    }
+
+    #[test]
+    fn rejects_broken_profiles_and_layouts() {
+        assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"  \"").unwrap_err().contains("empty command"));
+        assert!(Config::parse("[[profiles]]\nname = \"a\"\ncommand = \"ssh a\"\n[[profiles]]\nname = \"a\"\ncommand = \"ssh b\"")
+            .unwrap_err()
+            .contains("share the id"));
+        assert!(Config::parse("[[layouts]]\nname = \"x\"\npanes = [{}, {}]").unwrap_err().contains("needs split"));
+        assert!(Config::parse("[[layouts]]\nname = \"x\"\n[[layouts]]\nname = \"x\"").unwrap_err().contains("named"));
+        assert!(Config::parse("[[layouts]]\nname = \"x\"\nsplit = \"diagonal\"").is_err());
+    }
+
+    #[test]
+    fn saves_replaces_and_deletes_layouts_keeping_the_file() {
+        let dir = std::env::temp_dir().join(format!("qterm-layouts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = ConfigState::load(&dir);
+        let dev = serde_json::json!({
+            "name": "dev",
+            "split": "row",
+            "panes": [{ "profile": "pwsh", "cwd": "C:/work/api" }, { "split": "column", "panes": [{}, { "command": "npm start" }] }],
+        });
+        state.save_layout(&dev).unwrap();
+        state.save_layout(&serde_json::json!({ "name": "solo", "cwd": "D:/x" })).unwrap();
+        state.save_layout(&serde_json::json!({ "name": "dev", "split": "column", "panes": [{}, {}] })).unwrap();
+
+        let text = std::fs::read_to_string(state.path()).unwrap();
+        assert!(text.starts_with("# qterm settings."), "comments kept");
+        let config = Config::parse(&text).unwrap();
+        assert_eq!(config.layouts.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["dev", "solo"]);
+        assert_eq!(config.layouts[0].split, Some(SplitDir::Column), "replaced in place");
+
+        state.delete_layout("dev").unwrap();
+        state.delete_layout("solo").unwrap();
+        let text = std::fs::read_to_string(state.path()).unwrap();
+        assert!(Config::parse(&text).unwrap().layouts.is_empty());
+        assert!(!text.lines().any(|l| l.trim() == "[[layouts]]"), "no table left (commented examples stay)");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -422,7 +715,7 @@ find = \"f3\"
         assert!(state.path().exists());
 
         std::fs::write(state.path(), "height = 0.3").unwrap();
-        assert!(matches!(state.reload(), Reload::Changed(old) if old == Config::default()));
+        assert!(matches!(state.reload(), Reload::Changed(old) if *old == Config::default()));
         assert_eq!(state.get().height, 0.3);
 
         std::fs::write(state.path(), "height = 9").unwrap();
