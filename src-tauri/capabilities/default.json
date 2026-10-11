@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the quake window",
+  "windows": [
+    "quake"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}
