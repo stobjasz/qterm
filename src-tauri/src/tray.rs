@@ -11,10 +11,11 @@ use crate::{hotkey, window};
 
 const TRAY_ID: &str = "main";
 
-/// Items whose text or check mark follows the config and the hotkey switch.
+/// Items whose text or check mark follows the config and other switches.
 struct TrayItems {
     toggle: MenuItem<Wry>,
     hotkey: CheckMenuItem<Wry>,
+    autostart: CheckMenuItem<Wry>,
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -42,7 +43,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             &quit,
         ],
     )?;
-    app.manage(TrayItems { toggle, hotkey: hotkey_item });
+    app.manage(TrayItems { toggle, hotkey: hotkey_item, autostart: autostart.clone() });
 
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -50,8 +51,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "toggle" => window::flip(app),
             "hotkey" => set_hotkey(app),
-            "autostart" => set_autostart(app, &autostart),
-            "settings" => open_settings(app),
+            "autostart" => {
+                let wanted = autostart.is_checked().unwrap_or(false);
+                if let Err(e) = set_autostart(app, wanted) {
+                    eprintln!("qterm: {e}");
+                }
+            }
+            "settings" => window::open_settings(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -103,20 +109,18 @@ fn set_hotkey(app: &AppHandle) {
     refresh(app);
 }
 
-/// Same pattern: make the registry match the check mark, or put the mark back.
-fn set_autostart(app: &AppHandle, item: &CheckMenuItem<Wry>) {
-    let wanted = item.is_checked().unwrap_or(false);
+/// Turns "Start with Windows" on or off (HKCU Run key) and keeps the tray's check
+/// mark in step, whether the change came from the tray or the settings panel.
+pub fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
-    let result = if wanted { autolaunch.enable() } else { autolaunch.disable() };
-    if let Err(e) = result {
-        eprintln!("qterm: could not change autostart: {e}");
-        let _ = item.set_checked(autolaunch.is_enabled().unwrap_or(false));
+    let result = if enabled { autolaunch.enable() } else { autolaunch.disable() };
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items.autostart.set_checked(autolaunch.is_enabled().unwrap_or(false));
     }
+    result.map_err(|e| format!("could not change autostart: {e}"))
 }
 
-fn open_settings(app: &AppHandle) {
+pub fn open_config_file(app: &AppHandle) -> Result<(), String> {
     let path = app.state::<ConfigState>().path().to_string_lossy().into_owned();
-    if let Err(e) = app.opener().open_path(path, None::<&str>) {
-        eprintln!("qterm: could not open settings: {e}");
-    }
+    app.opener().open_path(path, None::<&str>).map_err(|e| format!("could not open settings file: {e}"))
 }

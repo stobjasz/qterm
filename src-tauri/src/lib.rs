@@ -1,3 +1,4 @@
+mod claude;
 mod commands;
 mod config;
 mod hotkey;
@@ -34,6 +35,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_autostart::Builder::new().arg(BACKGROUND_ARG).build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
@@ -53,6 +55,7 @@ pub fn run() {
             }
             let config_path = config.path().to_owned();
             app.manage(config);
+            app.manage(claude::ClaudeStore::load(&config_dir, claude::claude_home()));
 
             // Another app may already own the key; the tray says so and still toggles.
             if let Err(e) = hotkey::apply(app.handle()) {
@@ -89,6 +92,15 @@ pub fn run() {
             commands::pty_kill,
             commands::hide_window,
             commands::ui_ready,
+            commands::load_session,
+            commands::save_session,
+            commands::list_claude_sessions,
+            commands::claude_session_seen,
+            commands::forget_claude_session,
+            commands::save_config,
+            commands::open_config_file,
+            commands::get_autostart,
+            commands::set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

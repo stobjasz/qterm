@@ -64,6 +64,16 @@ pub fn flip(app: &AppHandle) {
     }
 }
 
+/// Brings the console up with the settings panel open (tray "Settings…").
+pub fn open_settings(app: &AppHandle) {
+    if let Some(win) = window(app)
+        && !win.is_visible().unwrap_or(false)
+    {
+        show(app, &win);
+    }
+    let _ = app.emit_to(LABEL, "open-settings", ());
+}
+
 /// Hides the console if it is showing, e.g. after its last tab closed.
 pub fn dismiss(app: &AppHandle) {
     let Some(win) = window(app) else { return };

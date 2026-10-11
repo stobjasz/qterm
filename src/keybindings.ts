@@ -10,7 +10,11 @@ export type Command =
   | { type: "split"; dir: SplitDir }
   | { type: "moveFocus"; direction: Direction }
   | { type: "resizePane"; direction: Direction }
-  | { type: "equalize" };
+  | { type: "equalize" }
+  | { type: "copy" }
+  | { type: "paste" }
+  | { type: "find" }
+  | { type: "settings" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -28,9 +32,42 @@ const ACTIONS = {
   resize_right: { command: { type: "resizePane", direction: "right" }, chord: "alt+shift+right" },
   resize_up: { command: { type: "resizePane", direction: "up" }, chord: "alt+shift+up" },
   resize_down: { command: { type: "resizePane", direction: "down" }, chord: "alt+shift+down" },
+  copy: { command: { type: "copy" }, chord: "ctrl+shift+c" },
+  paste: { command: { type: "paste" }, chord: "ctrl+shift+v" },
+  find: { command: { type: "find" }, chord: "ctrl+shift+f" },
+  settings: { command: { type: "settings" }, chord: "ctrl+," },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
+
+const LABELS: Record<Action, string> = {
+  new_tab: "New tab",
+  close_pane: "Close pane",
+  next_tab: "Next tab",
+  prev_tab: "Previous tab",
+  split_right: "Split right",
+  split_down: "Split down",
+  equalize: "Equalize panes",
+  focus_left: "Focus pane left",
+  focus_right: "Focus pane right",
+  focus_up: "Focus pane up",
+  focus_down: "Focus pane down",
+  resize_left: "Resize pane left",
+  resize_right: "Resize pane right",
+  resize_up: "Resize pane up",
+  resize_down: "Resize pane down",
+  copy: "Copy",
+  paste: "Paste",
+  find: "Find",
+  settings: "Settings",
+};
+
+/** Every rebindable action with its config name, label and default chord. */
+export const ACTION_LIST = (Object.keys(ACTIONS) as Action[]).map((name) => ({
+  name,
+  label: LABELS[name],
+  defaultChord: ACTIONS[name].chord as string,
+}));
 
 /** The parts of a KeyboardEvent that matter; `altGraph` is getModifierState("AltGraph"). */
 export interface KeyInput {

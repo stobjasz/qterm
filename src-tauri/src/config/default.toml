@@ -27,6 +27,27 @@ hide_on_blur = false
 # Empty means the first one found (PowerShell 7 if installed).
 default_profile = ""
 
+# Colour theme: "qterm", "campbell", "one-dark", "dracula", "nord", "gruvbox-dark",
+# "tokyo-night", "solarized-dark" or "solarized-light".
+theme = "qterm"
+
+# Copy selected text as soon as you select it.
+copy_on_select = false
+# Right-click copies the selection, or pastes when nothing is selected.
+right_click_paste = true
+
+# Reopen your tabs and split layout (with their profiles and folders) on start.
+restore_session = true
+
+# Let shells report their current folder, so restored and split panes open where
+# you were. PowerShell and cmd prompts (and Git Bash) get an invisible marker;
+# your own prompt is kept. Applies to newly opened tabs and panes.
+shell_integration = true
+
+# Remember Claude Code sessions: when a terminal prints "claude --resume <id>",
+# qterm keeps it with its folder so you can resume it later from the tab bar.
+claude_sessions = false
+
 [font]
 family = '"Cascadia Mono", "Cascadia Code", Consolas, monospace'
 size = 14   # 6 - 72
@@ -39,6 +60,8 @@ size = 14   # 6 - 72
 #   close_pane   = "ctrl+shift+w"     split_down   = "alt+shift+-"
 #   next_tab     = "ctrl+tab"         equalize     = "alt+shift+0"
 #   prev_tab     = "ctrl+shift+tab"   focus_left   = "alt+left"    (also _right/_up/_down)
-#                                     resize_left  = "alt+shift+left"  (also _right/_up/_down)
+#   copy         = "ctrl+shift+c"     resize_left  = "alt+shift+left"  (also _right/_up/_down)
+#   paste        = "ctrl+shift+v"     find         = "ctrl+shift+f"
+#   settings     = "ctrl+,"
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]

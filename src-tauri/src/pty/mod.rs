@@ -39,6 +39,18 @@ struct Session {
 
 type Sessions = Arc<Mutex<HashMap<SessionId, Session>>>;
 
+/// What the UI asks for when it opens a pane.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpawnRequest {
+    /// `None` means the default profile.
+    pub profile_id: Option<String>,
+    /// Start here when the folder exists (else the profile's home).
+    pub cwd: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
 #[derive(Default)]
 pub struct SessionManager {
     next_id: AtomicU32,
@@ -52,21 +64,22 @@ impl SessionManager {
         self.profiles.get_or_init(profiles::detect)
     }
 
-    /// Starts the given profile, or the default (first) one when `profile_id` is `None`.
+    /// Starts the requested profile, or the default (first) one, with shell
+    /// integration when `integrate` is set.
     pub fn spawn_profile(
         &self,
-        profile_id: Option<&str>,
-        cols: u16,
-        rows: u16,
+        request: &SpawnRequest,
+        integrate: bool,
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
         let profiles = self.profiles();
-        let profile = match profile_id {
-            Some(id) => profiles.iter().find(|p| p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
+        let profile = match &request.profile_id {
+            Some(id) => profiles.iter().find(|p| &p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
             None => profiles.first().ok_or("no shell profiles found")?,
         };
-        self.spawn(profile.command(), cols, rows, on_output, on_exit)
+        let cmd = profile.command(request.cwd.as_deref(), integrate);
+        self.spawn(cmd, request.cols, request.rows, on_output, on_exit)
     }
 
     /// `on_output` receives batched bytes and returns `false` once nobody is listening;

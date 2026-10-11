@@ -19,6 +19,12 @@ export interface Config {
   slideMs: number;
   hideOnBlur: boolean;
   defaultProfile: string;
+  theme: string;
+  copyOnSelect: boolean;
+  rightClickPaste: boolean;
+  restoreSession: boolean;
+  shellIntegration: boolean;
+  claudeSessions: boolean;
   font: { family: string; size: number };
   keybindings: Record<string, string>;
 }
@@ -56,12 +62,13 @@ export function ptySpawn(
   profileId: string,
   cols: number,
   rows: number,
+  cwd: string | undefined,
   onOutput: (data: Uint8Array) => void,
 ): Promise<SessionId> {
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { profileId, cols, rows, onOutput: channel });
+  return invoke("pty_spawn", { request: { profileId, cwd, cols, rows }, onOutput: channel });
 }
 
 export function ptyWrite(id: SessionId, data: string): Promise<void> {
@@ -88,6 +95,62 @@ export function uiReady(): Promise<void> {
 
 export function hideWindow(): Promise<void> {
   return invoke("hide_window");
+}
+
+export function loadSession(): Promise<string | null> {
+  return invoke("load_session");
+}
+
+export function saveSession(session: string): Promise<void> {
+  return invoke("save_session", { session });
+}
+
+export interface ClaudeSession {
+  id: string;
+  /** Where to resume; null when neither the transcript nor the pane knew. */
+  cwd: string | null;
+  title: string | null;
+  profileId: string;
+  /** Unix milliseconds. */
+  seenAt: number;
+}
+
+export function listClaudeSessions(): Promise<ClaudeSession[]> {
+  return invoke("list_claude_sessions");
+}
+
+export function claudeSessionSeen(id: string, profileId: string, paneCwd: string | undefined): Promise<ClaudeSession[]> {
+  return invoke("claude_session_seen", { id, profileId, paneCwd });
+}
+
+export function forgetClaudeSession(id: string): Promise<ClaudeSession[]> {
+  return invoke("forget_claude_session", { id });
+}
+
+export function onClaudeSessionsChanged(handler: (sessions: ClaudeSession[]) => void): Promise<UnlistenFn> {
+  return listen<ClaudeSession[]>("claude-sessions-changed", (event) => handler(event.payload));
+}
+
+/** Settings panel: TOML keys ("height", "font.size", "keybindings") to new values. */
+export function saveConfig(changes: Record<string, unknown>): Promise<void> {
+  return invoke("save_config", { changes });
+}
+
+export function openConfigFile(): Promise<void> {
+  return invoke("open_config_file");
+}
+
+export function getAutostart(): Promise<boolean> {
+  return invoke("get_autostart");
+}
+
+export function setAutostart(enabled: boolean): Promise<void> {
+  return invoke("set_autostart", { enabled });
+}
+
+/** The tray asked for the settings panel. */
+export function onOpenSettings(handler: () => void): Promise<UnlistenFn> {
+  return listen("open-settings", () => handler());
 }
 
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {

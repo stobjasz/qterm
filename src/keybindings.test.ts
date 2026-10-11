@@ -47,6 +47,13 @@ describe("default keymap", () => {
     expect(resolveKey(key("Digit0", { altKey: true, shiftKey: true }), defaults)).toEqual({ type: "equalize" });
   });
 
+  it("maps clipboard, search and settings shortcuts", () => {
+    expect(resolveKey(key("KeyC", { ctrlKey: true, shiftKey: true }), defaults)).toEqual({ type: "copy" });
+    expect(resolveKey(key("KeyV", { ctrlKey: true, shiftKey: true }), defaults)).toEqual({ type: "paste" });
+    expect(resolveKey(key("KeyF", { ctrlKey: true, shiftKey: true }), defaults)).toEqual({ type: "find" });
+    expect(resolveKey(key("Comma", { ctrlKey: true }), defaults)).toEqual({ type: "settings" });
+  });
+
   it("leaves AltGr combinations to the shell (AltGr reports as Ctrl+Alt)", () => {
     expect(resolveKey(key("Digit7", { ctrlKey: true, altKey: true, altGraph: true }), defaults)).toBeUndefined();
   });

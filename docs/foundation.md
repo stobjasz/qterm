@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4 and M5a done. Next: more features, then M6 (installer, auto-update). See §11–15. Date: 2026-10-11.
+Status: M0–M4, M5a and the feature round (§16) done. Next: M6 (installer, auto-update). See §11–16. Date: 2026-10-11.
 
 ---
 
@@ -470,3 +470,25 @@ Lessons:
   pass on it.
 - **Portable caveat:** "Start with Windows" registers the exe's current path, so moving
   the exe breaks autostart until the checkbox is toggled again.
+
+## 16. Feature round (2026-10-11)
+
+| Feature | How | Verified |
+|---|---|---|
+| Copy/paste | `tauri-plugin-clipboard-manager`. Right-click copies the selection or pastes (WT behaviour). Ctrl+Shift+C/V; optional `copy_on_select`. Paste goes through `term.paste` (bracketed paste). | CDP: right-click copy, both paste paths ran the pasted command, copy on select |
+| Search | `@xterm/addon-search` with decorations. Bar with match count, case and regex toggles, Enter/Shift+Enter, Esc. | CDP: "1 of 4", case-sensitive "No results", Esc closes |
+| Rename / reorder tabs | `renameTab` (blank clears) and `moveTab`, pure and tested. Double-click edits the title in place; dragging uses pointer events, because Tauri's native file-drop swallows HTML5 drag-and-drop on Windows. | CDP |
+| Themes | `terminal/themes.ts`: 9 palettes. The theme drives xterm colours plus the CSS vars the chrome derives from (`color-mix`). | CDP: accent changed live; a test keeps `default.toml` in sync with the theme list |
+| Folder tracking | Shells report OSC 9;9 (or OSC 7). `shell_integration` (default on) adds it: PowerShell gets a prompt wrapper via `-EncodedCommand` that keeps the user's own prompt, cmd a `PROMPT` prefix, Git Bash a `PROMPT_COMMAND`. Not WSL yet. | Rust probe: OSC 9;9 passes through both ConPTYs. CDP: `cd` updates the pane, splits open there, reload restores there |
+| Session restore | `saveWorkspace`/`restoreWorkspace` (versioned JSON; damaged or outdated sessions are rejected whole; vanished profiles map to the default). Saved 400 ms after layout changes to `%APPDATA%\dev.qterm.app\session.json`; shell titles excluded so they don't trigger saves. | Unit tests + CDP reload |
+| Claude sessions | Off by default (`claude_sessions`). The registry scans new lines (`onLineFeed`, debounced) for `claude --resume <uuid>`. Rust finds `<claude home>/projects/*/<id>.jsonl` (`CLAUDE_CONFIG_DIR` or `~/.claude`) and takes the first `cwd` (the launch folder, where `--resume` must run) and the latest `aiTitle`. Falls back to the pane's folder. The id is validated as a UUID before being used in a path. Kept in `claude-sessions.json` (newest first, max 50). Resume opens a tab in that folder and types the command once the shell is up. | Rust tests on fixture transcripts. CDP: this conversation's real transcript gave its title and folder; resume opened a cmd tab in the remembered folder and ran `claude --resume <id>` |
+| Settings panel | `settings/draft.ts` (tested) turns edits into minimal TOML changes. Rust `ConfigState::update` applies them with `toml_edit`, keeping key comments (on the key) and trailing comments (on the value), validates, then writes; the watcher reloads. "Start with Windows" applies right away and keeps the tray check in sync. | Rust tests: comments and layout survive, invalid edits leave the file untouched. CDP: theme + toggle saved |
+
+Notes:
+- **Testing caveat:** the resume check was meant to hit a stub `claude.cmd`, but the
+  environment had `NoDefaultCurrentDirectoryInExePath=1`, so cmd ran the real Claude Code.
+  It stopped at its folder-trust prompt; the tab was closed and nothing was accepted.
+  Future resume tests must not rely on current-folder lookup.
+- **Encoding pitfall:** Python's `open()` defaults to the ANSI code page on Windows. One
+  edit wrote "…" as byte 0x85 into a `.rs` file. Always pass `encoding="utf-8"`.
+- **Not verified by automation:** tray → "Settings…" (needs a real tray click).

@@ -3,7 +3,7 @@ import { Fragment, useRef } from "react";
 import { paneIds, type LayoutNode, type PaneId, type SplitDir } from "../workspace/layout";
 import type { Pane } from "../workspace/workspace";
 import { PaneView } from "./PaneView";
-import type { TerminalRegistry } from "./registry";
+import type { PaneSpec, TerminalRegistry } from "./registry";
 
 interface Props {
   node: LayoutNode;
@@ -13,6 +13,7 @@ interface Props {
   focusedPane: PaneId;
   showFocus: boolean;
   registry: TerminalRegistry;
+  spec(pane: Pane): PaneSpec;
   onFocusPane(paneId: PaneId): void;
   /** Divider after child `index` of the split at `path` moved by `delta` (share of the split). */
   onResize(path: number[], index: number, delta: number): void;
@@ -25,6 +26,7 @@ export function LayoutView(props: Props) {
       <PaneView
         pane={props.panes[node.pane]}
         registry={props.registry}
+        spec={props.spec}
         focused={props.showFocus && node.pane === props.focusedPane}
         onFocus={props.onFocusPane}
       />

@@ -10,7 +10,12 @@ import {
   equalizeActive,
   focusPane,
   moveFocus,
+  moveTab,
   openTab,
+  renameTab,
+  restoreWorkspace,
+  saveWorkspace,
+  setPaneCwd,
   resizeDivider,
   resizeFocused,
   setPaneTitle,
@@ -175,5 +180,79 @@ describe("splits", () => {
   it("drags a divider in a given tab", () => {
     const ws = resizeDivider(split(withTabs(1), "p1", "n1"), "t1", [], 0, 0.25);
     expect(ws.tabs[0].root.kind === "split" && ws.tabs[0].root.sizes).toEqual([0.75, 0.25]);
+  });
+});
+
+describe("tab rename and reorder", () => {
+  it("a custom title wins over the shell's, and clearing it restores the shell's", () => {
+    let ws = setPaneTitle(withTabs(1), "p1", "C:\work");
+    ws = renameTab(ws, "t1", "  build  ");
+    expect(tabTitle(ws, ws.tabs[0])).toBe("build");
+    ws = renameTab(ws, "t1", "   ");
+    expect(tabTitle(ws, ws.tabs[0])).toBe("C:\work");
+  });
+
+  it("moves a tab to a new position and keeps it active", () => {
+    const ws = moveTab(activateTab(withTabs(3), "t1"), "t1", 2);
+    expect(ws.tabs.map((t) => t.id)).toEqual(["t2", "t3", "t1"]);
+    expect(ws.activeTab).toBe("t1");
+    expect(moveTab(ws, "t3", 0).tabs.map((t) => t.id)).toEqual(["t3", "t2", "t1"]);
+  });
+
+  it("clamps the target position and ignores unknown tabs", () => {
+    const ws = withTabs(2);
+    expect(moveTab(ws, "t1", 99).tabs.map((t) => t.id)).toEqual(["t2", "t1"]);
+    expect(moveTab(ws, "nope", 0)).toBe(ws);
+  });
+});
+
+describe("working directories", () => {
+  it("records the folder a pane reported", () => {
+    const ws = setPaneCwd(withTabs(1), "p1", "C:\src");
+    expect(ws.panes.p1.cwd).toBe("C:\src");
+    expect(setPaneCwd(ws, "p1", "C:\src")).toBe(ws);
+  });
+
+  it("starts new tabs and splits in the given folder", () => {
+    let ws = openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, pwsh, "D:\a");
+    ws = splitPane(ws, "p1", "row", "p2", pwsh, "D:\b");
+    expect(ws.panes.p1.cwd).toBe("D:\a");
+    expect(ws.panes.p2.cwd).toBe("D:\b");
+  });
+});
+
+describe("save and restore", () => {
+  const profiles = [pwsh, cmd];
+
+  it("round-trips tabs, layout, profiles, folders and custom titles", () => {
+    let ws = openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, pwsh, "C:\a");
+    ws = splitPane(ws, "p1", "column", "p2", cmd, "C:\b");
+    ws = renameTab(setPaneTitle(ws, "p1", "shell title"), "t1", "mine");
+    ws = openTab(ws, { tab: "t2", pane: "p3" }, cmd);
+
+    const restored = restoreWorkspace(saveWorkspace(ws), profiles)!;
+    expect(restored.tabs).toEqual(ws.tabs);
+    expect(restored.activeTab).toBe("t2");
+    expect(restored.panes.p2).toEqual({ id: "p2", profileId: "cmd", profileName: "Command Prompt", title: "", cwd: "C:\b" });
+    expect(restored.panes.p1.title, "shell titles are not saved; the shell sets them again").toBe("");
+  });
+
+  it("does not change when only shell titles change", () => {
+    const ws = withTabs(1);
+    expect(saveWorkspace(setPaneTitle(ws, "p1", "x"))).toBe(saveWorkspace(ws));
+  });
+
+  it("moves panes of a profile that no longer exists to the default profile", () => {
+    const saved = saveWorkspace(openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, { id: "wsl:Gone", name: "Gone" }));
+    const restored = restoreWorkspace(saved, profiles)!;
+    expect(restored.panes.p1.profileId).toBe("pwsh");
+    expect(restored.panes.p1.profileName).toBe("PowerShell");
+  });
+
+  it("rejects damaged or empty sessions", () => {
+    expect(restoreWorkspace("not json", profiles)).toBeUndefined();
+    expect(restoreWorkspace(JSON.stringify({ version: 1, tabs: [] }), profiles)).toBeUndefined();
+    expect(restoreWorkspace(JSON.stringify({ version: 1, tabs: [{ id: "t", root: { kind: "leaf", pane: "x" } }] }), profiles)).toBeUndefined();
+    expect(restoreWorkspace(saveWorkspace(withTabs(1)), [])).toBeUndefined();
   });
 });

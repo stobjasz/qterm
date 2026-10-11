@@ -1,23 +1,34 @@
 # qterm
 
 A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slides a
-translucent console down from the top of the screen. Tabs and split panes for PowerShell, cmd, Git Bash and WSL;
-tray icon with "Start with Windows". Tauri 2 + xterm.js + ConPTY.
+translucent console down from the top of the screen.
+
+- Tabs and split panes for PowerShell, cmd, Git Bash and WSL; rename (double-click)
+  and reorder (drag) tabs
+- Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
+- Nine colour themes, adjustable size, opacity, font, slide speed
+- Reopens your tabs and layout, each pane in the folder it was in
+- Optional: remembers Claude Code sessions (from `claude --resume <id>` in the output)
+  and resumes them in their folder from the ✳ menu
+- Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"
 
 | Keys | Action |
 |---|---|
 | ~ | Show / hide (global; switch it off in the tray to type a backtick elsewhere) |
 | Ctrl+Shift+T / Ctrl+Shift+1..9 | New tab (default / Nth profile) |
-| Ctrl+Shift+W | Close tab |
+| Ctrl+Shift+W | Close pane |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+Alt+1..9 | Go to tab N |
 | Alt+Shift+= / Alt+Shift+- | Split right / down |
 | Alt+Arrow | Move focus between panes |
 | Alt+Shift+Arrow / Alt+Shift+0 | Resize pane / equalize |
+| Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
+| Ctrl+Shift+F | Find in scrollback |
+| Ctrl+, | Settings |
 
-Settings: tray → **Settings…** opens `%APPDATA%\dev.qterm.app\config.toml`. Every
-option is documented in the file, and changes apply when you save. Shortcuts can be
-remapped in its `[keybindings]` table.
+Settings: the ⚙ button, Ctrl+, or tray → **Settings…** open the settings panel. Everything
+lives in `%APPDATA%\dev.qterm.app\config.toml`, which the panel edits for you (keeping its
+comments); you can also edit the file directly. Changes apply when saved.
 
 Design and roadmap: [docs/foundation.md](docs/foundation.md).
 

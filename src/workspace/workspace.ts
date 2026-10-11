@@ -24,12 +24,16 @@ export interface Pane {
   profileName: string;
   /** Last title the shell set; empty until it sets one. */
   title: string;
+  /** Last folder the shell reported (shell integration), or where it was started. */
+  cwd?: string;
 }
 
 export interface Tab {
   id: TabId;
   root: LayoutNode;
   focusedPane: PaneId;
+  /** Set by renaming the tab; wins over the shell's title. */
+  title?: string;
 }
 
 export interface Workspace {
@@ -48,24 +52,30 @@ export function emptyWorkspace(): Workspace {
 }
 
 /** Ids come from the caller so this stays deterministic. */
-export function openTab(ws: Workspace, ids: { tab: TabId; pane: PaneId }, profile: ProfileRef): Workspace {
+export function openTab(
+  ws: Workspace,
+  ids: { tab: TabId; pane: PaneId },
+  profile: ProfileRef,
+  cwd?: string,
+): Workspace {
   const tab: Tab = { id: ids.tab, root: { kind: "leaf", pane: ids.pane }, focusedPane: ids.pane };
-  return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes: withPane(ws.panes, ids.pane, profile) };
+  return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes: withPane(ws.panes, ids.pane, profile, cwd) };
 }
 
-/** Splits `paneId` in `dir`, opening `profile` in the new pane and focusing it. */
+/** Splits `paneId` in `dir`, opening `profile` (in `cwd`) in the new pane and focusing it. */
 export function splitPane(
   ws: Workspace,
   paneId: PaneId,
   dir: SplitDir,
   newPane: PaneId,
   profile: ProfileRef,
+  cwd?: string,
 ): Workspace {
   const tab = tabOf(ws, paneId);
   if (!tab) return ws;
   return {
     ...replaceTab(ws, { ...tab, root: insertSplit(tab.root, paneId, dir, newPane), focusedPane: newPane }),
-    panes: withPane(ws.panes, newPane, profile),
+    panes: withPane(ws.panes, newPane, profile, cwd),
   };
 }
 
@@ -152,6 +162,29 @@ export function setPaneTitle(ws: Workspace, paneId: PaneId, title: string): Work
   return { ...ws, panes: { ...ws.panes, [paneId]: { ...pane, title } } };
 }
 
+/** A blank title removes the custom one, so the shell's shows again. */
+export function renameTab(ws: Workspace, tabId: TabId, title: string): Workspace {
+  const tab = ws.tabs.find((t) => t.id === tabId);
+  if (!tab) return ws;
+  const { title: _old, ...rest } = tab;
+  const trimmed = title.trim();
+  return replaceTab(ws, trimmed ? { ...rest, title: trimmed } : rest);
+}
+
+export function moveTab(ws: Workspace, tabId: TabId, toIndex: number): Workspace {
+  const from = ws.tabs.findIndex((t) => t.id === tabId);
+  if (from < 0) return ws;
+  const tabs = ws.tabs.filter((t) => t.id !== tabId);
+  tabs.splice(Math.max(0, Math.min(toIndex, tabs.length)), 0, ws.tabs[from]);
+  return { ...ws, tabs };
+}
+
+export function setPaneCwd(ws: Workspace, paneId: PaneId, cwd: string): Workspace {
+  const pane = ws.panes[paneId];
+  if (!pane || pane.cwd === cwd) return ws;
+  return { ...ws, panes: { ...ws.panes, [paneId]: { ...pane, cwd } } };
+}
+
 export function activeTab(ws: Workspace): Tab | undefined {
   return ws.tabs.find((tab) => tab.id === ws.activeTab);
 }
@@ -159,8 +192,9 @@ export function activeTab(ws: Workspace): Tab | undefined {
 // Shells without prompt integration title themselves with their own exe path.
 const EXE_PATH = /^[a-z]:\\.*\.exe$/i;
 
-/** The focused pane's shell title, or its profile name when that says nothing useful. */
+/** The custom title, else the focused pane's shell title, else its profile name. */
 export function tabTitle(ws: Workspace, tab: Tab): string {
+  if (tab.title) return tab.title;
   const pane = ws.panes[tab.focusedPane];
   if (!pane) return "";
   const title = pane.title.trim();
@@ -175,6 +209,76 @@ function replaceTab(ws: Workspace, tab: Tab): Workspace {
   return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? tab : t)) };
 }
 
-function withPane(panes: Record<PaneId, Pane>, id: PaneId, profile: ProfileRef): Record<PaneId, Pane> {
-  return { ...panes, [id]: { id, profileId: profile.id, profileName: profile.name, title: "" } };
+function withPane(panes: Record<PaneId, Pane>, id: PaneId, profile: ProfileRef, cwd?: string): Record<PaneId, Pane> {
+  return { ...panes, [id]: { id, profileId: profile.id, profileName: profile.name, title: "", cwd } };
+}
+
+// --- Saving and restoring the layout across restarts --------------------------
+
+interface SavedSession {
+  version: 1;
+  activeTab?: TabId;
+  tabs: { id: TabId; title?: string; root: LayoutNode; focusedPane: PaneId }[];
+  panes: Record<PaneId, { profileId: string; cwd?: string }>;
+}
+
+/** What is worth keeping: layout, profiles, folders, custom titles. Shell titles are not. */
+export function saveWorkspace(ws: Workspace): string {
+  const saved: SavedSession = {
+    version: 1,
+    activeTab: ws.activeTab,
+    tabs: ws.tabs.map(({ id, title, root, focusedPane }) => ({ id, title, root, focusedPane })),
+    panes: Object.fromEntries(Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd }])),
+  };
+  return JSON.stringify(saved);
+}
+
+/**
+ * Rebuilds a saved workspace. Panes whose profile is gone get the default (first)
+ * profile. Anything malformed means no restore at all rather than half a layout.
+ */
+export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspace | undefined {
+  if (profiles.length === 0) return undefined;
+  let saved: SavedSession;
+  try {
+    saved = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (saved?.version !== 1 || !Array.isArray(saved.tabs) || saved.tabs.length === 0) return undefined;
+  if (typeof saved.panes !== "object" || saved.panes === null) return undefined;
+
+  const panes: Record<PaneId, Pane> = {};
+  const tabs: Tab[] = [];
+  for (const raw of saved.tabs) {
+    if (typeof raw?.id !== "string" || !isLayout(raw.root)) return undefined;
+    const ids = paneIds(raw.root);
+    for (const id of ids) {
+      const savedPane = saved.panes[id];
+      if (typeof savedPane?.profileId !== "string") return undefined;
+      const profile = profiles.find((p) => p.id === savedPane.profileId) ?? profiles[0];
+      const cwd = typeof savedPane.cwd === "string" ? savedPane.cwd : undefined;
+      panes[id] = { id, profileId: profile.id, profileName: profile.name, title: "", cwd };
+    }
+    const focusedPane = ids.includes(raw.focusedPane) ? raw.focusedPane : ids[0];
+    tabs.push({ id: raw.id, root: raw.root, focusedPane, ...(typeof raw.title === "string" && raw.title ? { title: raw.title } : {}) });
+  }
+  const activeTab = tabs.some((t) => t.id === saved.activeTab) ? saved.activeTab : tabs[0].id;
+  return { tabs, activeTab, panes };
+}
+
+function isLayout(node: unknown): node is LayoutNode {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as Record<string, unknown>;
+  if (n.kind === "leaf") return typeof n.pane === "string";
+  return (
+    n.kind === "split" &&
+    (n.dir === "row" || n.dir === "column") &&
+    Array.isArray(n.children) &&
+    Array.isArray(n.sizes) &&
+    n.children.length >= 2 &&
+    n.sizes.length === n.children.length &&
+    n.sizes.every((size) => typeof size === "number" && size > 0) &&
+    n.children.every(isLayout)
+  );
 }

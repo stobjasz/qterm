@@ -29,6 +29,12 @@ pub struct Config {
     pub slide_ms: u64,
     pub hide_on_blur: bool,
     pub default_profile: String,
+    pub theme: String,
+    pub copy_on_select: bool,
+    pub right_click_paste: bool,
+    pub restore_session: bool,
+    pub shell_integration: bool,
+    pub claude_sessions: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -59,6 +65,12 @@ impl Default for Config {
             slide_ms: 150,
             hide_on_blur: false,
             default_profile: String::new(),
+            theme: "qterm".into(),
+            copy_on_select: false,
+            right_click_paste: true,
+            restore_session: true,
+            shell_integration: true,
+            claude_sessions: false,
             font: Font::default(),
             keybindings: BTreeMap::new(),
         }
@@ -195,6 +207,83 @@ impl ConfigState {
     }
 }
 
+impl ConfigState {
+    /// Writes `changes` (TOML keys: "height", "font.size", "keybindings", ...) into
+    /// config.toml, keeping its comments and layout. The result must validate first;
+    /// the file watcher then reloads it like any other edit.
+    pub fn update(&self, changes: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let updated = apply_changes(&text, changes)?;
+        Config::parse(&updated)?;
+        crate::claude::write_atomically(&self.path, &updated)
+    }
+}
+
+fn apply_changes(text: &str, changes: &serde_json::Map<String, serde_json::Value>) -> Result<String, String> {
+    use toml_edit::{DocumentMut, Item, Table};
+
+    let mut doc: DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;
+    for (key, value) in changes {
+        let (table, name) = match key.split_once('.') {
+            Some((table, name)) => (Some(table), name),
+            None => (None, key.as_str()),
+        };
+        let parent = match table {
+            Some(table) => doc
+                .entry(table)
+                .or_insert_with(|| Item::Table(Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| format!("[{table}] is not a table"))?,
+            None => doc.as_table_mut(),
+        };
+
+        // A whole table (keybindings): exactly these entries afterwards.
+        if let serde_json::Value::Object(entries) = value {
+            let target = parent
+                .entry(name)
+                .or_insert_with(|| Item::Table(Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| format!("{key} is not a table"))?;
+            let stale: Vec<String> = target.iter().map(|(k, _)| k.to_string()).filter(|k| !entries.contains_key(k)).collect();
+            for k in stale {
+                target.remove(&k);
+            }
+            for (k, v) in entries {
+                set_value(target, k, v)?;
+            }
+        } else {
+            set_value(parent, name, value)?;
+        }
+    }
+    Ok(doc.to_string())
+}
+
+/// Replaces a value but keeps what surrounds it: the comment lines above belong to
+/// the key and a trailing `# comment` to the value, so both are carried over.
+fn set_value(table: &mut toml_edit::Table, key: &str, value: &serde_json::Value) -> Result<(), String> {
+    let mut new = match value {
+        serde_json::Value::Bool(b) => toml_edit::Value::from(*b),
+        serde_json::Value::String(s) => toml_edit::Value::from(s.as_str()),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => toml_edit::Value::from(i),
+            None => toml_edit::Value::from(n.as_f64().ok_or("number out of range")?),
+        },
+        other => return Err(format!("{key}: unsupported value {other}")),
+    };
+    match table.get_mut(key) {
+        Some(item) => {
+            if let Some(old) = item.as_value() {
+                *new.decor_mut() = old.decor().clone();
+            }
+            *item = toml_edit::Item::Value(new);
+        }
+        None => {
+            table.insert(key, toml_edit::Item::Value(new));
+        }
+    }
+    Ok(())
+}
+
 pub enum Reload {
     Unchanged,
     ErrorCleared,
@@ -271,6 +360,49 @@ mod tests {
     fn monitor_choice_parses() {
         assert_eq!(Config::parse("monitor = \"primary\"").unwrap().monitor, MonitorChoice::Primary);
         assert!(Config::parse("monitor = \"left\"").is_err());
+    }
+
+    #[test]
+    fn editing_keeps_comments_and_layout() {
+        let changes = serde_json::json!({
+            "height": 0.4,
+            "slide_ms": 0,
+            "theme": "nord",
+            "font.size": 16,
+            "keybindings": { "new_tab": "ctrl+t" },
+        });
+        let updated = apply_changes(DEFAULT_FILE, changes.as_object().unwrap()).unwrap();
+
+        let config = Config::parse(&updated).unwrap();
+        assert_eq!((config.height, config.slide_ms, config.theme.as_str(), config.font.size), (0.4, 0, "nord", 16.0));
+        assert_eq!(config.keybindings["new_tab"], "ctrl+t");
+        assert!(updated.contains("height = 0.4   # 0.1 - 1.0"), "trailing comment kept:
+{updated}");
+        assert!(updated.starts_with("# qterm settings."), "header kept");
+        assert_eq!(updated.lines().count(), DEFAULT_FILE.lines().count() + 1, "only the new binding added a line");
+    }
+
+    #[test]
+    fn editing_replaces_the_whole_keybindings_table() {
+        let start = "[keybindings]
+new_tab = \"ctrl+t\"
+find = \"f3\"
+";
+        let changes = serde_json::json!({ "keybindings": { "find": "ctrl+f" } });
+        let config = Config::parse(&apply_changes(start, changes.as_object().unwrap()).unwrap()).unwrap();
+        assert_eq!(config.keybindings.len(), 1);
+        assert_eq!(config.keybindings["find"], "ctrl+f");
+    }
+
+    #[test]
+    fn invalid_edits_are_refused_before_writing() {
+        let dir = std::env::temp_dir().join(format!("qterm-config-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = ConfigState::load(&dir);
+        let bad = serde_json::json!({ "hotkey": "ctrl+Backquote" });
+        assert!(state.update(bad.as_object().unwrap()).unwrap_err().contains("single key"));
+        assert_eq!(std::fs::read_to_string(state.path()).unwrap(), DEFAULT_FILE, "file untouched");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
