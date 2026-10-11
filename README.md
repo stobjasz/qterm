@@ -34,3 +34,16 @@ pwsh scripts/smoke.ps1             # hotkey/window smoke check against the runni
 ```
 
 Inside qterm, `scripts/bench.ps1` measures output throughput.
+
+## Portable build
+
+```sh
+pnpm build:portable
+```
+
+This produces `dist-portable/qterm-<version>-portable-x64.exe`, a single ~6 MB file to
+copy anywhere and run. It needs only Windows 11, which already includes the WebView2
+runtime. The newer ConPTY (Windows Terminal's console host) is embedded and extracted to
+`%LOCALAPPDATA%\dev.qterm.app` on first run. `scripts/fetch-conpty.ps1` fetches it for
+builds (`build:portable` runs it if needed); without it, builds use the ConPTY built into
+Windows. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

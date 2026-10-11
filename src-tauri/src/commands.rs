@@ -52,6 +52,12 @@ pub fn pty_write(sessions: State<'_, SessionManager>, id: SessionId, data: Strin
     sessions.write(id, &data)
 }
 
+/// The UI has processed `bytes` of output; see `pty::flow`.
+#[tauri::command]
+pub fn pty_ack(sessions: State<'_, SessionManager>, id: SessionId, bytes: usize) {
+    sessions.ack(id, bytes);
+}
+
 #[tauri::command]
 pub fn pty_resize(
     sessions: State<'_, SessionManager>,
@@ -70,4 +76,9 @@ pub fn pty_kill(sessions: State<'_, SessionManager>, id: SessionId) {
 #[tauri::command]
 pub fn hide_window(app: AppHandle) {
     window::dismiss(&app);
+}
+
+#[tauri::command]
+pub fn ui_ready(app: AppHandle) {
+    window::ui_ready(&app);
 }

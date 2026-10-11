@@ -10,8 +10,9 @@
   pwsh scripts/smoke.ps1            # report state, then hide/show via the ~ key
   pwsh scripts/smoke.ps1 -StateOnly # just report
   pwsh scripts/smoke.ps1 -Show      # bring the console up (e.g. before a CDP check)
+  pwsh scripts/smoke.ps1 -Hide      # put it away (e.g. to test a hidden console)
 #>
-param([switch]$StateOnly, [switch]$Show)
+param([switch]$StateOnly, [switch]$Show, [switch]$Hide)
 
 $ErrorActionPreference = 'Stop'
 
@@ -65,7 +66,8 @@ public static class QtermWin32 {
 [QtermWin32]::SetProcessDPIAware() | Out-Null
 
 function Get-QuakeState {
-    $proc = Get-Process qterm -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Matches dev (qterm.exe) and portable (qterm-<version>-portable-x64.exe) builds.
+    $proc = Get-Process -Name 'qterm*' -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $proc) { throw 'qterm is not running' }
     $hwnd = [QtermWin32]::FindQuake([uint32]$proc.Id)
     if ($hwnd -eq [IntPtr]::Zero) { throw 'qterm has no quake window' }
@@ -96,6 +98,14 @@ if ($Show) {
     for ($i = 0; $i -lt 2 -and -not ($s.Visible -and $s.Focused); $i++) { $s = Invoke-Hotkey }
     "shown:         $s"
     if (-not $s.Visible) { exit 1 }
+    return
+}
+if ($Hide) {
+    # Visible but behind needs a press to focus it first, then one to hide it.
+    $s = $initial
+    for ($i = 0; $i -lt 2 -and $s.Visible; $i++) { $s = Invoke-Hotkey }
+    "hidden:        $s"
+    if ($s.Visible) { exit 1 }
     return
 }
 

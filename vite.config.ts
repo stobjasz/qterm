@@ -7,6 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react()],
+  // The bundle is embedded in the exe and loaded from memory, not downloaded,
+  // so the web-oriented chunk-size warning doesn't apply.
+  build: { chunkSizeWarningLimit: 2000 },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

@@ -7,6 +7,7 @@ import {
   listProfiles,
   onConfigChanged,
   onQuakeVisibility,
+  uiReady,
   type ConfigSnapshot,
   type Profile,
 } from "./ipc";
@@ -159,7 +160,9 @@ export default function App() {
       setSlideMs(slideMs);
       setShown(visible);
     });
-    // The window may already be on screen before this listener exists (first launch).
+    // Rust shows the console on launch only after this, so the event isn't missed.
+    void Promise.all([unlisten, unlistenConfig]).then(() => uiReady());
+    // After a page reload the window can already be on screen.
     void getCurrentWindow()
       .isVisible()
       .then((visible) => visible && setShown(true));

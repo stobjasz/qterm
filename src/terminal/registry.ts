@@ -6,12 +6,16 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
-import { onPtyExit, ptyKill, ptyResize, ptySpawn, ptyWrite, type SessionId } from "../ipc";
+import { onPtyExit, ptyAck, ptyKill, ptyResize, ptySpawn, ptyWrite, type SessionId } from "../ipc";
 import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
 import { terminalOptions } from "./theme";
 
 const RESIZE_DEBOUNCE_MS = 50;
+/** Processed output is acknowledged in batches of at least this many bytes... */
+const ACK_BATCH_BYTES = 64 * 1024;
+/** ...or after this long, whichever comes first. Rust resumes reading at 128 KB unacked. */
+const ACK_DELAY_MS = 20;
 
 export interface RegistryEvents {
   onCommand(paneId: PaneId, command: Command): void;
@@ -27,6 +31,9 @@ interface Entry {
   opened: boolean;
   sessionId?: SessionId;
   resizeTimer?: number;
+  /** Output xterm.js has processed but Rust hasn't been told about yet. */
+  pendingAck: number;
+  ackTimer?: number;
 }
 
 export interface FontSettings {
@@ -74,6 +81,7 @@ export class TerminalRegistry {
     if (!entry) return;
     this.entries.delete(paneId);
     window.clearTimeout(entry.resizeTimer);
+    window.clearTimeout(entry.ackTimer);
     if (entry.sessionId !== undefined) void ptyKill(entry.sessionId);
     entry.term.dispose();
     entry.wrapper.remove();
@@ -98,11 +106,25 @@ export class TerminalRegistry {
     }
   }
 
+  private processed(entry: Entry, bytes: number): void {
+    entry.pendingAck += bytes;
+    if (entry.pendingAck >= ACK_BATCH_BYTES) this.flushAck(entry);
+    else if (entry.ackTimer === undefined) entry.ackTimer = window.setTimeout(() => this.flushAck(entry), ACK_DELAY_MS);
+  }
+
+  private flushAck(entry: Entry): void {
+    window.clearTimeout(entry.ackTimer);
+    entry.ackTimer = undefined;
+    if (entry.sessionId === undefined || entry.pendingAck === 0) return;
+    void ptyAck(entry.sessionId, entry.pendingAck);
+    entry.pendingAck = 0;
+  }
+
   private create(paneId: PaneId, profileId: string): Entry {
     const wrapper = document.createElement("div");
     wrapper.className = "terminal-wrapper";
     const term = new Terminal({ ...terminalOptions, fontFamily: this.font.family, fontSize: this.font.size });
-    const entry: Entry = { term, fit: new FitAddon(), wrapper, profileId, opened: false };
+    const entry: Entry = { term, fit: new FitAddon(), wrapper, profileId, opened: false, pendingAck: 0 };
     this.entries.set(paneId, entry);
     return entry;
   }
@@ -134,11 +156,14 @@ export class TerminalRegistry {
       }, RESIZE_DEBOUNCE_MS);
     });
 
-    ptySpawn(entry.profileId, term.cols, term.rows, (data) => term.write(data))
+    // Acknowledge only after xterm has parsed the data, so a slow renderer slows the shell.
+    const onOutput = (data: Uint8Array) => term.write(data, () => this.processed(entry, data.length));
+    ptySpawn(entry.profileId, term.cols, term.rows, onOutput)
       .then((id) => {
         // The pane may have been closed while the shell was starting.
-        if (this.entries.get(paneId) === entry) entry.sessionId = id;
-        else void ptyKill(id);
+        if (this.entries.get(paneId) !== entry) return void ptyKill(id);
+        entry.sessionId = id;
+        this.flushAck(entry); // output may have arrived before the id did
       })
       .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
   }

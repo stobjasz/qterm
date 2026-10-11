@@ -18,6 +18,21 @@ pub const LABEL: &str = "quake";
 #[derive(Default)]
 pub struct QuakeState {
     hiding: AtomicBool,
+    show_when_ready: AtomicBool,
+}
+
+/// Show the console once the UI reports ready (a normal launch, not `--background`).
+/// Showing straight from setup races the webview's creation and can be lost.
+pub fn show_when_ready(app: &AppHandle) {
+    app.state::<QuakeState>().show_when_ready.store(true, Ordering::Release);
+}
+
+/// Called by the UI once its listeners are attached. Only the first call counts,
+/// so a reloaded page doesn't pop the console up again.
+pub fn ui_ready(app: &AppHandle) {
+    if app.state::<QuakeState>().show_when_ready.swap(false, Ordering::AcqRel) {
+        toggle(app);
+    }
 }
 
 #[derive(Clone, Serialize)]

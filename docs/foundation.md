@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4 done; M5 (hardening) next (see §11–14). Date: 2026-10-11.
+Status: M0–M4 and M5a done. Next: more features, then M6 (installer, auto-update). See §11–15. Date: 2026-10-11.
 
 ---
 
@@ -307,7 +307,9 @@ qterm/
 | **M2** | Tabs + profiles (pwsh/cmd/WSL/Git Bash) + tab bar | Open/close/switch/rename tabs by keyboard |
 | **M3** | Split tree: N-way splits, focus nav, drag resize, equalize | 3 shells side by side in one tab, all resizable |
 | **M4** | Config file + hot reload, keybinding overrides, multi-monitor/DPI, hide-on-blur, fonts/themes | No rebuild needed to customize |
-| **M5** | Hardening: Job Objects, bundled ConPTY, backpressure, `tilde` mode (S5), NSIS installer, updater, E2E suite | Installable release |
+| **M5a** | Bundled ConPTY, backpressure, portable single-exe build | One exe that runs anywhere on Windows 11 |
+| *(next)* | More features, chosen with the user | |
+| **M6** | Job Objects, NSIS installer, auto-update, E2E suite | Installable release |
 
 Rough effort for one developer with AI assistance: M0–M1 about 1 week, M2–M3 about
 1–2 weeks, M4–M5 about 2 weeks.
@@ -424,3 +426,47 @@ Lessons:
   changes.
 - **Not verified:** clicking the tray "Hotkey ~" item. It can't be automated here, but it
   runs the same unregister/register path that was checked.
+
+## 15. M5a results (2026-10-11)
+
+- **Bundled ConPTY 1.25.260930003** (`Microsoft.Windows.Console.ConPTY`, MIT, see
+  `THIRD_PARTY_NOTICES.md`). `scripts/fetch-conpty.ps1` downloads the pinned package,
+  checks its SHA-256 and both binaries' Microsoft Authenticode signatures, and drops the
+  x64 `conpty.dll` + `OpenConsole.exe` into `src-tauri/vendor/` (gitignored). `build.rs`
+  embeds them when present (cfg `bundled_conpty`); without them it warns and uses Windows'
+  built-in ConPTY.
+  At startup `pty::conpty::install` extracts them to
+  `%LOCALAPPDATA%\dev.qterm.app\conpty\<version>\`, rewriting any file that differs
+  from the embedded copy, and preloads the DLL by full path. portable-pty's bare-name
+  `LoadLibrary("conpty.dll")` then gets that module, so the process-wide DLL search path
+  stays untouched. Verified by process inspection: `conpty.dll` comes from the cache, and
+  the session host is that folder's `OpenConsole.exe`, not `conhost.exe`.
+- **Backpressure** (`pty/flow.rs`): the flusher counts bytes sent; the UI acknowledges
+  them after `term.write` has processed them (batched at 64 KB or 20 ms). The reader stops
+  reading at 512 KB outstanding and resumes at 128 KB, so a flood blocks the shell instead
+  of growing webview memory. On close, the flow stops pausing so the reader drains to EOF,
+  because closing a pseudoconsole can hang on a full pipe. Integration test: about 6 MB of
+  unacknowledged output pauses near the high-water mark with the shell still running, and
+  acknowledging lets it finish.
+- **Hidden console at full speed:** with flow control, a throttled hidden webview would
+  throttle the shell too. `additionalBrowserArgs` disables background timer throttling,
+  renderer backgrounding and occluded-window backgrounding, and keeps wry's default
+  `--disable-features` set. Measured on 100k lines: 5.77 s visible vs 5.56 s hidden;
+  release build 5.63 s.
+- **Ctrl+C fix (found while testing):** Windows passes "ignore Ctrl+C" from parent to
+  child process. Launched from a terminal or pnpm/node, every shell inherited it and Ctrl+C
+  did nothing. `allow_ctrl_c_in_children` clears it once before the first spawn. The
+  regression test fails without the fix. After the fix, Ctrl+C stops an endless flood and
+  the prompt is back in well under a second.
+- **Launch race fix (found on the release build):** showing the window from setup could
+  be lost while the webview was still being created, and the console stayed hidden. The UI
+  now calls `ui_ready` once its listeners are attached, and Rust shows the console then;
+  only the first call counts. 3 of 3 release launches visible; `--background` stays hidden.
+- **Portable build:** `pnpm build:portable` runs `tauri build --no-bundle` and gives
+  `dist-portable/qterm-<version>-portable-x64.exe`, about 6 MB. `dumpbin /dependents`
+  lists only Windows system DLLs (WebView2 loader and C runtime are static). Run from an
+  empty folder it leaves nothing beside itself: settings go to `%APPDATA%`, ConPTY and
+  WebView2 data to `%LOCALAPPDATA%\dev.qterm.app`. The tab, split and throughput checks
+  pass on it.
+- **Portable caveat:** "Start with Windows" registers the exe's current path, so moving
+  the exe breaks autostart until the checkbox is toggled again.

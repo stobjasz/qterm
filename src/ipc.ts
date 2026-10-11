@@ -68,12 +68,22 @@ export function ptyWrite(id: SessionId, data: string): Promise<void> {
   return invoke("pty_write", { id, data });
 }
 
+/** Tells Rust that xterm.js has processed `bytes` of output (flow control). */
+export function ptyAck(id: SessionId, bytes: number): Promise<void> {
+  return invoke("pty_ack", { id, bytes });
+}
+
 export function ptyResize(id: SessionId, cols: number, rows: number): Promise<void> {
   return invoke("pty_resize", { id, cols, rows });
 }
 
 export function ptyKill(id: SessionId): Promise<void> {
   return invoke("pty_kill", { id });
+}
+
+/** The UI is listening; on a normal launch Rust shows the console now. */
+export function uiReady(): Promise<void> {
+  return invoke("ui_ready");
 }
 
 export function hideWindow(): Promise<void> {

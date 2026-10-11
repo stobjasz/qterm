@@ -38,6 +38,14 @@ pub fn run() {
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
         .setup(|app| {
+            // Before anything can open a PTY: the first one fixes which ConPTY is used.
+            match pty::conpty::install(&app.path().app_local_data_dir()?) {
+                pty::conpty::Host::Bundled { version, dir } => {
+                    eprintln!("qterm: ConPTY {version} from {}", dir.display())
+                }
+                pty::conpty::Host::Inbox { reason } => eprintln!("qterm: using Windows' built-in ConPTY: {reason}"),
+            }
+
             let config_dir = app.path().app_config_dir()?;
             let config = ConfigState::load(&config_dir);
             if let Some(error) = config.snapshot().error {
@@ -59,7 +67,7 @@ pub fn run() {
             app.manage(ConfigWatcher(Mutex::new(watcher)));
 
             if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
-                window::toggle(app.handle());
+                window::show_when_ready(app.handle());
             }
             Ok(())
         })
@@ -76,9 +84,11 @@ pub fn run() {
             commands::list_profiles,
             commands::pty_spawn,
             commands::pty_write,
+            commands::pty_ack,
             commands::pty_resize,
             commands::pty_kill,
             commands::hide_window,
+            commands::ui_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
