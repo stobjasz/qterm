@@ -25,6 +25,9 @@ const APP_ID: &str = "dev.qterm.app";
 const INBOX: &str = "alerts";
 /// Larger hook input than this is not a notification.
 const MAX_INPUT: u64 = 1 << 20;
+/// Claude Code writes the input and closes the pipe at once; if a caller never
+/// closes it, give up instead of lingering.
+const INPUT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One alert as the UI sees it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,10 +54,13 @@ struct HookInput {
 /// Outside qterm (no `QTERM_PANE`) it does nothing at all.
 pub fn run_hook() {
     let Ok(pane_id) = std::env::var(PANE_ENV) else { return };
-    let mut input = String::new();
-    if std::io::stdin().take(MAX_INPUT).read_to_string(&mut input).is_err() {
-        return;
-    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut input = String::new();
+        let ok = std::io::stdin().take(MAX_INPUT).read_to_string(&mut input).is_ok();
+        let _ = tx.send(ok.then_some(input));
+    });
+    let Ok(Some(input)) = rx.recv_timeout(INPUT_TIMEOUT) else { return };
     let Some(alert) = alert_from_hook(&pane_id, &input) else { return };
     if let Some(inbox) = inbox_dir() {
         let _ = deliver(&inbox, &alert);
