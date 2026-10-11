@@ -93,6 +93,8 @@ interface Entry {
   /** Latest folder the shell reported; file links resolve against it. */
   cwd?: string;
   opened: boolean;
+  /** Its shell has been started (see start). */
+  started: boolean;
   sessionId?: SessionId;
   resizeTimer?: number;
   /** Output xterm.js has processed but Rust hasn't been told about yet. */
@@ -109,6 +111,8 @@ interface Entry {
   lastBell: number;
   /** Date.now() of the latest output (busy/idle status). */
   lastOutput: number;
+  /** Input produced before the shell's session id was known, e.g. the reply to ConPTY's cursor query. */
+  earlyInput: string[];
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -151,6 +155,7 @@ export class TerminalRegistry {
     const entry = this.entries.get(paneId);
     if (!entry?.opened || entry.wrapper.clientWidth === 0) return;
     entry.fit.fit();
+    this.start(paneId, entry);
   }
 
   focus(paneId: PaneId): void {
@@ -300,6 +305,7 @@ export class TerminalRegistry {
       spec,
       cwd: spec.cwd,
       opened: false,
+      started: false,
       pendingAck: 0,
       linesSinceScan: 0,
       claudeSeen: new Set(),
@@ -307,6 +313,7 @@ export class TerminalRegistry {
       activityReported: false,
       lastBell: 0,
       lastOutput: 0,
+      earlyInput: [],
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -342,6 +349,7 @@ export class TerminalRegistry {
       for (const target of this.broadcast.get(paneId) ?? [paneId]) {
         const session = this.entries.get(target)?.sessionId;
         if (session !== undefined) void ptyWrite(session, data);
+        else if (target === paneId) entry.earlyInput.push(data);
       }
     });
     term.onBell(() => {
@@ -368,8 +376,17 @@ export class TerminalRegistry {
       entry.scanTimer ??= window.setTimeout(() => this.scanForClaude(paneId, entry), CLAUDE_SCAN_DELAY_MS);
     });
 
-    if (entry.spec.restored) showRestored(term, entry.spec.restored);
+    // A restored pane in a tab that isn't showing has no size yet. Its old output and
+    // its shell wait for the first real fit: at the 80x24 placeholder, the jump to the
+    // real size makes ConPTY repaint over the restored lines.
+    if (!entry.spec.restored || entry.wrapper.clientWidth > 0) this.start(paneId, entry);
+  }
 
+  /** Shows any restored output, then starts the pane's shell. Runs once per pane. */
+  private start(paneId: PaneId, entry: Entry): void {
+    if (entry.started) return;
+    entry.started = true;
+    const { term } = entry;
     // Acknowledge only after xterm has parsed the data, so a slow renderer slows the shell.
     let pendingInput = entry.spec.startupInput;
     const onOutput = (data: Uint8Array) =>
@@ -386,12 +403,15 @@ export class TerminalRegistry {
           pendingInput = undefined;
         }
       });
-    ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput)
+    // Earlier output first: ConPTY asks where the cursor is and starts the shell there.
+    (entry.spec.restored ? showRestored(term, entry.spec.restored) : Promise.resolve())
+      .then(() => ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput))
       .then((id) => {
         // The pane may have been closed while the shell was starting.
         if (this.entries.get(paneId) !== entry) return void ptyKill(id);
         entry.sessionId = id;
         this.flushAck(entry); // output may have arrived before the id did
+        for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
       })
       .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
   }
@@ -495,16 +515,24 @@ function loadWebgl(term: Terminal): void {
 }
 
 /**
- * Puts output saved before a restart above the new shell: the old text, a dim
- * divider, then a full-screen erase that pushes it all into the scrollback. The
- * new shell then starts on a clean screen (ConPTY begins at the top) with the
- * old output a scroll away.
+ * Puts output saved before a restart above the new shell: the old text, then a dim
+ * divider on the line after its last text. Resolves once both are on screen; the
+ * shell starts after that, and ConPTY (PSEUDOCONSOLE_INHERIT_CURSOR) asks where the
+ * cursor is, so the new prompt appears right under the divider with the old output
+ * still in view.
  */
-function showRestored(term: Terminal, saved: string): void {
+function showRestored(term: Terminal, saved: string): Promise<void> {
   const when = new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  term.write(`${saved}\x1b[0m\r\n\x1b[90m──── restored ${when} ────\x1b[0m\r\n`);
-  term.options.scrollOnEraseInDisplay = true;
-  term.write("\x1b[2J\x1b[H", () => {
-    term.options.scrollOnEraseInDisplay = false;
+  return new Promise((resolve) => {
+    term.write(`${saved}\x1b[0m`, () => {
+      // The saved screen ends with the cursor where the program left it, which may be
+      // mid-screen (an editor, Claude Code's input box): go below the last text instead.
+      const buffer = term.buffer.active;
+      const cursor = buffer.baseY + buffer.cursorY;
+      let last = buffer.length - 1;
+      while (last > cursor && !buffer.getLine(last)?.translateToString(true).trim()) last--;
+      const down = last > cursor ? `\x1b[${last - cursor}B` : "";
+      term.write(`${down}\r\n\x1b[90m──── restored ${when} ────\x1b[0m\r\n`, resolve);
+    });
   });
 }

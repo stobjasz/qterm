@@ -688,3 +688,25 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
     `'C:\My Files\it''s a.txt' C:\tools\x.exe` there and focused it, and the left pane
     stayed clean.
   - Not yet checked: a real drag from Explorer.
+
+### 20a. Restored output stays in view (2026-10-11)
+
+- **Problem:** restoring worked, but ED2 pushed the old output, divider included, into
+  the scrollback. The console opened on a blank screen with a fresh prompt, and with
+  the scrollbar hidden it looked as if nothing had been restored.
+- **Now:**
+  - The old output is written and the cursor goes to the line after its last text. A
+    saved screen can end with the cursor mid-screen, e.g. in Claude Code's input box.
+  - Then the divider is written, and only then the shell starts.
+  - portable-pty creates ConPTY with `PSEUDOCONSOLE_INHERIT_CURSOR`, so ConPTY asks
+    where the cursor is and the prompt appears right under the divider, with the old
+    output still on screen.
+  - Input produced before the session id is known, such as the reply to that cursor
+    query, is queued instead of dropped.
+- **Hidden tabs:** a restored pane in a tab that isn't showing waits for its first real
+  fit before restoring and starting its shell. Started at the 80x24 placeholder, the
+  jump to the real size let ConPTY repaint over the restored lines.
+- **Verified** with copies of real saved files in a test instance:
+  - The active tab shows Claude Code's last screen, the divider and a new prompt.
+  - The background tab, once shown, shows the same.
+  - Changing rows or columns afterwards keeps the restored lines.
