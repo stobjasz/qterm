@@ -58,6 +58,15 @@ claude_alerts = true
 # opens in its default app.
 editor = "code --goto {file}:{line}:{col}"
 
+# Keep each pane's output across restarts (with restore_session): restored panes
+# show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
+# `profiles` switches it per shell, overriding `restore`, e.g.
+#   profiles = { "wsl:Ubuntu" = false, cmd = true }
+[scrollback]
+restore = true
+lines = 1000
+profiles = {}
+
 [font]
 family = '"Cascadia Mono", "Cascadia Code", Consolas, monospace'
 size = 14   # 6 - 72

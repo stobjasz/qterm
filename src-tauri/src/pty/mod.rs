@@ -394,6 +394,68 @@ mod tests {
         assert_eq!(exited, id);
     }
 
+    /// Child half of the crash test below: owns a session whose shell runs ping,
+    /// reports the shell's pid, then waits to be killed.
+    #[test]
+    #[ignore]
+    fn crash_helper_owns_a_session() {
+        if std::env::var_os("QTERM_CRASH_HELPER").is_none() {
+            return;
+        }
+        let manager = SessionManager::default();
+        let (id, _probe) = spawn(&manager, &["/c", "ping -n 100 127.0.0.1"]);
+        let pid = manager.sessions.lock().unwrap()[&id].pid.unwrap();
+        println!("SHELL_PID={pid}");
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        thread::sleep(Duration::from_secs(60));
+    }
+
+    /// Why qterm needs no Job Object: when the process that owns a pseudoconsole dies
+    /// (crash, Task Manager), the console host goes with it and Windows ends every
+    /// process attached to that console: the shell and the programs running in it.
+    #[test]
+    fn a_crash_takes_the_shell_and_its_programs_with_it() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+
+        let mut helper = Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "pty::tests::crash_helper_owns_a_session", "--nocapture", "--test-threads=1"])
+            .env("QTERM_CRASH_HELPER", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdout = std::io::BufReader::new(helper.stdout.take().unwrap());
+        let shell: u32 = stdout
+            .lines()
+            .map_while(Result::ok)
+            // The harness prints "test <name> ... " without a newline, so it can share the line.
+            .find_map(|line| line.split("SHELL_PID=").nth(1).map(|pid| pid.trim().parse().unwrap()))
+            .expect("helper reported no shell");
+
+        // Wait for ping to run inside the shell, and remember its pid.
+        let deadline = Instant::now() + TIMEOUT;
+        let ping = loop {
+            let found = crate::procs::snapshot().into_iter().find(|p| p.parent == shell && p.name == "ping.exe");
+            if let Some(p) = found {
+                break p.pid;
+            }
+            assert!(Instant::now() < deadline, "ping never started");
+            thread::sleep(Duration::from_millis(100));
+        };
+
+        helper.kill().unwrap(); // TerminateProcess, as a crash would end it
+        helper.wait().unwrap();
+
+        let alive = |pid: u32| crate::procs::snapshot().iter().any(|p| p.pid == pid);
+        let deadline = Instant::now() + TIMEOUT;
+        while (alive(shell) || alive(ping)) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(100));
+        }
+        assert!(!alive(shell), "the shell outlived its owner");
+        assert!(!alive(ping), "a program in the shell outlived its owner");
+    }
+
     #[test]
     fn resize_unknown_session_is_an_error() {
         assert!(SessionManager::default().resize(99, 80, 24).is_err());

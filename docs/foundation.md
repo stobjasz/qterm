@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4, M5a and the feature rounds (§16–18) done. Next: see roadmap.md. See §11–18. Date: 2026-10-11.
+Status: M0–M4, M5a and the feature rounds (§16–19) done. Next: see roadmap.md. See §11–19. Date: 2026-10-11.
 
 ---
 
@@ -604,3 +604,50 @@ includes `message`, `title`, `notification_type` and `session_id`.
     branch and 15 prompts;
   - the status chip going working → idle → gone, using a renamed `cmd.exe` as a stand-in
     `claude.exe`. Real Claude was never launched.
+
+## 19. Scrollback across restarts (#10) and crash cleanup (#12) (2026-10-11)
+
+**#12: shells after a crash.** Measured before building anything. With qterm
+force-killed, as in a crash or Task Manager:
+- the shell (`pwsh`) and its console host (`OpenConsole.exe`) were gone within 3 s;
+- so was a `ping` running inside the shell, because Windows ends every process attached
+  to a console when that console's host exits;
+- a GUI program started from the shell was not affected.
+
+A Job Object with kill-on-close would add nothing here, and it would also kill programs
+the user deliberately started from a shell (`code .`, a browser). So there is no Job
+Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_programs_with_it`:
+- the test binary starts itself as a helper that owns a PTY session running `ping`;
+- the test terminates the helper with TerminateProcess and asserts that the shell and
+  `ping` are gone.
+- Pitfall found writing it: the test harness prints `test <name> ... ` without a newline,
+  so the helper's `SHELL_PID=` shares that line.
+
+**#10: scrollback.**
+- `@xterm/addon-serialize` saves the normal screen (colours included, alternate screen
+  and modes excluded, last `scrollback.lines` rows). Files go to
+  `%LOCALAPPDATA%\dev.qterm.app\scrollback\<pane>.txt`; pane ids are validated before
+  becoming file names.
+- **When it saves:**
+  - every 30 s, for panes that printed since their last save;
+  - when the console is hidden;
+  - on tray → Quit, which now asks the UI to save first and exits on `quit_now`, with a
+    3 s fallback if the UI doesn't answer.
+  - Each save cycle prunes files of closed panes and of switched-off shells.
+- **Restoring:** on session restore the files are loaded before the panes mount.
+  - The registry writes the old output, then a dim "──── restored <time> ────" line, then
+    ED2 with `scrollOnEraseInDisplay` on.
+  - That pushes everything into the scrollback, so ConPTY's cursor-home lands on a clean
+    screen and the new prompt starts at the top.
+- **Per shell:** `[scrollback] restore / lines / profiles = { id = bool }`. The settings
+  panel has a checkbox per shell, storing only exceptions to the general switch.
+- **TOML pitfalls found:**
+  - `[scrollback]` must come after all top-level keys. Placed earlier, it swallowed
+    `shell_integration` and friends; the documented-defaults test caught that.
+  - The editor now handles inline tables (`profiles = {}`) through `TableLike`.
+- **Verified live:**
+  - output saved on hide, with its magenta colour;
+  - after a UI restart, the old output plus the divider above a fresh prompt at row 0;
+  - Command Prompt switched off → not saved, while PowerShell was;
+  - Quit → the latest output saved, then exited by itself after 1.7 s, inside the 3 s
+    grace.

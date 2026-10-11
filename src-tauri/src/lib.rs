@@ -7,6 +7,7 @@ mod editor;
 mod hotkey;
 mod procs;
 mod pty;
+mod scrollback;
 mod tray;
 mod window;
 
@@ -63,6 +64,7 @@ pub fn run() {
             let config_path = config.path().to_owned();
             app.manage(config);
             app.manage(claude::ClaudeStore::load(&config_dir, claude::claude_home()));
+            app.manage(scrollback::ScrollbackStore::new(app.path().app_local_data_dir()?.join("scrollback")));
 
             // Another app may already own the key; the tray says so and still toggles.
             if let Err(e) = hotkey::apply(app.handle()) {
@@ -124,6 +126,10 @@ pub fn run() {
             commands::delete_layout,
             commands::list_all_claude_sessions,
             commands::claude_running,
+            commands::save_scrollback,
+            commands::load_scrollback,
+            commands::prune_scrollback,
+            commands::quit_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

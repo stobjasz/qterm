@@ -242,3 +242,24 @@ pub async fn list_all_claude_sessions(index: State<'_, crate::claude::Transcript
 pub async fn claude_running(sessions: State<'_, SessionManager>) -> Result<Vec<SessionId>, String> {
     Ok(sessions.running("claude.exe"))
 }
+
+#[tauri::command]
+pub fn save_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pane_id: String, text: String) -> Result<(), String> {
+    store.save(&pane_id, &text)
+}
+
+#[tauri::command]
+pub fn load_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pane_id: String) -> Option<String> {
+    store.load(&pane_id)
+}
+
+#[tauri::command]
+pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, keep: Vec<String>) {
+    store.prune(&keep);
+}
+
+/// The UI has saved what it needs after "quit-requested"; exit now.
+#[tauri::command]
+pub fn quit_now(app: AppHandle) {
+    app.exit(0);
+}

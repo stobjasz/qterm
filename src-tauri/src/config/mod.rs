@@ -45,6 +45,25 @@ pub struct Config {
     pub profiles: Vec<CustomProfile>,
     /// Named tab layouts ([[layouts]]).
     pub layouts: Vec<LayoutDef>,
+    /// Keeping each pane's output across restarts ([scrollback]).
+    pub scrollback: ScrollbackSettings,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct ScrollbackSettings {
+    /// For shells not listed in `profiles`.
+    pub restore: bool,
+    /// Lines kept per pane.
+    pub lines: u32,
+    /// Profile id → on/off, overriding `restore` for that shell.
+    pub profiles: BTreeMap<String, bool>,
+}
+
+impl Default for ScrollbackSettings {
+    fn default() -> Self {
+        Self { restore: true, lines: 1000, profiles: BTreeMap::new() }
+    }
 }
 
 /// A user-defined shell, e.g. an SSH host or `npm run dev` in a folder.
@@ -160,6 +179,7 @@ impl Default for Config {
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),
             layouts: Vec::new(),
+            scrollback: ScrollbackSettings::default(),
         }
     }
 }
@@ -189,6 +209,7 @@ impl Config {
         in_range("opacity", self.opacity, 0.0, 1.0)?;
         in_range("slide_ms", self.slide_ms as f64, 0.0, 1000.0)?;
         in_range("font.size", self.font.size, 6.0, 72.0)?;
+        in_range("scrollback.lines", f64::from(self.scrollback.lines), 100.0, 10_000.0)?;
         let mut ids = std::collections::BTreeSet::new();
         for profile in &self.profiles {
             if profile.name.trim().is_empty() {
@@ -364,12 +385,13 @@ fn apply_changes(text: &str, changes: &serde_json::Map<String, serde_json::Value
             None => doc.as_table_mut(),
         };
 
-        // A whole table (keybindings): exactly these entries afterwards.
+        // A whole table (keybindings, scrollback.profiles): exactly these entries
+        // afterwards. It may be a [table] or an inline { ... } table.
         if let serde_json::Value::Object(entries) = value {
             let target = parent
                 .entry(name)
                 .or_insert_with(|| Item::Table(Table::new()))
-                .as_table_mut()
+                .as_table_like_mut()
                 .ok_or_else(|| format!("{key} is not a table"))?;
             let stale: Vec<String> = target.iter().map(|(k, _)| k.to_string()).filter(|k| !entries.contains_key(k)).collect();
             for k in stale {
@@ -387,7 +409,7 @@ fn apply_changes(text: &str, changes: &serde_json::Map<String, serde_json::Value
 
 /// Replaces a value but keeps what surrounds it: the comment lines above belong to
 /// the key and a trailing `# comment` to the value, so both are carried over.
-fn set_value(table: &mut toml_edit::Table, key: &str, value: &serde_json::Value) -> Result<(), String> {
+fn set_value(table: &mut dyn toml_edit::TableLike, key: &str, value: &serde_json::Value) -> Result<(), String> {
     let mut new = match value {
         serde_json::Value::Bool(b) => toml_edit::Value::from(*b),
         serde_json::Value::String(s) => toml_edit::Value::from(s.as_str()),
@@ -614,6 +636,15 @@ panes = [
     }
 
     #[test]
+    fn reads_scrollback_settings_per_shell() {
+        let config = Config::parse("[scrollback]\nlines = 500\nprofiles = { \"wsl:Ubuntu\" = false, cmd = true }").unwrap();
+        assert!(config.scrollback.restore, "default stays on");
+        assert_eq!(config.scrollback.lines, 500);
+        assert!(!config.scrollback.profiles["wsl:Ubuntu"]);
+        assert!(Config::parse("[scrollback]\nlines = 5").unwrap_err().contains("scrollback.lines"));
+    }
+
+    #[test]
     fn rejects_broken_profiles_and_layouts() {
         assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"  \"").unwrap_err().contains("empty command"));
         assert!(Config::parse("[[profiles]]\nname = \"a\"\ncommand = \"ssh a\"\n[[profiles]]\nname = \"a\"\ncommand = \"ssh b\"")
@@ -681,6 +712,17 @@ panes = [
 {updated}");
         assert!(updated.starts_with("# qterm settings."), "header kept");
         assert_eq!(updated.lines().count(), DEFAULT_FILE.lines().count() + 1, "only the new binding added a line");
+    }
+
+    #[test]
+    fn editing_an_inline_table_keeps_it_inline() {
+        let start = "[scrollback]\nrestore = true\nprofiles = {}\n";
+        let changes = serde_json::json!({ "scrollback.profiles": { "cmd": false, "wsl:Ubuntu": true } });
+        let updated = apply_changes(start, changes.as_object().unwrap()).unwrap();
+        let config = Config::parse(&updated).unwrap();
+        assert_eq!(config.scrollback.profiles.len(), 2);
+        assert!(!config.scrollback.profiles["cmd"]);
+        assert!(updated.contains("profiles = {"), "still inline:\n{updated}");
     }
 
     #[test]

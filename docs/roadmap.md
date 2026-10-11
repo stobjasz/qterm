@@ -23,14 +23,14 @@ Proposed on 2026-10-11, after the Claude session grouping was finished.
 | 7 | **Named layouts / workspaces**, e.g. "dev" = 3 panes in a folder with start commands, opened from a menu. | ✅ `[[layouts]]`, ▾ menu, palette, "Save this tab as a layout" |
 | 8 | **Custom profiles in config**: SSH hosts, `npm run dev` in a folder, per-profile colours and font. | ✅ `[[profiles]]` |
 | 9 | **Pane tools**: zoom a pane temporarily, swap panes, type into all panes of a tab at once (broadcast input). | ✅ Alt+Shift+Z, Alt+Shift+B, swap via palette |
-| 10 | **Scrollback across restarts**: restored tabs show their previous output, as Windows Terminal can. | ⬜ |
+| 10 | **Scrollback across restarts**: restored tabs show their previous output, as Windows Terminal can. | ✅ `[scrollback]`, switchable per shell |
 
 ## Robustness and release
 
 | # | Feature | Status |
 |---|---|---|
 | 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ⬜ |
-| 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ⬜ |
+| 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ already guaranteed by ConPTY (verified); locked in by a regression test instead of a Job Object, see foundation.md §19 |
 | 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). | ⬜ |
 
 Suggested order: 11 (E2E in CI) before 13 (installer); the rest as wanted.

@@ -14,7 +14,7 @@ import {
 } from "../ipc";
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
-import { changes, overrides, toDraft, type Draft } from "./draft";
+import { changes, keepsScrollback, overrides, toDraft, withShellScrollback, type Draft } from "./draft";
 
 const HOTKEYS: [string, string][] = [
   ["Backquote", "~ (the key left of 1)"],
@@ -172,6 +172,36 @@ export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
           <Field label="Open files with" hint="Ctrl+click a file reference like src/app.ts:42. {file}, {line} and {col} are filled in.">
             <input type="text" value={draft.editor} onChange={(e) => set("editor", e.target.value)} spellCheck={false} />
           </Field>
+        </Group>
+
+        <Group title="Scrollback">
+          <Toggle
+            label="Keep each pane's output across restarts"
+            hint="Restored tabs show their earlier output above a “restored” line (needs “Reopen tabs and layout on start”)."
+            checked={draft.scrollbackRestore}
+            onChange={(v) => set("scrollbackRestore", v)}
+          />
+          <Field label="Lines kept per pane">
+            <input
+              type="number"
+              min={100}
+              max={10000}
+              step={100}
+              value={draft.scrollbackLines}
+              onChange={(e) => set("scrollbackLines", Number(e.target.value))}
+            />
+          </Field>
+          <div className="settings-field">
+            <span className="settings-label">Per shell</span>
+            {profiles.map((profile) => (
+              <Toggle
+                key={profile.id}
+                label={profile.name}
+                checked={keepsScrollback(draft, profile.id)}
+                onChange={(on) => set("scrollbackProfiles", withShellScrollback(draft, profile.id, on))}
+              />
+            ))}
+          </div>
         </Group>
 
         <Group title="Claude Code">

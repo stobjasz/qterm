@@ -68,7 +68,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "settings" => window::open_settings(app),
-            "quit" => app.exit(0),
+            "quit" => request_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -138,4 +138,17 @@ pub fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
 pub fn open_config_file(app: &AppHandle) -> Result<(), String> {
     let path = app.state::<ConfigState>().path().to_string_lossy().into_owned();
     app.opener().open_path(path, None::<&str>).map_err(|e| format!("could not open settings file: {e}"))
+}
+
+/// Lets the UI save the panes' output first (it then calls `quit_now`); exits
+/// on its own if the UI doesn't answer in time.
+fn request_quit(app: &AppHandle) {
+    use tauri::Emitter;
+    const GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+    let _ = app.emit_to(window::LABEL, "quit-requested", ());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(GRACE);
+        app.exit(0);
+    });
 }

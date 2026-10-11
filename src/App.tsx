@@ -19,6 +19,11 @@ import {
   onConfigChanged,
   onOpenSettings,
   onQuakeVisibility,
+  onQuitRequested,
+  quitNow,
+  loadScrollback,
+  pruneScrollback,
+  saveScrollback,
   deleteLayout,
   saveLayout,
   openConfigFile,
@@ -77,6 +82,8 @@ const DEFAULT_OPACITY = 0.82;
 const RESIZE_STEP = 0.05;
 /** The layout is saved this long after the last change. */
 const SAVE_DELAY_MS = 400;
+/** Pane output is saved this often (only panes that printed since the last save). */
+const SCROLLBACK_SAVE_MS = 30_000;
 /** How often to look for Claude Code in the panes, and how recent output means "working". */
 const CLAUDE_POLL_MS = 2000;
 const CLAUDE_BUSY_MS = 2500;
@@ -106,6 +113,8 @@ export default function App() {
   workspaceRef.current = workspace;
   /** Typed into a pane's shell once it starts (resuming a Claude session). */
   const startupInput = useRef(new Map<PaneId, string>());
+  /** Output saved before the restart, shown above each restored pane's new shell. */
+  const restoredOutput = useRef(new Map<PaneId, string>());
 
   // The registry outlives renders; its events reach the latest handlers through this ref.
   const handlers = useRef<RegistryEvents>(null!);
@@ -225,6 +234,7 @@ export default function App() {
       profileId: pane.profileId,
       cwd: pane.cwd,
       startupInput: startupInput.current.get(pane.id),
+      restored: restoredOutput.current.get(pane.id),
       theme: profile?.theme ? THEMES[profile.theme] : undefined,
       fontSize: profile?.fontSize,
     };
@@ -526,12 +536,55 @@ export default function App() {
       return;
     }
     started.current = true;
-    void (config.restoreSession ? loadSession() : Promise.resolve(null)).then((saved) => {
+    void (config.restoreSession ? loadSession() : Promise.resolve(null)).then(async (saved) => {
       const restored = saved ? restoreWorkspace(saved, profiles) : undefined;
-      if (restored) setWorkspace(restored);
-      else newTab();
+      if (!restored) return newTab();
+      // Earlier output first, so it is there before the panes' shells start.
+      await Promise.all(
+        Object.values(restored.panes)
+          .filter((pane) => keepsOutput(config, pane.profileId))
+          .map(async (pane) => {
+            const text = await loadScrollback(pane.id).catch(() => null);
+            if (text) restoredOutput.current.set(pane.id, text);
+          }),
+      );
+      setWorkspace(restored);
     });
   }, [workspace.tabs.length, profiles, config, newTab]);
+
+  // --- scrollback: each pane's output, kept across restarts (per shell) -------------
+  const configRef = useRef(config);
+  configRef.current = config;
+  const lastScrollbackSave = useRef(new Map<PaneId, number>());
+  const saveScrollbacks = useCallback(async () => {
+    const cfg = configRef.current;
+    if (!cfg || !started.current) return;
+    const keep: PaneId[] = [];
+    const saves: Promise<void>[] = [];
+    for (const pane of Object.values(workspaceRef.current.panes)) {
+      if (!cfg.restoreSession || !keepsOutput(cfg, pane.profileId)) continue;
+      keep.push(pane.id);
+      const changed = registry.lastOutput(pane.id) > (lastScrollbackSave.current.get(pane.id) ?? 0);
+      const text = changed ? registry.serialize(pane.id, cfg.scrollback.lines) : undefined;
+      if (text === undefined) continue;
+      lastScrollbackSave.current.set(pane.id, Date.now());
+      saves.push(saveScrollback(pane.id, text).catch(() => {}));
+    }
+    await Promise.all(saves);
+    await pruneScrollback(keep).catch(() => {});
+  }, [registry]);
+  useEffect(() => {
+    const timer = window.setInterval(() => void saveScrollbacks(), SCROLLBACK_SAVE_MS);
+    return () => window.clearInterval(timer);
+  }, [saveScrollbacks]);
+  // Hiding the console is a natural moment to save; quitting is the last one.
+  useEffect(() => {
+    if (!shown) void saveScrollbacks();
+  }, [shown, saveScrollbacks]);
+  useEffect(() => {
+    const unlisten = onQuitRequested(() => void saveScrollbacks().finally(() => void quitNow()));
+    return () => void unlisten.then((fn) => fn());
+  }, [saveScrollbacks]);
 
   // Save the layout shortly after it changes (shell titles alone don't count).
   const lastSaved = useRef<string>(undefined);
@@ -682,4 +735,9 @@ function layoutProblems(layouts: LayoutDef[], profiles: Profile[]): string[] {
 
 function sameStatus(a: ReadonlyMap<PaneId, string>, b: ReadonlyMap<PaneId, string>): boolean {
   return a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+}
+
+/** Whether panes of this shell keep their output across restarts. */
+function keepsOutput(config: { scrollback: { restore: boolean; profiles: Record<string, boolean> } }, profileId: string): boolean {
+  return config.scrollback.profiles[profileId] ?? config.scrollback.restore;
 }

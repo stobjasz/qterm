@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Config } from "../ipc";
-import { changes, overrides, toDraft } from "./draft";
+import { changes, keepsScrollback, overrides, toDraft, withShellScrollback } from "./draft";
 
 const config: Config = {
   hotkey: "Backquote",
@@ -24,6 +24,7 @@ const config: Config = {
   keybindings: {},
   profiles: [],
   layouts: [],
+  scrollback: { restore: true, lines: 1000, profiles: {} },
 };
 
 describe("settings draft", () => {
@@ -57,5 +58,25 @@ describe("settings draft", () => {
     const draft = toDraft(config);
     draft.chords.equalize = "";
     expect(overrides(draft)).toEqual({ equalize: "" });
+  });
+});
+
+describe("scrollback per shell", () => {
+  it("follows the general switch unless a shell says otherwise", () => {
+    const draft = toDraft({ ...config, scrollback: { restore: true, lines: 1000, profiles: { cmd: false } } });
+    expect(keepsScrollback(draft, "pwsh")).toBe(true);
+    expect(keepsScrollback(draft, "cmd")).toBe(false);
+  });
+
+  it("stores only exceptions and saves them as one table", () => {
+    const draft = toDraft(config);
+    draft.scrollbackProfiles = withShellScrollback(draft, "wsl:Ubuntu", false);
+    expect(draft.scrollbackProfiles).toEqual({ "wsl:Ubuntu": false });
+    draft.scrollbackProfiles = withShellScrollback(draft, "wsl:Ubuntu", true);
+    expect(draft.scrollbackProfiles).toEqual({});
+
+    draft.scrollbackProfiles = { cmd: false };
+    draft.scrollbackLines = 500;
+    expect(changes(config, draft)).toEqual({ "scrollback.lines": 500, "scrollback.profiles": { cmd: false } });
   });
 });

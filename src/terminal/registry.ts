@@ -4,6 +4,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -67,6 +68,8 @@ export interface PaneSpec {
   /** The profile's own look, instead of the global theme / font size. */
   theme?: Theme;
   fontSize?: number;
+  /** Output saved before the last restart, shown above the new shell. */
+  restored?: string;
 }
 
 export interface Behavior {
@@ -84,6 +87,7 @@ interface Entry {
   term: Terminal;
   fit: FitAddon;
   search: SearchAddon;
+  serialize: SerializeAddon;
   wrapper: HTMLDivElement;
   spec: PaneSpec;
   /** Latest folder the shell reported; file links resolve against it. */
@@ -185,6 +189,11 @@ export class TerminalRegistry {
     }
   }
 
+  /** The pane's output (normal screen, colours included), last `lines` rows. */
+  serialize(paneId: PaneId, lines: number): string | undefined {
+    return this.entries.get(paneId)?.serialize.serialize({ scrollback: lines, excludeAltBuffer: true, excludeModes: true });
+  }
+
   /** The pane's PTY session, once its shell is running. */
   sessionOf(paneId: PaneId): SessionId | undefined {
     return this.entries.get(paneId)?.sessionId;
@@ -283,6 +292,7 @@ export class TerminalRegistry {
       term,
       fit: new FitAddon(),
       search: new SearchAddon(),
+      serialize: new SerializeAddon(),
       wrapper,
       spec,
       cwd: spec.cwd,
@@ -304,6 +314,7 @@ export class TerminalRegistry {
     const { term, fit, search } = entry;
     term.loadAddon(fit);
     term.loadAddon(search);
+    term.loadAddon(entry.serialize);
     // Unicode 11 widths: emoji and symbols (Claude Code's UI is full of them) take
     // the cells the shell expects, so lines don't drift.
     term.loadAddon(new Unicode11Addon());
@@ -353,6 +364,8 @@ export class TerminalRegistry {
       entry.linesSinceScan++;
       entry.scanTimer ??= window.setTimeout(() => this.scanForClaude(paneId, entry), CLAUDE_SCAN_DELAY_MS);
     });
+
+    if (entry.spec.restored) showRestored(term, entry.spec.restored);
 
     // Acknowledge only after xterm has parsed the data, so a slow renderer slows the shell.
     let pendingInput = entry.spec.startupInput;
@@ -476,4 +489,19 @@ function loadWebgl(term: Terminal): void {
   } catch (err) {
     console.warn("qterm: WebGL renderer unavailable, using DOM renderer", err);
   }
+}
+
+/**
+ * Puts output saved before a restart above the new shell: the old text, a dim
+ * divider, then a full-screen erase that pushes it all into the scrollback. The
+ * new shell then starts on a clean screen (ConPTY begins at the top) with the
+ * old output a scroll away.
+ */
+function showRestored(term: Terminal, saved: string): void {
+  const when = new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  term.write(`${saved}\x1b[0m\r\n\x1b[90m──── restored ${when} ────\x1b[0m\r\n`);
+  term.options.scrollOnEraseInDisplay = true;
+  term.write("\x1b[2J\x1b[H", () => {
+    term.options.scrollOnEraseInDisplay = false;
+  });
 }

@@ -22,12 +22,16 @@ export interface Draft {
   editor: string;
   fontFamily: string;
   fontSize: number;
+  scrollbackRestore: boolean;
+  scrollbackLines: number;
+  /** Per-shell switches that differ from scrollbackRestore. */
+  scrollbackProfiles: Record<string, boolean>;
   /** Effective chord per action; "" means unbound. */
   chords: Record<string, string>;
 }
 
 /** Draft field → config.toml key, for everything except the shortcuts. */
-const TOML_KEYS: Record<Exclude<keyof Draft, "chords">, string> = {
+const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, string> = {
   hotkey: "hotkey",
   height: "height",
   width: "width",
@@ -46,6 +50,8 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords">, string> = {
   editor: "editor",
   fontFamily: "font.family",
   fontSize: "font.size",
+  scrollbackRestore: "scrollback.restore",
+  scrollbackLines: "scrollback.lines",
 };
 
 export function toDraft(config: Config): Draft {
@@ -68,6 +74,9 @@ export function toDraft(config: Config): Draft {
     editor: config.editor,
     fontFamily: config.font.family,
     fontSize: config.font.size,
+    scrollbackRestore: config.scrollback.restore,
+    scrollbackLines: config.scrollback.lines,
+    scrollbackProfiles: { ...config.scrollback.profiles },
     chords: Object.fromEntries(ACTION_LIST.map((a) => [a.name, config.keybindings[a.name] ?? a.defaultChord])),
   };
 }
@@ -91,7 +100,21 @@ export function changes(config: Config, draft: Draft): Record<string, unknown> {
   }
   const wanted = overrides(draft);
   if (!sameTable(wanted, config.keybindings)) out.keybindings = wanted;
+  if (!sameTable(draft.scrollbackProfiles, config.scrollback.profiles)) out["scrollback.profiles"] = draft.scrollbackProfiles;
   return out;
+}
+
+/** Whether a shell keeps its output across restarts under this draft. */
+export function keepsScrollback(draft: Draft, profileId: string): boolean {
+  return draft.scrollbackProfiles[profileId] ?? draft.scrollbackRestore;
+}
+
+/** Switches one shell; a value equal to the general setting needs no entry. */
+export function withShellScrollback(draft: Draft, profileId: string, on: boolean): Record<string, boolean> {
+  const next = { ...draft.scrollbackProfiles };
+  if (on === draft.scrollbackRestore) delete next[profileId];
+  else next[profileId] = on;
+  return next;
 }
 
 function normalize(chord: string): string {
@@ -99,7 +122,7 @@ function normalize(chord: string): string {
   return chord.toLowerCase().replace(/\s+/g, "");
 }
 
-function sameTable(a: Record<string, string>, b: Record<string, string>): boolean {
+function sameTable<V>(a: Record<string, V>, b: Record<string, V>): boolean {
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length && keys.every((k) => b[k] === a[k]);
 }

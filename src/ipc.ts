@@ -47,6 +47,13 @@ export interface Config {
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
   layouts: LayoutDef[];
+  scrollback: {
+    /** For shells not listed in `profiles`. */
+    restore: boolean;
+    lines: number;
+    /** Profile id → on/off. */
+    profiles: Record<string, boolean>;
+  };
 }
 
 /** The config in effect, plus why the file on disk was rejected if it was. */
@@ -270,6 +277,29 @@ export function listAllClaudeSessions(): Promise<TranscriptSummary[]> {
 /** Sessions with Claude Code running inside their shell. */
 export function claudeRunning(): Promise<SessionId[]> {
   return invoke("claude_running");
+}
+
+/** A pane's serialized output, kept across restarts. */
+export function saveScrollback(paneId: string, text: string): Promise<void> {
+  return invoke("save_scrollback", { paneId, text });
+}
+
+export function loadScrollback(paneId: string): Promise<string | null> {
+  return invoke("load_scrollback", { paneId });
+}
+
+/** Deletes saved output of every pane not in `keep`. */
+export function pruneScrollback(keep: string[]): Promise<void> {
+  return invoke("prune_scrollback", { keep });
+}
+
+/** Tray → Quit: save what needs saving, then call quitNow (Rust exits anyway after a grace period). */
+export function onQuitRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen("quit-requested", () => handler());
+}
+
+export function quitNow(): Promise<void> {
+  return invoke("quit_now");
 }
 
 export function onPtyExit(handler: (exit: PtyExit) => void): Promise<UnlistenFn> {

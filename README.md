@@ -8,7 +8,8 @@ translucent console down from the top of the screen.
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
 - Nine colour themes, adjustable size, opacity, font, slide speed; drag the console's
   bottom edge to change its height (double-click it for half the screen)
-- Reopens your tabs and layout, each pane in the folder it was in
+- Reopens your tabs and layout, each pane in the folder it was in, with its earlier
+  output (switchable per shell)
 - Claude Code: remembers sessions (from `claude --resume <id>` in the output), grouped
   by folder, and resumes them from the ✳ menu; alerts you (Windows notification, ✳ on
   the tab) when Claude is waiting for you. Turn both on in Settings → Claude Code.
