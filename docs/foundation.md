@@ -172,7 +172,7 @@ Details that matter:
 ### 4.5 App shell
 - `tauri-plugin-single-instance`: a second launch only toggles the existing window.
 - `tauri-plugin-autostart`: HKCU `Run` key, no admin needed. Launched with
-  `--background` so nothing is shown at login.
+  `--background` so nothing is shown at login. Release builds only (see §15).
 - Tray (Tauri `tray-icon` feature): Show/Hide, New tab, Settings (opens `config.json`),
   Start with Windows ✓, Quit.
 - `ConfigService`: `%APPDATA%\qterm\config.json`, validated with serde, watched with the
@@ -468,8 +468,11 @@ Lessons:
   empty folder it leaves nothing beside itself: settings go to `%APPDATA%`, ConPTY and
   WebView2 data to `%LOCALAPPDATA%\dev.qterm.app`. The tab, split and throughput checks
   pass on it.
-- **Portable caveat:** "Start with Windows" registers the exe's current path, so moving
-  the exe breaks autostart until the checkbox is toggled again.
+- **Portable and autostart:** "Start with Windows" registers the exe's current path. On
+  every launch a release exe re-points an enabled entry at itself, so a moved or
+  replaced exe takes over once it has been run. Dev builds refuse to register: they
+  need the Vite server and open a console window, and an entry naming one showed an
+  error page at logon (2026-10-11).
 
 ## 16. Feature round (2026-10-11)
 

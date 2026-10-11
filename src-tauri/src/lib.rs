@@ -71,6 +71,7 @@ pub fn run() {
                 eprintln!("qterm: could not register the hotkey: {e}");
             }
             tray::create(app.handle())?;
+            tray::repoint_autostart(app.handle());
 
             let handle = app.handle().clone();
             let config_watcher = config::watch(config_path, move || on_config_file_changed(&handle))

@@ -128,11 +128,32 @@ fn set_hotkey(app: &AppHandle) {
 /// mark in step, whether the change came from the tray or the settings panel.
 pub fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
-    let result = if enabled { autolaunch.enable() } else { autolaunch.disable() };
+    let result = if !enabled {
+        autolaunch.disable().map_err(|e| format!("could not change autostart: {e}"))
+    } else if cfg!(debug_assertions) {
+        // A dev build needs the Vite server and opens a console window; at logon it
+        // would show an error page instead of the console.
+        Err("a development build can't start with Windows; turn this on from the portable exe".into())
+    } else {
+        autolaunch.enable().map_err(|e| format!("could not change autostart: {e}"))
+    };
     if let Some(items) = app.try_state::<TrayItems>() {
         let _ = items.autostart.set_checked(autolaunch.is_enabled().unwrap_or(false));
     }
-    result.map_err(|e| format!("could not change autostart: {e}"))
+    result
+}
+
+/// If "Start with Windows" is on, points it at this exe. The portable exe may have
+/// been moved or replaced, and an older entry may name a dev build; whichever
+/// release exe ran last is the one that starts at logon.
+pub fn repoint_autostart(app: &AppHandle) {
+    let autolaunch = app.autolaunch();
+    if !cfg!(debug_assertions)
+        && autolaunch.is_enabled().unwrap_or(false)
+        && let Err(e) = autolaunch.enable()
+    {
+        eprintln!("qterm: could not update autostart: {e}");
+    }
 }
 
 pub fn open_config_file(app: &AppHandle) -> Result<(), String> {
