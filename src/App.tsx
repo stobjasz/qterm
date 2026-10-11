@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideWindow, listProfiles, onQuakeVisibility, type Profile } from "./ipc";
 import type { Command } from "./keybindings";
 import { TabBar } from "./tabs/TabBar";
-import { PaneView } from "./terminal/PaneView";
+import { LayoutView } from "./terminal/LayoutView";
 import { TerminalRegistry, type RegistryEvents } from "./terminal/registry";
 import {
   activateIndex,
@@ -13,14 +13,23 @@ import {
   closePane,
   cycleTab,
   emptyWorkspace,
+  equalizeActive,
+  focusPane,
+  moveFocus,
   openTab,
   paneIds,
+  resizeDivider,
+  resizeFocused,
   setPaneTitle,
+  splitPane,
   type PaneId,
+  type SplitDir,
   type TabId,
 } from "./workspace/workspace";
 
 const DEFAULT_SLIDE_MS = 150;
+/** Share of the split one Alt+Shift+Arrow press moves a divider. */
+const RESIZE_STEP = 0.05;
 
 let idCounter = 0;
 const nextId = (prefix: string) => `${prefix}-${++idCounter}`;
@@ -49,6 +58,17 @@ export default function App() {
       const profile = profileId ? profiles?.find((p) => p.id === profileId) : profiles?.[0];
       if (!profile) return;
       setWorkspace((ws) => openTab(ws, { tab: nextId("tab"), pane: nextId("pane") }, profile));
+    },
+    [profiles],
+  );
+
+  // The new pane runs the same profile as the one being split (a WSL pane splits into WSL).
+  const split = useCallback(
+    (paneId: PaneId, dir: SplitDir) => {
+      const source = workspaceRef.current.panes[paneId];
+      const profile = profiles?.find((p) => p.id === source?.profileId) ?? profiles?.[0];
+      if (!profile) return;
+      setWorkspace((ws) => splitPane(ws, paneId, dir, nextId("pane"), profile));
     },
     [profiles],
   );
@@ -84,6 +104,18 @@ export default function App() {
           break;
         case "goToTab":
           setWorkspace((ws) => activateIndex(ws, command.index));
+          break;
+        case "split":
+          split(paneId, command.dir);
+          break;
+        case "moveFocus":
+          setWorkspace((ws) => moveFocus(ws, command.direction));
+          break;
+        case "resizePane":
+          setWorkspace((ws) => resizeFocused(ws, command.direction, RESIZE_STEP));
+          break;
+        case "equalize":
+          setWorkspace(equalizeActive);
           break;
       }
     },
@@ -135,9 +167,16 @@ export default function App() {
       <div className="tab-panels">
         {workspace.tabs.map((tab) => (
           <div key={tab.id} className="tab-panel" role="tabpanel" hidden={tab.id !== workspace.activeTab}>
-            {paneIds(tab.root).map((paneId) => (
-              <PaneView key={paneId} pane={workspace.panes[paneId]} registry={registry} />
-            ))}
+            <LayoutView
+              node={tab.root}
+              path={[]}
+              panes={workspace.panes}
+              focusedPane={tab.focusedPane}
+              showFocus={tab.root.kind === "split"}
+              registry={registry}
+              onFocusPane={(paneId) => setWorkspace((ws) => focusPane(ws, paneId))}
+              onResize={(path, index, delta) => setWorkspace((ws) => resizeDivider(ws, tab.id, path, index, delta))}
+            />
           </div>
         ))}
       </div>
@@ -147,6 +186,7 @@ export default function App() {
         onActivate={(tabId) => setWorkspace((ws) => activateTab(ws, tabId))}
         onClose={closeTab}
         onNewTab={newTab}
+        onSplit={(dir) => focusedPane && split(focusedPane, dir)}
       />
     </div>
   );

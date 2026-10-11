@@ -3,11 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   activateIndex,
   activateTab,
+  activeTab,
   closePane,
   cycleTab,
   emptyWorkspace,
+  equalizeActive,
+  focusPane,
+  moveFocus,
   openTab,
+  resizeDivider,
+  resizeFocused,
   setPaneTitle,
+  splitPane,
   tabTitle,
   type Workspace,
 } from "./workspace";
@@ -106,5 +113,67 @@ describe("titles", () => {
   it("falls back to the profile name when the shell clears its title", () => {
     const ws = setPaneTitle(withTabs(1), "p1", "  ");
     expect(tabTitle(ws, ws.tabs[0])).toBe("PowerShell");
+  });
+});
+
+describe("splits", () => {
+  const split = (ws: Workspace, pane: string, newPane: string, dir: "row" | "column" = "row") =>
+    splitPane(ws, pane, dir, newPane, cmd);
+
+  it("splits the pane, registers the new one and focuses it", () => {
+    const ws = split(withTabs(1), "p1", "n1");
+
+    expect(ws.tabs[0].root).toEqual({
+      kind: "split",
+      dir: "row",
+      children: [
+        { kind: "leaf", pane: "p1" },
+        { kind: "leaf", pane: "n1" },
+      ],
+      sizes: [0.5, 0.5],
+    });
+    expect(ws.tabs[0].focusedPane).toBe("n1");
+    expect(ws.panes.n1.profileName).toBe("Command Prompt");
+  });
+
+  it("closing one pane of a split keeps the tab and focuses a remaining pane", () => {
+    const ws = closePane(split(split(withTabs(1), "p1", "n1"), "n1", "n2"), "n2");
+
+    expect(ws.tabs).toHaveLength(1);
+    expect(ws.tabs[0].focusedPane).toBe("n1");
+    expect(ws.panes.n2).toBeUndefined();
+  });
+
+  it("closing an unfocused pane keeps focus where it is", () => {
+    const ws = closePane(split(withTabs(1), "p1", "n1"), "p1");
+    expect(ws.tabs[0].focusedPane).toBe("n1");
+  });
+
+  it("focusing a pane also activates its tab", () => {
+    let ws = activateTab(split(withTabs(2), "p1", "n1"), "t2");
+    ws = focusPane(ws, "p1"); // p1 lives in the inactive t1
+
+    expect(ws.activeTab).toBe("t1");
+    expect(ws.tabs[0].focusedPane).toBe("p1");
+  });
+
+  it("moves focus between panes of the active tab", () => {
+    const ws = split(withTabs(1), "p1", "n1"); // focus on n1 (right)
+    expect(activeTab(moveFocus(ws, "left"))?.focusedPane).toBe("p1");
+    expect(moveFocus(ws, "right")).toBe(ws);
+  });
+
+  it("resizes the focused pane and equalizes the active tab", () => {
+    let ws = split(withTabs(1), "p1", "n1"); // n1 focused, last child
+    ws = resizeFocused(ws, "left", 0.1);
+    expect(ws.tabs[0].root.kind === "split" && ws.tabs[0].root.sizes).toEqual([0.4, 0.6]);
+
+    ws = equalizeActive(ws);
+    expect(ws.tabs[0].root.kind === "split" && ws.tabs[0].root.sizes).toEqual([0.5, 0.5]);
+  });
+
+  it("drags a divider in a given tab", () => {
+    const ws = resizeDivider(split(withTabs(1), "p1", "n1"), "t1", [], 0, 0.25);
+    expect(ws.tabs[0].root.kind === "split" && ws.tabs[0].root.sizes).toEqual([0.75, 0.25]);
   });
 });

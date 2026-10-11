@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M2 done, M3 (splits) next (see §11–12). Date: 2026-10-11.
+Status: M0–M3 done; M4 (config) next (see §11–13). Date: 2026-10-11.
 
 ---
 
@@ -368,3 +368,21 @@ Lessons:
 - **Testability gap for E2E:** the WebGL renderer draws to a canvas, so terminal text
   isn't in the DOM. Real E2E assertions on output need a test hook (e.g. reading
   `term.buffer`) or a screen-reader mode toggle.
+
+## 13. M3 results (2026-10-11)
+
+- `workspace/layout.ts`: pure tree operations, all unit-tested. `insertSplit` (same
+  direction adds a sibling, so equal thirds), `removePane` (collapses single-child splits
+  and flattens same-direction nesting, giving the freed space to siblings in proportion),
+  `layoutRects` + `neighbor` (geometric focus moves in unit space, no DOM), `resizeAt` /
+  `resizeToward` (min share 0.1, sizes rounded to avoid float drift), `equalized`.
+- A split opens the **same profile** as the pane being split (a WSL pane splits into WSL).
+- `LayoutView` renders the tree with flex shares and 5 px draggable dividers. Children are
+  keyed by content, so the registry re-parents a pane's terminal when the tree changes
+  around it.
+- **Verified over CDP:** Split right ×2 gives three 1698 px columns on the 5120 px screen,
+  each running its own shell. Also checked: Alt+Arrow focus, Alt+Shift+- nested split,
+  divider drag, Alt+Shift+0 equalize, Ctrl+Shift+W collapse back to three equal columns.
+- **Fix:** xterm 6 leaves its legacy `.xterm-viewport` (`overflow-y: scroll`) under the
+  themed scrollbar layer. A see-through terminal shows its native scrollbar, so it's
+  hidden with `scrollbar-width: none`.

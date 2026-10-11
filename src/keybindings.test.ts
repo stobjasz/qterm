@@ -34,6 +34,21 @@ describe("resolveKey", () => {
     expect(resolveKey(key("Digit1", { ctrlKey: true }))).toBeUndefined();
   });
 
+  it("maps pane shortcuts on Alt+Shift / Alt", () => {
+    expect(resolveKey(key("Equal", { altKey: true, shiftKey: true }))).toEqual({ type: "split", dir: "row" });
+    expect(resolveKey(key("Minus", { altKey: true, shiftKey: true }))).toEqual({ type: "split", dir: "column" });
+    expect(resolveKey(key("ArrowLeft", { altKey: true }))).toEqual({ type: "moveFocus", direction: "left" });
+    expect(resolveKey(key("ArrowDown", { altKey: true }))).toEqual({ type: "moveFocus", direction: "down" });
+    expect(resolveKey(key("ArrowUp", { altKey: true, shiftKey: true }))).toEqual({ type: "resizePane", direction: "up" });
+    expect(resolveKey(key("Digit0", { altKey: true, shiftKey: true }))).toEqual({ type: "equalize" });
+  });
+
+  it("leaves Alt keys the shell uses alone", () => {
+    expect(resolveKey(key("KeyB", { altKey: true }))).toBeUndefined(); // readline: word back
+    expect(resolveKey(key("Equal", { altKey: true }))).toBeUndefined();
+    expect(resolveKey(key("ArrowLeft", { altKey: true, ctrlKey: true }))).toBeUndefined();
+  });
+
   it("ignores the Windows key", () => {
     expect(resolveKey(key("KeyT", { ctrlKey: true, shiftKey: true, metaKey: true }))).toBeUndefined();
   });

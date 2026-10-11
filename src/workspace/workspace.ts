@@ -1,13 +1,22 @@
 // Tabs, panes and their layout as plain immutable data. No DOM, no IPC:
 // every operation is a pure function so it can be unit-tested.
+import {
+  equalized,
+  insertSplit,
+  neighbor,
+  paneIds,
+  removePane,
+  resizeAt,
+  resizeToward,
+  type Direction,
+  type LayoutNode,
+  type PaneId,
+  type SplitDir,
+} from "./layout";
 
-export type PaneId = string;
+export { paneIds, type Direction, type LayoutNode, type PaneId, type SplitDir } from "./layout";
+
 export type TabId = string;
-
-export type LayoutNode =
-  | { kind: "leaf"; pane: PaneId }
-  // Splits arrive in M3. N-ary so that three splits make three equal columns.
-  | { kind: "split"; dir: "row" | "column"; children: LayoutNode[]; sizes: number[] };
 
 export interface Pane {
   id: PaneId;
@@ -41,25 +50,82 @@ export function emptyWorkspace(): Workspace {
 /** Ids come from the caller so this stays deterministic. */
 export function openTab(ws: Workspace, ids: { tab: TabId; pane: PaneId }, profile: ProfileRef): Workspace {
   const tab: Tab = { id: ids.tab, root: { kind: "leaf", pane: ids.pane }, focusedPane: ids.pane };
+  return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes: withPane(ws.panes, ids.pane, profile) };
+}
+
+/** Splits `paneId` in `dir`, opening `profile` in the new pane and focusing it. */
+export function splitPane(
+  ws: Workspace,
+  paneId: PaneId,
+  dir: SplitDir,
+  newPane: PaneId,
+  profile: ProfileRef,
+): Workspace {
+  const tab = tabOf(ws, paneId);
+  if (!tab) return ws;
   return {
-    tabs: [...ws.tabs, tab],
-    activeTab: tab.id,
-    panes: { ...ws.panes, [ids.pane]: { id: ids.pane, profileId: profile.id, profileName: profile.name, title: "" } },
+    ...replaceTab(ws, { ...tab, root: insertSplit(tab.root, paneId, dir, newPane), focusedPane: newPane }),
+    panes: withPane(ws.panes, newPane, profile),
   };
 }
 
+/** Removes the pane; a tab whose last pane closes goes with it. */
 export function closePane(ws: Workspace, paneId: PaneId): Workspace {
   const index = ws.tabs.findIndex((tab) => paneIds(tab.root).includes(paneId));
   if (index < 0) return ws;
-
-  // M2: a tab holds exactly one pane, so closing the pane closes the tab.
-  const tabs = ws.tabs.filter((_, i) => i !== index);
+  const tab = ws.tabs[index];
   const { [paneId]: _closed, ...panes } = ws.panes;
+
+  const root = removePane(tab.root, paneId);
+  if (root) {
+    // Focus moves to the pane before the closed one in reading order, else the first.
+    const order = paneIds(tab.root);
+    const remaining = paneIds(root);
+    const focusedPane =
+      tab.focusedPane !== paneId
+        ? tab.focusedPane
+        : (order.slice(0, order.indexOf(paneId)).reverse().find((id) => remaining.includes(id)) ?? remaining[0]);
+    return { ...replaceTab(ws, { ...tab, root, focusedPane }), panes };
+  }
+
+  const tabs = ws.tabs.filter((_, i) => i !== index);
   let activeTab = ws.activeTab;
-  if (ws.tabs[index].id === ws.activeTab) {
+  if (tab.id === ws.activeTab) {
     activeTab = (tabs[index] ?? tabs[index - 1])?.id;
   }
   return { tabs, activeTab, panes };
+}
+
+/** Focuses the pane, switching to its tab if needed. */
+export function focusPane(ws: Workspace, paneId: PaneId): Workspace {
+  const tab = tabOf(ws, paneId);
+  if (!tab || (tab.focusedPane === paneId && ws.activeTab === tab.id)) return ws;
+  return { ...replaceTab(ws, { ...tab, focusedPane: paneId }), activeTab: tab.id };
+}
+
+export function moveFocus(ws: Workspace, direction: Direction): Workspace {
+  const tab = activeTab(ws);
+  const target = tab && neighbor(tab.root, tab.focusedPane, direction);
+  return target ? focusPane(ws, target) : ws;
+}
+
+export function resizeFocused(ws: Workspace, direction: Direction, step: number): Workspace {
+  const tab = activeTab(ws);
+  if (!tab) return ws;
+  const root = resizeToward(tab.root, tab.focusedPane, direction, step);
+  return root === tab.root ? ws : replaceTab(ws, { ...tab, root });
+}
+
+/** Drag of the divider after child `index` of the split at `path` in `tabId`. */
+export function resizeDivider(ws: Workspace, tabId: TabId, path: number[], index: number, delta: number): Workspace {
+  const tab = ws.tabs.find((t) => t.id === tabId);
+  if (!tab) return ws;
+  return replaceTab(ws, { ...tab, root: resizeAt(tab.root, path, index, delta) });
+}
+
+export function equalizeActive(ws: Workspace): Workspace {
+  const tab = activeTab(ws);
+  return tab ? replaceTab(ws, { ...tab, root: equalized(tab.root) }) : ws;
 }
 
 export function activateTab(ws: Workspace, tabId: TabId): Workspace {
@@ -101,6 +167,14 @@ export function tabTitle(ws: Workspace, tab: Tab): string {
   return title && !EXE_PATH.test(title) ? title : pane.profileName;
 }
 
-export function paneIds(node: LayoutNode): PaneId[] {
-  return node.kind === "leaf" ? [node.pane] : node.children.flatMap(paneIds);
+function tabOf(ws: Workspace, paneId: PaneId): Tab | undefined {
+  return ws.tabs.find((tab) => paneIds(tab.root).includes(paneId));
+}
+
+function replaceTab(ws: Workspace, tab: Tab): Workspace {
+  return { ...ws, tabs: ws.tabs.map((t) => (t.id === tab.id ? tab : t)) };
+}
+
+function withPane(panes: Record<PaneId, Pane>, id: PaneId, profile: ProfileRef): Record<PaneId, Pane> {
+  return { ...panes, [id]: { id, profileId: profile.id, profileName: profile.name, title: "" } };
 }

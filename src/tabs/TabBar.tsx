@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Profile } from "../ipc";
-import { tabTitle, type TabId, type Workspace } from "../workspace/workspace";
+import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
 
 interface Props {
   workspace: Workspace;
@@ -9,11 +9,12 @@ interface Props {
   onActivate(tabId: TabId): void;
   onClose(tabId: TabId): void;
   onNewTab(profileId?: string): void;
+  onSplit(dir: SplitDir): void;
 }
 
 // Mouse-down default is prevented throughout so clicking the bar never takes
 // keyboard focus away from the terminal.
-export function TabBar({ workspace, profiles, onActivate, onClose, onNewTab }: Props) {
+export function TabBar({ workspace, profiles, onActivate, onClose, onNewTab, onSplit }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -94,6 +95,22 @@ export function TabBar({ workspace, profiles, onActivate, onClose, onNewTab }: P
           </div>
         )}
       </div>
+      <div className="tabbar-spacer" />
+      <button className="tab-new" aria-label="Split right" title="Split right (Alt+Shift+=)" onClick={() => onSplit("row")}>
+        <SplitIcon dir="row" />
+      </button>
+      <button className="tab-new" aria-label="Split down" title="Split down (Alt+Shift+-)" onClick={() => onSplit("column")}>
+        <SplitIcon dir="column" />
+      </button>
     </div>
+  );
+}
+
+function SplitIcon({ dir }: { dir: SplitDir }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="11" height="11" rx="1.5" />
+      {dir === "row" ? <line x1="7" y1="1.5" x2="7" y2="12.5" /> : <line x1="1.5" y1="7" x2="12.5" y2="7" />}
+    </svg>
   );
 }

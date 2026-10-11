@@ -39,16 +39,67 @@ body,
 }
 
 .tab-panel,
+.split,
 .pane,
 .terminal-wrapper {
   width: 100%;
   height: 100%;
 }
 
-/* xterm.css paints the viewport #000 and xterm 6 applies the theme background
-   to another element, so the viewport stays opaque unless cleared here. */
+.split {
+  display: flex;
+}
+
+.split-row {
+  flex-direction: row;
+}
+
+.split-column {
+  flex-direction: column;
+}
+
+/* min-size 0 lets flex shares shrink below the terminal's content size. */
+.split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane {
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.pane.focused {
+  border-color: rgba(229, 192, 123, 0.45);
+}
+
+.divider {
+  flex: 0 0 5px;
+  background: transparent;
+  transition: background 120ms;
+}
+
+.divider-row {
+  cursor: col-resize;
+}
+
+.divider-column {
+  cursor: row-resize;
+}
+
+.divider:hover,
+.divider:active {
+  background: rgba(229, 192, 123, 0.35);
+}
+
+/* xterm 6 keeps the old .xterm-viewport (#000, overflow-y: scroll) underneath its
+   own themed scrollbar layer. An opaque terminal covers it; ours is see-through, so
+   clear its paint and hide its native scrollbar. Scrolling is xterm's own layer. */
 .terminal-wrapper .xterm-viewport {
   background-color: transparent;
+  scrollbar-width: none;
 }
 
 /* Tab bar sits at the bottom edge, nearest to where the console slides in from. */
@@ -116,7 +167,14 @@ body,
   background: rgba(255, 255, 255, 0.12);
 }
 
+.tabbar-spacer {
+  flex: 1;
+}
+
 .tab-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 26px;
   color: var(--tab-fg) !important;
 }

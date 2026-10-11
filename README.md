@@ -1,7 +1,7 @@
 # qterm
 
 A quake-style drop-down terminal for Windows 11: **Ctrl+`** slides a translucent
-console down from the top of the screen. Tabs for PowerShell, cmd, Git Bash and WSL;
+console down from the top of the screen. Tabs and split panes for PowerShell, cmd, Git Bash and WSL;
 tray icon with "Start with Windows". Tauri 2 + xterm.js + ConPTY.
 
 | Keys | Action |
@@ -11,6 +11,9 @@ tray icon with "Start with Windows". Tauri 2 + xterm.js + ConPTY.
 | Ctrl+Shift+W | Close tab |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+Alt+1..9 | Go to tab N |
+| Alt+Shift+= / Alt+Shift+- | Split right / down |
+| Alt+Arrow | Move focus between panes |
+| Alt+Shift+Arrow / Alt+Shift+0 | Resize pane / equalize |
 
 Design and roadmap: [docs/foundation.md](docs/foundation.md).
 
