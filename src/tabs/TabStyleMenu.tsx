@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import { TAB_COLORS, type TabColor } from "../workspace/workspace";
 
@@ -30,6 +30,18 @@ interface Props {
 export function TabStyleMenu({ x, y, color, icon, onChange, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(icon ?? "");
+  // Opens below and right of the pointer, flipped up / left where it wouldn't fit
+  // (the tab bar sits at the console's bottom edge).
+  const [position, setPosition] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const box = ref.current?.getBoundingClientRect();
+    if (!box) return;
+    const margin = 4;
+    setPosition({
+      left: x + box.width + margin > window.innerWidth ? Math.max(margin, x - box.width) : x,
+      top: y + box.height + margin > window.innerHeight ? Math.max(margin, y - box.height) : y,
+    });
+  }, [x, y]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -43,7 +55,7 @@ export function TabStyleMenu({ x, y, color, icon, onChange, onClose }: Props) {
   }, [onClose]);
 
   return (
-    <div ref={ref} className="tab-style-menu" role="dialog" aria-label="Tab colour and icon" style={{ left: x, top: y }}>
+    <div ref={ref} className="tab-style-menu" role="dialog" aria-label="Tab colour and icon" style={position}>
       <div className="tab-style-label">Colour</div>
       <div className="tab-style-colors" role="radiogroup" aria-label="Tab colour">
         <button role="radio" aria-checked={!color} className="tab-style-swatch none" title="No colour" onClick={() => onChange({ color: null })} />

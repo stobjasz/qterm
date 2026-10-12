@@ -9,6 +9,7 @@ const config: Config = {
   width: 1,
   monitor: "cursor",
   opacity: 0.82,
+  backgroundEffect: "none",
   slideMs: 150,
   hideOnBlur: false,
   defaultProfile: "",

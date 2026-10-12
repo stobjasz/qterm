@@ -75,6 +75,7 @@ pub fn run() {
                 eprintln!("qterm: could not register the hotkey: {e}");
             }
             tray::create(app.handle())?;
+            window::apply_effect(app.handle());
             tray::repoint_autostart(app.handle());
 
             let handle = app.handle().clone();
@@ -164,6 +165,9 @@ fn on_config_file_changed(app: &AppHandle) {
             }
             if (new.height, new.width, new.monitor) != (old.height, old.width, old.monitor) {
                 window::replace(app);
+            }
+            if new.background_effect != old.background_effect {
+                window::apply_effect(app);
             }
         }
     }

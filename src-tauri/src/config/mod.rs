@@ -26,6 +26,8 @@ pub struct Config {
     pub width: f64,
     pub monitor: MonitorChoice,
     pub opacity: f64,
+    /// Windows 11 material behind the console's translucent background.
+    pub background_effect: BackgroundEffect,
     pub slide_ms: u64,
     pub hide_on_blur: bool,
     pub default_profile: String,
@@ -172,6 +174,17 @@ pub enum SplitDir {
     Column,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackgroundEffect {
+    #[default]
+    None,
+    /// Frosted glass: what's behind the console, blurred and tinted.
+    Acrylic,
+    /// The desktop wallpaper's tint (Windows 11); turns solid while unfocused.
+    Mica,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MonitorChoice {
@@ -196,6 +209,7 @@ impl Default for Config {
             width: 1.0,
             monitor: MonitorChoice::Cursor,
             opacity: 0.82,
+            background_effect: BackgroundEffect::None,
             slide_ms: 150,
             hide_on_blur: false,
             default_profile: String::new(),

@@ -158,6 +158,13 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
           <Field label={`Background opacity ${Math.round(draft.opacity * 100)}%`}>
             <input type="range" min={0} max={100} value={Math.round(draft.opacity * 100)} onChange={(e) => set("opacity", Number(e.target.value) / 100)} />
           </Field>
+          <Field label="Background effect" hint="What shows through the translucent background. Lower the opacity to see more of it.">
+            <select value={draft.backgroundEffect} onChange={(e) => set("backgroundEffect", e.target.value as Draft["backgroundEffect"])}>
+              <option value="none">None: the windows behind, sharp</option>
+              <option value="acrylic">Acrylic: frosted glass</option>
+              <option value="mica">Mica: the wallpaper's tint</option>
+            </select>
+          </Field>
           <Field label="Font">
             <input type="text" value={draft.fontFamily} onChange={(e) => set("fontFamily", e.target.value)} spellCheck={false} />
           </Field>

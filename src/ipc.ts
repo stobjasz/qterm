@@ -44,6 +44,7 @@ export interface Config {
   width: number;
   monitor: "cursor" | "primary";
   opacity: number;
+  backgroundEffect: "none" | "acrylic" | "mica";
   slideMs: number;
   hideOnBlur: boolean;
   defaultProfile: string;

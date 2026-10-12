@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
-use crate::config::{Config, ConfigState, MonitorChoice};
+use crate::config::{BackgroundEffect, Config, ConfigState, MonitorChoice};
 
 pub const LABEL: &str = "quake";
 /// Smallest console height as a share of the work area; matches the `height` setting's range.
@@ -109,6 +109,26 @@ fn show(app: &AppHandle, win: &WebviewWindow) {
     let _ = win.show();
     let _ = win.set_focus();
     let _ = app.emit_to(LABEL, "quake-visibility", Visibility { visible: true, slide_ms: config.slide_ms });
+}
+
+/// Puts the configured material (acrylic, mica, blur) behind the window, or none.
+pub fn apply_effect(app: &AppHandle) {
+    use tauri::window::{Effect, EffectsBuilder};
+    let Some(win) = app.get_webview_window(LABEL) else { return };
+    let effect = match app.state::<ConfigState>().get().background_effect {
+        BackgroundEffect::None => None,
+        BackgroundEffect::Acrylic => Some(Effect::Acrylic),
+        BackgroundEffect::Mica => Some(Effect::Mica),
+    };
+    // Effects stack otherwise (DWM keeps the previous backdrop): clear first.
+    let _ = win.set_effects(None);
+    let result = match effect {
+        Some(effect) => win.set_effects(EffectsBuilder::new().effect(effect).build()),
+        None => Ok(()),
+    };
+    if let Err(e) = result {
+        eprintln!("qterm: could not set the background effect: {e}");
+    }
 }
 
 /// Re-applies size and position, e.g. after the settings changed while the console is up.

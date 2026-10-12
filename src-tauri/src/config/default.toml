@@ -17,6 +17,11 @@ monitor = "cursor"
 # Background opacity, 0.0 (clear) - 1.0 (solid).
 opacity = 0.82
 
+# What shows through the translucent background: "none" (the windows behind, sharp),
+# "acrylic" (them, blurred and tinted, like frosted glass) or "mica" (the
+# wallpaper's tint). Windows 11. Lower opacity lets more of the effect through.
+background_effect = "none"
+
 # Slide animation in milliseconds, 0 - 1000 (0 = no animation).
 slide_ms = 150
 

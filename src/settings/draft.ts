@@ -9,6 +9,7 @@ export interface Draft {
   width: number;
   monitor: Config["monitor"];
   opacity: number;
+  backgroundEffect: Config["backgroundEffect"];
   slideMs: number;
   hideOnBlur: boolean;
   defaultProfile: string;
@@ -42,6 +43,7 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   width: "width",
   monitor: "monitor",
   opacity: "opacity",
+  backgroundEffect: "background_effect",
   slideMs: "slide_ms",
   hideOnBlur: "hide_on_blur",
   defaultProfile: "default_profile",
@@ -71,6 +73,7 @@ export function toDraft(config: Config): Draft {
     width: config.width,
     monitor: config.monitor,
     opacity: config.opacity,
+    backgroundEffect: config.backgroundEffect,
     slideMs: config.slideMs,
     hideOnBlur: config.hideOnBlur,
     defaultProfile: config.defaultProfile,
