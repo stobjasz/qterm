@@ -25,6 +25,7 @@ export interface Draft {
   longCommandAlert: number;
   inlineImages: boolean;
   sshProfiles: boolean;
+  checkUpdates: boolean;
   fontFamily: string;
   fontSize: number;
   fontLigatures: boolean;
@@ -59,6 +60,7 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   longCommandAlert: "long_command_alert",
   inlineImages: "inline_images",
   sshProfiles: "ssh_profiles",
+  checkUpdates: "check_updates",
   fontFamily: "font.family",
   fontSize: "font.size",
   fontLigatures: "font.ligatures",
@@ -89,6 +91,7 @@ export function toDraft(config: Config): Draft {
     longCommandAlert: config.longCommandAlert,
     inlineImages: config.inlineImages,
     sshProfiles: config.sshProfiles,
+    checkUpdates: config.checkUpdates,
     fontFamily: config.font.family,
     fontSize: config.font.size,
     fontLigatures: config.font.ligatures,

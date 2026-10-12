@@ -887,3 +887,55 @@ its background. The panes of that shell are painted in it, at the console's `opa
 - E2E R7 (`pane-background-picker.spec.ts`): navy on the right pane only, still there
   after a restart. Both deliberate breaks (colour ignored, colour not saved) were
   caught.
+
+## 25. Releases, installer and updates (#13, 2026-10-12)
+
+**Publishing.** `scripts/release.ps1 <version>` sets the version in package.json,
+Cargo.toml (and Cargo.lock) and tauri.conf.json, commits and tags `v<version>`. Pushing
+the tag runs `.github/workflows/release.yml`:
+1. checks the tag matches tauri.conf.json and the signing secret is there; unit tests;
+2. `tauri build --no-bundle` → `qterm-<v>-portable-x64.exe` (built before bundling,
+   which marks the exe it packs as the installer's);
+3. `tauri build` → `qterm_<v>_x64-setup.exe` (NSIS, `installMode: currentUser`) and its
+   `.sig` (`createUpdaterArtifacts`);
+4. `tauri signer sign` on the portable exe; `scripts/release-manifest.mjs` writes
+   `latest.json`; `SHA256SUMS`;
+5. `gh release create --draft`, then publish, so the feed never points at missing files.
+
+**Signing.** A minisign key pair made with `tauri signer generate`. The private key and
+its password are the repo secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` (a copy is kept
+outside the repo); the public key is `plugins.updater.pubkey` in tauri.conf.json. Not
+Authenticode: SmartScreen still warns on first run (documented in the README).
+
+**Feed.** `https://github.com/stobjasz/qterm/releases/latest/download/latest.json`, so it
+works once the repo (or its releases) is public. Entries: `windows-x86_64-nsis` and
+`windows-x86_64` → the installer; `windows-x86_64-portable` → the bare exe.
+
+**In the app** (`updater.rs`):
+- Installed or portable: `uninstall.exe` next to the exe means installed. Portable
+  copies ask the feed for the `windows-x86_64-portable` target.
+- `check_updates` (default on): first check 30 s after start, then every 24 h. A found
+  update is kept in `UpdateState`, the tray item becomes "Update to qterm X…", and the
+  UI gets `update-available` (banner with Update and restart).
+- Installing: the UI saves tabs and output (the same `flushSession` + `saveScrollbacks`
+  as Quit), then `install_update`. `Update::download` verifies the signature.
+  Installed: `Update::install` runs the installer (`/P /UPDATE /R`) and exits; the
+  installer restarts qterm with the same arguments, so a `show-after-update` file in the
+  local data folder makes the console show even after an autostart's `--background`. Portable: write `<exe>.new`, rename the running exe to
+  `<exe>.old` (Windows allows renaming a running exe), rename `.new` into place (put
+  back on failure), start it with `--after-update <pid>`, exit. `main` waits up to 15 s
+  for that pid before the single-instance check, and setup deletes `<exe>.old`.
+- Dev builds don't check unless `QTERM_UPDATE_ENDPOINT` points at a test feed (http
+  allowed in debug only); release builds always use the configured https endpoint.
+
+**Verified:**
+- Unit: the exe swap (and a second swap over a leftover `.old`), a failed swap leaving
+  things as they were; the manifest generator.
+- Locally end to end, isolated (identifier `dev.qterm.updtest`, own product name so the
+  real autostart entry isn't touched): a 0.1.0 debug exe with the feed on a local http
+  server found 0.1.1 (a release build signed with the real key) after 30 s; clicking
+  the banner's Update and restart exited it (code 0), the same path then ran 0.1.1,
+  and `.old`/`.new` were gone. With one flipped byte in the served exe the banner said
+  "could not download the update: The signature verification failed", qterm kept
+  running and the exe was unchanged.
+- `tauri build` with the key set produced the per-user installer and its `.sig`.

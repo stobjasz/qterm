@@ -1,9 +1,34 @@
 # qterm
 
+[![CI](https://github.com/stobjasz/qterm/actions/workflows/ci.yml/badge.svg)](https://github.com/stobjasz/qterm/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/stobjasz/qterm)](https://github.com/stobjasz/qterm/releases/latest)
+
 A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slides a
 translucent console down from the top of the screen.
 
 How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
+
+## Download
+
+From the [latest release](https://github.com/stobjasz/qterm/releases/latest), either:
+
+- **`qterm_<version>_x64-setup.exe`**: installs for your user only (no administrator
+  rights) into `%LOCALAPPDATA%\Programs\qterm`, with a Start menu entry and an
+  uninstaller in Windows' Installed apps.
+- **`qterm-<version>-portable-x64.exe`**: one file, nothing to install; put it in any
+  folder and run it.
+
+Both need Windows 11 (or Windows 10 with the WebView2 runtime). The files aren't
+code-signed yet, so SmartScreen may say "Windows protected your PC" the first time:
+click **More info**, then **Run anyway**. `SHA256SUMS` in the release lists their
+checksums.
+
+**Updates.** qterm checks GitHub for a newer release shortly after it starts and then
+daily, and offers it in a banner, in the tray menu and in Settings → Updates. One click
+saves your tabs and their output, updates and restarts. The installer updates itself in
+place; the portable exe replaces itself. Every update is checked against qterm's signing
+key before it runs. Settings → Updates → "Check for updates automatically" turns the
+checks off.
 
 - Tabs and split panes for PowerShell, cmd, Git Bash and WSL; rename (double-click)
   and reorder (drag) tabs
@@ -75,6 +100,19 @@ CI (`.github/workflows/ci.yml`, Windows runner) runs the type checks, unit tests
 clippy, the Rust tests and the end-to-end tests on every push to master and every pull
 request.
 
+## Releasing
+
+```sh
+pwsh scripts/release.ps1 0.2.0     # sets the version, commits "release: v0.2.0", tags v0.2.0
+git push origin master v0.2.0      # the tag starts .github/workflows/release.yml
+```
+
+The release workflow builds the portable exe and the NSIS installer, signs both for the
+updater (the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo
+secrets; the public key is in `tauri.conf.json`), writes `latest.json` (the updater's
+feed, `scripts/release-manifest.mjs`) and `SHA256SUMS`, and publishes the GitHub release.
+Losing the private key means existing copies can't verify later updates; keep a backup.
+
 Inside qterm, `scripts/bench.ps1` measures output throughput.
 
 ## Portable build
@@ -89,3 +127,8 @@ runtime. The newer ConPTY (Windows Terminal's console host) is embedded and extr
 `%LOCALAPPDATA%\dev.qterm.app` on first run. `scripts/fetch-conpty.ps1` fetches it for
 builds (`build:portable` runs it if needed); without it, builds use the ConPTY built into
 Windows. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## License
+
+[MIT](LICENSE). qterm embeds Microsoft's ConPTY, also MIT; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

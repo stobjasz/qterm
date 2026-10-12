@@ -48,6 +48,8 @@ pub struct Config {
     pub inline_images: bool,
     /// Offer the hosts in ~/.ssh/config as shells ("SSH <host>").
     pub ssh_profiles: bool,
+    /// Look for a newer release on start and daily.
+    pub check_updates: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -233,6 +235,7 @@ impl Default for Config {
             long_command_alert: 30,
             inline_images: true,
             ssh_profiles: true,
+            check_updates: true,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),

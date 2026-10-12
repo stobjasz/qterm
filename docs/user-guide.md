@@ -6,6 +6,7 @@ away. It runs PowerShell, Command Prompt, Git Bash and WSL in tabs and split pan
 it has extras for working with Claude Code.
 
 - [Getting started](#getting-started)
+- [Updates](#updates)
 - [The console](#the-console)
 - [Tabs and panes](#tabs-and-panes)
 - [Working in the terminal](#working-in-the-terminal)
@@ -21,14 +22,21 @@ it has extras for working with Claude Code.
 
 ## Getting started
 
-1. Put `qterm-<version>-portable-x64.exe` in a folder of your choice and run it. Nothing
-   needs installing; the console appears at the top of the screen.
+1. Download qterm from the [latest release](https://github.com/stobjasz/qterm/releases/latest),
+   either way:
+   - `qterm_<version>_x64-setup.exe` installs qterm for your user (no administrator
+     rights needed) with a Start menu entry. Remove it from Windows' Installed apps.
+   - `qterm-<version>-portable-x64.exe` needs no installing: put it in a folder of your
+     choice and run it.
+
+   The files aren't code-signed yet, so SmartScreen may warn the first time: click
+   **More info**, then **Run anyway**. The console appears at the top of the screen.
 2. Press **~** to hide it and **~** again to bring it back.
 3. To have it ready after every sign-in, open the tray icon menu and tick **Start with
    Windows**. It then starts hidden and waits for the hotkey.
 
-If you move the exe or replace it with a newer one, run the new one once: "Start with
-Windows" follows the copy you ran last.
+If you move the portable exe, run it once from its new place: "Start with Windows"
+follows the copy you ran last.
 
 **The tray icon** (bottom right of the taskbar):
 
@@ -39,9 +47,30 @@ Windows" follows the copy you ran last.
 | Hotkey ✓ | Switches the ~ hotkey off, for when you need to type ~ in another app. |
 | Start with Windows ✓ | Starts qterm hidden when you sign in. |
 | Settings… | Opens the console with the settings panel. |
+| Check for updates… | Opens Settings → Updates and checks. Once a newer version is found it reads "Update to qterm *version*…". |
 | Quit qterm | Saves your tabs and their output, then closes qterm and every shell in it. |
 
 When Claude Code is waiting for you, the tray tooltip says in how many panes.
+
+## Updates
+
+qterm looks for a newer release on GitHub about 30 seconds after it starts and then once
+a day. When there is one:
+
+- a banner over the tabs says "qterm *version* is available" with **Update and restart**
+  (× puts it off; the offer stays in Settings and the tray),
+- the tray menu reads **Update to qterm *version*…**,
+- Settings → Updates shows **Update to *version* and restart**.
+
+Updating saves your tabs and every pane's output first, as quitting does, so they come
+back after the restart. The installed qterm runs the new installer (a small progress
+window) and restarts; the portable exe downloads the new exe, puts it in its own place
+and restarts. Before anything runs, the download is checked against qterm's signing
+key; a file that doesn't match is refused and qterm stays as it is.
+
+Settings → Updates shows your version and whether it is installed or portable, has
+**Check now**, and **Check for updates automatically** (on by default) to stop the
+daily checks. Nothing installs without your click.
 
 ## The console
 
@@ -295,6 +324,8 @@ click **Save**; Esc or Cancel discards them. At the bottom:
 
 | Group | Setting | Default |
 |---|---|---|
+| Updates | Version, Check now / Update to *version* and restart | |
+| | Check for updates automatically | on |
 | Console | Hotkey: ~, Scroll Lock, Pause, Insert or F13–F24 | ~ |
 | | Height, width (share of the screen) | 50%, 100% |
 | | Monitor: where the mouse is / primary | where the mouse is |
@@ -366,9 +397,14 @@ characters, qterm leaves AltGr combinations to the shell.
 | Saved pane output | `%LOCALAPPDATA%\dev.qterm.app\scrollback\` |
 | Console host and browser data | `%LOCALAPPDATA%\dev.qterm.app\` |
 
-The portable exe writes nothing next to itself. To remove qterm completely: untick
-**Start with Windows**, remove the Claude Code hook (Settings → Claude Code → Remove)
-if you set it up, quit qterm, then delete the exe and the two `dev.qterm.app` folders.
+The installer puts qterm in `%LOCALAPPDATA%\Programs\qterm`. The portable exe writes
+nothing next to itself, except during an update (`qterm.exe.old`, the previous version,
+deleted when the new one starts).
+
+To remove qterm completely: untick **Start with Windows**, remove the Claude Code hook
+(Settings → Claude Code → Remove) if you set it up, quit qterm, then uninstall it from
+Windows' Installed apps (or delete the portable exe), and delete the two `dev.qterm.app`
+folders.
 
 ## Troubleshooting
 
@@ -394,6 +430,14 @@ which can pick the wrong one when several sessions share a folder.
 
 **"New admin tab" opens a separate window.** Windows' sudo isn't set to Inline; see
 [Administrator tabs](#administrator-tabs).
+
+**"Could not check for updates".** qterm couldn't reach GitHub (offline, a proxy or a
+firewall). It tries again the next day; Settings → Updates → **Check now** tries at
+once. You can always download a release by hand.
+
+**The portable update says it couldn't move qterm aside or write the new version.** The
+folder the exe is in isn't writable for you (e.g. under Program Files). Move the exe to a
+folder of your own, or use the installer.
 
 **Command marks or ✓/✗ alerts don't appear.** They need Settings → Terminal → Shell
 integration (on by default) and a tab opened after it was switched on. WSL tabs and

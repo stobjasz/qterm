@@ -26,6 +26,7 @@ struct TrayItems {
     toggle: MenuItem<Wry>,
     hotkey: CheckMenuItem<Wry>,
     autostart: CheckMenuItem<Wry>,
+    update: MenuItem<Wry>,
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -40,6 +41,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "Check for updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit qterm", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -49,11 +51,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             &hotkey_item,
             &autostart,
             &settings,
+            &update,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
     )?;
-    app.manage(TrayItems { toggle, hotkey: hotkey_item, autostart: autostart.clone() });
+    app.manage(TrayItems { toggle, hotkey: hotkey_item, autostart: autostart.clone(), update });
 
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -68,6 +71,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "settings" => window::open_settings(app),
+            // Settings → Updates checks and offers the update.
+            "update" => {
+                use tauri::Emitter;
+                window::open_settings(app);
+                let _ = app.emit_to(window::LABEL, "check-updates", ());
+            }
             "quit" => request_quit(app),
             _ => {}
         })
@@ -159,6 +168,14 @@ pub fn repoint_autostart(app: &AppHandle) {
 pub fn open_config_file(app: &AppHandle) -> Result<(), String> {
     let path = app.state::<ConfigState>().path().to_string_lossy().into_owned();
     app.opener().open_path(path, None::<&str>).map_err(|e| format!("could not open settings file: {e}"))
+}
+
+/// The tray item names the newer version once a check has found one.
+pub fn set_update(app: &AppHandle, version: Option<&str>) {
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let text = version.map_or_else(|| "Check for updates…".to_string(), |v| format!("Update to qterm {v}…"));
+        let _ = items.update.set_text(text);
+    }
 }
 
 /// Lets the UI save the panes' output first (it then calls `quit_now`); exits

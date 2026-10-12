@@ -64,6 +64,7 @@ export interface Config {
   longCommandAlert: number;
   inlineImages: boolean;
   sshProfiles: boolean;
+  checkUpdates: boolean;
   font: { family: string; size: number; ligatures: boolean };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
@@ -400,6 +401,42 @@ export function scrollbackUsage(): Promise<ScrollbackUsage> {
 /** Deletes saved output of every pane not in `keep`. */
 export function pruneScrollback(keep: string[]): Promise<void> {
   return invoke("prune_scrollback", { keep });
+}
+
+export interface AppInfo {
+  version: string;
+  /** The portable exe (replaces itself on update), not an installed copy. */
+  portable: boolean;
+}
+
+export function appInfo(): Promise<AppInfo> {
+  return invoke("app_info");
+}
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+}
+
+/** Asks GitHub Releases for a newer version; null when this one is current. */
+export function checkUpdate(): Promise<UpdateInfo | null> {
+  return invoke("check_update");
+}
+
+/** Downloads, verifies and installs the update, then qterm restarts. Save tabs and output first. */
+export function installUpdate(): Promise<void> {
+  return invoke("install_update");
+}
+
+/** Tray → "Check for updates…" (Settings opens too). */
+export function onCheckUpdates(handler: () => void): Promise<UnlistenFn> {
+  return listen("check-updates", () => handler());
+}
+
+/** The daily check found a newer version. */
+export function onUpdateAvailable(handler: (update: UpdateInfo) => void): Promise<UnlistenFn> {
+  return listen<UpdateInfo>("update-available", (event) => handler(event.payload));
 }
 
 /** Tray → Quit: save what needs saving, then call quitNow (Rust exits anyway after a grace period). */

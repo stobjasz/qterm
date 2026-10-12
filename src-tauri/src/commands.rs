@@ -290,6 +290,31 @@ pub async fn claude_usage(
     path.map(|path| usage.usage(&path)).transpose()
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    version: String,
+    /// The portable exe (updates by replacing itself), not an installed copy.
+    portable: bool,
+}
+
+#[tauri::command]
+pub fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo { version: app.package_info().version.to_string(), portable: crate::updater::is_portable() }
+}
+
+/// Settings → "Check now": the newer version, if there is one.
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<crate::updater::UpdateInfo>, String> {
+    crate::updater::check(&app).await
+}
+
+/// Installs the update found (the UI has saved tabs and output first); qterm restarts.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    crate::updater::install(&app).await
+}
+
 /// How Windows' sudo is set up: admin tabs need it Inline.
 #[tauri::command]
 pub fn sudo_status() -> crate::elevation::SudoMode {

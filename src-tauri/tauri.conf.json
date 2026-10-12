@@ -32,13 +32,35 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Sebastian Tobjasz",
+    "shortDescription": "A quake-style drop-down terminal for Windows",
+    "copyright": "Copyright (c) 2026 Sebastian Tobjasz. MIT License.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxOUU3M0YwQTZBMDkzRUEKUldUcWs2Q204SE9lWWU0QXJGWkY0Tjl5c2lXcUU1VjFUbk5HUVI4R0ZwUkdUVEMxNDJhdGpjQVMK",
+      "endpoints": [
+        "https://github.com/stobjasz/qterm/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

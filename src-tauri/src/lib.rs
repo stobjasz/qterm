@@ -11,6 +11,7 @@ mod procs;
 mod pty;
 mod scrollback;
 mod tray;
+mod updater;
 mod window;
 
 use std::sync::Mutex;
@@ -21,6 +22,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use config::{ConfigState, Reload};
 
 pub use alerts::{run_hook as run_claude_hook, HOOK_ARG};
+pub use updater::wait_for_previous;
 
 /// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
@@ -46,6 +48,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
@@ -75,6 +79,8 @@ pub fn run() {
                 eprintln!("qterm: could not register the hotkey: {e}");
             }
             tray::create(app.handle())?;
+            updater::remove_previous_exe();
+            updater::start_checking(app.handle().clone());
             window::apply_effect(app.handle());
             tray::repoint_autostart(app.handle());
 
@@ -87,7 +93,7 @@ pub fn run() {
                 .ok();
             app.manage(Watchers(Mutex::new(config_watcher.into_iter().chain(alert_watcher).collect())));
 
-            if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+            if updater::just_updated(app.handle()) || !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
                 window::show_when_ready(app.handle());
             }
             Ok(())
@@ -143,6 +149,9 @@ pub fn run() {
             commands::sudo_status,
             commands::open_elevated_window,
             commands::open_sudo_settings,
+            commands::app_info,
+            commands::check_update,
+            commands::install_update,
             commands::quit_now,
         ])
         .run(tauri::generate_context!())

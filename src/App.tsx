@@ -25,6 +25,10 @@ import {
   onClaudeSessionsChanged,
   onConfigChanged,
   onOpenSettings,
+  onCheckUpdates,
+  onUpdateAvailable,
+  installUpdate,
+  type UpdateInfo,
   onQuakeVisibility,
   onQuitRequested,
   quitNow,
@@ -122,6 +126,11 @@ export default function App() {
   const [claudeSessions, setClaudeSessions] = useState<ClaudeSession[]>([]);
   const [search, setSearch] = useState<{ pane: PaneId; results?: { index: number; count: number } }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Tray → Check for updates…: Settings opens and checks. */
+  const [checkRequest, setCheckRequest] = useState(0);
+  const [update, setUpdate] = useState<UpdateInfo>();
+  /** The banner offering the update; dismissing it leaves the offer in Settings. */
+  const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
   const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
   /** Background panes that printed something, or rang the bell, since last seen. */
@@ -709,6 +718,14 @@ export default function App() {
       }),
       onClaudeSessionsChanged(setClaudeSessions),
       onOpenSettings(() => setSettingsOpen(true)),
+      onCheckUpdates(() => {
+        setSettingsOpen(true);
+        setCheckRequest((n) => n + 1);
+      }),
+      onUpdateAvailable((found) => {
+        setUpdate(found);
+        setUpdateBanner(true);
+      }),
       onClaudeAttention((alert) => onAlert.current(alert)),
       onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
@@ -863,6 +880,13 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [workspace, claudeByPane, flushSession]);
 
+  /** Saves tabs and output like quitting does, then installs; qterm exits and restarts. */
+  const updateNow = useCallback(async () => {
+    await Promise.all([flushSession(), saveScrollbacks()]);
+    await installUpdate();
+  }, [flushSession, saveScrollbacks]);
+  const [updateError, setUpdateError] = useState<string>();
+
   // Quitting right after a change (a cd, a new tab) must not lose it to the save delay.
   useEffect(() => {
     const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks()]).finally(() => void quitNow()));
@@ -987,9 +1011,37 @@ export default function App() {
         <SearchAllPanel search={searchAllPanes} paneLabel={paneLabel} onPick={revealHit} onClose={() => setSearchAllOpen(false)} />
       )}
         {settingsOpen && settings && profiles && (
-          <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} onClearHistory={clearAllHistory} />
+          <SettingsPanel
+            snapshot={settings}
+            profiles={profiles}
+            onClose={() => {
+              setSettingsOpen(false);
+              setCheckRequest(0);
+            }}
+            onClearHistory={clearAllHistory}
+            update={update}
+            onUpdateFound={setUpdate}
+            onInstallUpdate={updateNow}
+            checkRequest={checkRequest}
+          />
         )}
       </div>
+      {update && updateBanner && !settingsOpen && (
+        <div className="app-notice" role="status">
+          {updateError ?? `qterm ${update.version} is available.`}
+          <button
+            onClick={() => {
+              setUpdateError(undefined);
+              updateNow().catch((e) => setUpdateError(String(e)));
+            }}
+          >
+            Update and restart
+          </button>
+          <button className="icon-button" aria-label="Dismiss" title="Later (Settings → Updates)" onClick={() => setUpdateBanner(false)}>
+            ×
+          </button>
+        </div>
+      )}
       {notice && (
         <div className="app-notice" role="status">
           {notice}

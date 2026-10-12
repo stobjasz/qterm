@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
+  appInfo,
+  checkUpdate,
   claudeHookStatus,
   exportSettings,
   importSettings,
@@ -18,6 +20,8 @@ import {
   type HookStatus,
   type Profile,
   type ScrollbackUsage,
+  type AppInfo,
+  type UpdateInfo,
 } from "../ipc";
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
@@ -37,10 +41,17 @@ interface Props {
   onClose(): void;
   /** Deletes all saved output and clears the open panes' history. */
   onClearHistory(): Promise<void>;
+  /** The newer version found so far, if any. */
+  update: UpdateInfo | undefined;
+  onUpdateFound(update: UpdateInfo | undefined): void;
+  /** Saves tabs and output, then installs the update; qterm restarts. */
+  onInstallUpdate(): Promise<void>;
+  /** Goes up on each tray → Check for updates…; the panel checks then. */
+  checkRequest: number;
 }
 
 /** Edits config.toml without touching the file by hand. Esc closes without saving. */
-export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: Props) {
+export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, update, onUpdateFound, onInstallUpdate, checkRequest }: Props) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(snapshot.config));
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
@@ -58,6 +69,34 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
       setConfirmClear(false);
       refreshUsage();
     }, (e) => setError(String(e)));
+
+  const [app, setApp] = useState<AppInfo>();
+  useEffect(() => void appInfo().then(setApp), []);
+  const [updateStatus, setUpdateStatus] = useState<"checking" | "current" | "installing">();
+  const checkNow = () => {
+    setUpdateStatus("checking");
+    setError(undefined);
+    void checkUpdate().then(
+      (found) => {
+        onUpdateFound(found ?? undefined);
+        setUpdateStatus(found ? undefined : "current");
+      },
+      (e) => {
+        setUpdateStatus(undefined);
+        setError(String(e));
+      },
+    );
+  };
+  // A new request checks (also one made before the panel opened).
+  useEffect(() => void (checkRequest > 0 && checkNow()), [checkRequest]);
+  const installNow = () => {
+    setUpdateStatus("installing");
+    setError(undefined);
+    onInstallUpdate().catch((e) => {
+      setUpdateStatus(undefined);
+      setError(String(e));
+    });
+  };
 
   useEffect(() => void getAutostart().then(setAutostartState), []);
   useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
@@ -98,6 +137,39 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
       </header>
 
       <div className="settings-body">
+        <Group title="Updates">
+          <div className="settings-field">
+            <span>
+              {app ? `qterm ${app.version}, ${app.portable ? "portable exe" : "installed"}` : "qterm"}
+              <span className="settings-hint">
+                New versions come from GitHub Releases and are checked against qterm's signing key before they install.
+                {app?.portable
+                  ? " The portable exe replaces itself and restarts."
+                  : " The installer updates qterm in place and restarts it."}{" "}
+                Tabs and their output are saved first.
+              </span>
+            </span>
+            <div className="settings-actions">
+              {update ? (
+                <button className="primary" disabled={updateStatus === "installing"} onClick={installNow}>
+                  {updateStatus === "installing" ? "Updating…" : `Update to ${update.version} and restart`}
+                </button>
+              ) : (
+                <button disabled={updateStatus === "checking"} onClick={checkNow}>
+                  {updateStatus === "checking" ? "Checking…" : "Check now"}
+                </button>
+              )}
+              {updateStatus === "current" && <span>✓ qterm is up to date</span>}
+            </div>
+          </div>
+          <Toggle
+            label="Check for updates automatically"
+            hint="Shortly after start and then daily. A newer version is offered here and in the tray; nothing installs by itself."
+            checked={draft.checkUpdates}
+            onChange={(v) => set("checkUpdates", v)}
+          />
+        </Group>
+
         <Group title="Console">
           <Field label="Hotkey" hint="One key that shows and hides qterm. The tray can switch it off.">
             <select value={draft.hotkey} onChange={(e) => set("hotkey", e.target.value)}>

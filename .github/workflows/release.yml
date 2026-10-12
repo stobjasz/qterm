@@ -1,0 +1,96 @@
+name: Release
+
+# Pushing a version tag (scripts/release.ps1 makes one) builds, signs and publishes:
+# the installer, the portable exe, their signatures, SHA256SUMS and latest.json,
+# the feed qterm's updater reads.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: release
+
+      - name: Fetch the bundled ConPTY
+        shell: pwsh
+        run: ./scripts/fetch-conpty.ps1
+
+      - name: Check the tag matches the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME, but tauri.conf.json says $version" }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'the TAURI_SIGNING_PRIVATE_KEY secret is missing' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Unit tests
+        run: pnpm test
+
+      # The bare exe first: bundling marks the exe it packs as the installer's.
+      - name: Build the portable exe
+        shell: pwsh
+        run: |
+          pnpm tauri build --no-bundle
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item src-tauri/target/release/qterm.exe "release/qterm-${{ steps.version.outputs.version }}-portable-x64.exe"
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          pnpm tauri build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $setup = "src-tauri/target/release/bundle/nsis/qterm_${{ steps.version.outputs.version }}_x64-setup.exe"
+          Copy-Item $setup, "$setup.sig" release/
+
+      - name: Sign the portable exe and write latest.json
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $portable = "release/qterm-$version-portable-x64.exe"
+          # Key and password come from the environment.
+          pnpm tauri signer sign $portable
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node scripts/release-manifest.mjs --version $version --repo $env:GITHUB_REPOSITORY `
+            --setup "release/qterm_${version}_x64-setup.exe" --portable $portable --out release/latest.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Push-Location release
+          Get-ChildItem -Filter *.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Set-Content SHA256SUMS -Encoding ascii
+          Get-Content SHA256SUMS
+          Pop-Location
+
+      # A draft until every file is up, so the updater never sees a half-published release.
+      - name: Publish the release
+        shell: pwsh
+        run: |
+          gh release create $env:GITHUB_REF_NAME --draft --verify-tag --generate-notes --title "qterm ${{ steps.version.outputs.version }}" (Get-ChildItem release).FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release edit $env:GITHUB_REF_NAME --draft=false --latest

@@ -12,7 +12,7 @@ export default defineConfig(() => ({
   // so the web-oriented chunk-size warning doesn't apply.
   build: { chunkSizeWarningLimit: 2000 },
   // Unit tests only; e2e/*.spec.ts belong to Playwright (pnpm e2e).
-  test: { include: ["src/**/*.test.{ts,tsx}"] },
+  test: { include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

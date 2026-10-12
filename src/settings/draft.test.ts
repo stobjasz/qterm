@@ -25,6 +25,7 @@ const config: Config = {
   longCommandAlert: 30,
   inlineImages: true,
   sshProfiles: true,
+  checkUpdates: true,
   font: { family: "Cascadia Mono", size: 14, ligatures: false },
   keybindings: {},
   profiles: [],

@@ -82,6 +82,10 @@ inline_images = true
 # palette). Patterns like *.internal are left out; Include files aren't read.
 ssh_profiles = true
 
+# Look for a newer qterm (GitHub Releases) shortly after start and then daily. When
+# there is one, the tray and Settings → Updates offer it; nothing installs by itself.
+check_updates = true
+
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
 # `profiles` switches it per shell, overriding `restore`, e.g.
