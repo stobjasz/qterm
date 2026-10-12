@@ -47,18 +47,18 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 14 | **Alert when Claude finishes**: hook Claude Code's Stop event for an instant ✳ and notification when a reply ends and you're not looking at that pane. (Today's Notification hook fires only for permission prompts, rare in auto mode, and after 60 s idle.) | S | ⬜ |
 | 15 | **Bring Claude sessions back after a restart**: panes that were running Claude reopen with `claude --resume <id>` typed for you (opt-in). | M | ⬜ |
 | 16 | **"Ask Claude about this"**: select an error, then a palette action opens a pane in that folder with `claude "<selection>"`. | S | ⬜ |
-| 17 | **Context and cost per tab**: token use read from the session's transcript, shown in the tab tooltip and the ✳ menu. | M | 🚧 |
+| 17 | **Context and cost per tab**: token use read from the session's transcript, shown in the tab tooltip and the ✳ menu. | M | ✅ context % on the tab, details in its tooltip, "Running now" in the ✳ menu; SessionStart hook maps panes to sessions |
 
 ### Terminal
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 18 | **Command marks** (OSC 133 from the shell integration): jump between commands, copy the last command's output, ✓/✗ per exit code. | M | 🚧 |
-| 19 | **"Long command finished" notifications** for commands over N seconds while you're not looking (needs #18). | S | 🚧 |
-| 20 | **Snippets**: named commands in config (`[[snippets]]`), run from the palette into the current pane. | S | 🚧 |
-| 21 | **Search across all panes**, restored output included. | M | 🚧 |
+| 18 | **Command marks** (OSC 133 from the shell integration): jump between commands, copy the last command's output, ✓/✗ per exit code. | M | ✅ PowerShell, Git Bash (exit codes), cmd (no exit codes); Ctrl+↑/↓ |
+| 19 | **"Long command finished" notifications** for commands over N seconds while you're not looking (needs #18). | S | ✅ `long_command_alert` (default 30 s) |
+| 20 | **Snippets**: named commands in config (`[[snippets]]`), run from the palette into the current pane. | S | ✅ |
+| 21 | **Search across all panes**, restored output included. | M | ✅ Alt+Shift+F |
 | 22 | **SSH quick-connect**: profiles from `~/.ssh/config`. | S | ⬜ |
-| 23 | **Inline images (sixel) and font ligatures** (xterm.js add-ons). | S–M | 🚧 |
+| 23 | **Inline images (sixel) and font ligatures** (xterm.js add-ons). | S–M | ✅ sixel/iTerm/Kitty images (on), ligatures (off; needs e.g. Cascadia Code) |
 | 24 | **Tab colours and icons**, per tab or per profile. | S | ⬜ |
 
 ### The console window
@@ -68,7 +68,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ⬜ |
 | 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ⬜ |
 | 27 | **A second console on its own hotkey** (scratch console, or docked bottom/side). | M | ⬜ |
-| 28 | **Run a tab as administrator**. | L | 🚧 |
+| 28 | **Run a tab as administrator**. | L | ✅ through Windows' sudo set to Inline; otherwise an elevated window. Elevation itself untested here (sudo is off on the dev machine) |
 
 ### Robustness and release
 
@@ -76,6 +76,6 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 |---|---|---|---|
 | 29 | **Log file** plus tray → "Open logs". | S | ⬜ |
 | 30 | **Publish to winget** (after #13). | S | ⬜ |
-| 31 | **Settings export/import** for moving to another PC. | S | 🚧 |
+| 31 | **Settings export/import** for moving to another PC. | S | ✅ Settings footer: Export… / Import… |
 
 Suggested next: #14 and #15 (Claude reliability across "is it done?" and restarts), #29.

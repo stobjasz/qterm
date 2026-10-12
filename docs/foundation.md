@@ -746,3 +746,23 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
     save kept only the first;
   - Settings showed "1 pane, 85 B", the two-step clear left no files, and the next save
     wrote none.
+
+## 21. Roadmap round 2: #17–#21, #23, #28, #31 (2026-10-12)
+
+| # | What | How | Verified |
+|---|---|---|---|
+| 20 | Snippets | `[[snippets]] name/command/run`; palette group "Snippet". Pasted (multi-line ones aren't run line by line), then Enter as its own keystroke when `run`, since a bracketed paste never runs. | Live: the `run` one ran, the other waited at the prompt. Config test. |
+| 31 | Settings export/import | `tauri-plugin-dialog` pickers. Export copies config.toml (comments kept). Import validates first, keeps `config.toml.bak`, writes atomically; the watcher applies it. | Rust test: export, rejected import leaves the file alone, good import with backup. |
+| 18 | Command marks | Shell integration emits OSC 133 A (prompt), B (typing), D;code (ended). PowerShell reads `$?`/`$LASTEXITCODE` first; Git Bash adds B to PS1 once; cmd's PROMPT can't see the exit code. The registry keeps a mark per command (markers, max 500): a 3 px bar at the prompt's edge (green/red/grey, tooltip = command), Ctrl+↑/↓ scroll between prompts, "Copy last command's output" (wrapped lines joined). | Live: exit 0/3 in PowerShell, 0/1 in Git Bash, none in cmd; bars on screen; jumps; copied `copy-me-1\ncopy-me-2`. |
+| 19 | Long-command alerts | Duration from the Enter that ran it to D. `long_command_alert` seconds (default 30, 0 = off, also in Settings). Same path as Claude alerts: ✓/✗ on the tab, Windows notification unless you're in the console. | Live: `Start-Sleep 3; exit 4` with the threshold at 2 s, console hidden → ✗ "Command failed (exit 4) · 3s". |
+| 21 | Search all panes | Alt+Shift+F: palette-style dialog, case/regex toggles, results "tab · line". Started panes: their normal buffer. A restored tab not shown yet: its saved output (plain text). Picking a result focuses the pane, waits for its restored output (`ready`), scrolls and selects. | Live: 4 matches across 2 tabs, pick selected `needle`; case 2→0; regex 4; unopened restored tab found and revealed after it started. |
+| 23 | Images, ligatures | `@xterm/addon-image` (sixel, iTerm, Kitty), `inline_images` default on. `@xterm/addon-ligatures` falls back to a built-in ligature list in a webview (no font files): `[font] ligatures`, default off, needs a font that has them. Loaded before WebGL; the renderer is reloaded when switched. | Live: a sixel through ConPTY was stored (60×12 px) and drawn; ligatures drawn with Cascadia Code; both switch at runtime. |
+| 17 | Claude context and cost | The hook also handles SessionStart (pane → session + transcript); Settings shows "Update" for a Notification-only setup. Fallback: the newest transcript of the pane's folder. Transcripts are read incrementally; a request counts once (latest line); context = the main thread's latest request; cost at API list prices per model (5 m/1 h cache writes, reads, Haiku 5.5 long-prompt tier, fast mode); unknown models make it partial. Polled every 5 s for panes running Claude. | Rust tests (cost maths, de-dup, incremental, path checks). Live: folder fallback read this session (56%, ≈ $103, 740 requests); a SessionStart event switched it to the mapped transcript; "Running now" row in the ✳ menu. |
+| 28 | Admin tabs | No home-made elevation bridge: Windows' sudo with `--inline -E -D <folder>` (full path to sudo.exe), only when sudo is set to Inline (registry, capped by policy); the backend refuses otherwise. Other modes: ShellExecute "runas" opens the shell in its own window, with a notice. Admin panes are marked and not saved as admin. | Live: status "disabled", elevated spawn refused, palette entries, Settings status. Tests: mode reading, sudo argv, command-line quoting. Not done: an actual elevation (sudo is off here; a UAC prompt can't be automated). |
+
+Notes:
+- **Ctrl+Alt chords** are AltGr on Windows (and type characters on many layouts), so the
+  key matcher ignores them. Search all panes uses Alt+Shift+F instead.
+- **Vite's watcher** sometimes missed files rewritten by scripts during development; a
+  touch (or restart) fixed it. Comments are stripped from served modules, so checking
+  served code for a comment proves nothing.

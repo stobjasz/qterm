@@ -7,13 +7,19 @@ translucent console down from the top of the screen.
   and reorder (drag) tabs
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
 - Drop files from Explorer on a pane to type their paths, quoted for its shell
+- Command marks: a ✓/✗ bar per command, Ctrl+↑/↓ between prompts, copy the last
+  command's output, and a notification when a long command finishes while you're away
+- Search the output of every pane at once (Alt+Shift+F); snippets in the palette;
+  inline images (sixel, iTerm, Kitty) and optional font ligatures
+- Administrator tabs through Windows' sudo (Inline); settings export and import
 - Nine colour themes, adjustable size, opacity, font, slide speed; drag the console's
   bottom edge to change its height (double-click it for half the screen)
 - Reopens your tabs and layout, each pane in the folder it was in, with its earlier
   output (switchable per shell)
 - Claude Code: remembers sessions (from `claude --resume <id>` in the output), grouped
   by folder, and resumes them from the ✳ menu; alerts you (Windows notification, ✳ on
-  the tab) when Claude is waiting for you. Turn both on in Settings → Claude Code.
+  the tab) when Claude is waiting for you; each tab shows how full Claude's context is and
+  an estimated cost. Turn them on in Settings → Claude Code.
 - Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
   editor (VS Code by default)
 - Command palette (Ctrl+Shift+P) for every action, tab, profile, layout, theme and
