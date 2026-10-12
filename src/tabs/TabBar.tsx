@@ -1,10 +1,11 @@
-import { useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 
 import { ClaudeMenu, type ClaudeMenuProps } from "../claude/ClaudeMenu";
 import { contextPercent, usageSummary } from "../claude/usage";
 import type { ClaudeAlert, ClaudeUsage, Profile } from "../ipc";
 import type { LayoutDef } from "../workspace/layouts";
-import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
+import { tabTitle, type SplitDir, type TabColor, type TabId, type Workspace } from "../workspace/workspace";
+import { TAB_COLOR_VALUES, TabStyleMenu } from "./TabStyleMenu";
 import { Popup } from "./Popup";
 
 /** A drag only starts after the pointer moved this far, so clicks stay clicks. */
@@ -20,6 +21,8 @@ interface Props {
   onNewTab(profileId?: string): void;
   onSplit(dir: SplitDir): void;
   onRename(tabId: TabId, title: string): void;
+  /** Right-click menu: the tab's own colour / icon (null clears it). */
+  onStyle(tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): void;
   onMove(tabId: TabId, toIndex: number): void;
   onOpenSettings(): void;
   /** Tabs with a pane where Claude Code is waiting, and its latest message. */
@@ -50,6 +53,7 @@ export interface TabMarkers {
 export function TabBar(props: Props) {
   const { workspace, profiles, claude } = props;
   const [editing, setEditing] = useState<TabId>();
+  const [styling, setStyling] = useState<{ tabId: TabId; x: number; y: number }>();
   const [dropIndex, setDropIndex] = useState<number>();
   const tabsRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ tabId: TabId; startX: number; active: boolean }>(undefined);
@@ -92,13 +96,22 @@ export function TabBar(props: Props) {
           const waiting = props.attention.get(tab.id);
           const marks = props.markers.get(tab.id);
           const drop = dropIndex === i ? " drop-before" : dropIndex === i + 1 && i === workspace.tabs.length - 1 ? " drop-after" : "";
+          // The tab's own colour and icon, else those of the profile in its focused pane.
+          const profile = props.profiles.find((p) => p.id === workspace.panes[tab.focusedPane]?.profileId);
+          const color = tab.color ?? profile?.tabColor;
+          const icon = tab.icon ?? profile?.icon;
           return (
             <div
               key={tab.id}
               role="tab"
               aria-selected={active}
-              className={`tab${active ? " active" : ""}${drop}${waiting ? " attention" : ""}`}
-              title={`${waiting ? `Claude: ${waiting.message}\n` : ""}${title}\nDouble-click to rename, drag to move`}
+              className={`tab${active ? " active" : ""}${drop}${waiting ? " attention" : ""}${color ? " colored" : ""}`}
+              style={color ? ({ "--tab-color": TAB_COLOR_VALUES[color] } as CSSProperties) : undefined}
+              title={`${waiting ? `Claude: ${waiting.message}\n` : ""}${title}\nDouble-click to rename, drag to move, right-click for colour and icon`}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setStyling({ tabId: tab.id, x: e.clientX, y: e.clientY });
+              }}
               onClick={() => props.onActivate(tab.id)}
               onDoubleClick={() => setEditing(tab.id)}
               onAuxClick={(e) => e.button === 1 && props.onClose(tab.id)}
@@ -116,7 +129,14 @@ export function TabBar(props: Props) {
                   }}
                 />
               ) : (
-                <span className="tab-title">{title}</span>
+                <>
+                  {icon && (
+                    <span className="tab-icon" aria-hidden="true">
+                      {icon}
+                    </span>
+                  )}
+                  <span className="tab-title">{title}</span>
+                </>
               )}
               {marks?.claude && !waiting && (
                 <span
@@ -236,6 +256,17 @@ export function TabBar(props: Props) {
       </Popup>
       <div className="tabbar-spacer" />
       {claude && <ClaudeMenu {...claude} />}
+      {styling && (
+        <TabStyleMenu
+          key={styling.tabId}
+          x={styling.x}
+          y={styling.y}
+          color={workspace.tabs.find((t) => t.id === styling.tabId)?.color}
+          icon={workspace.tabs.find((t) => t.id === styling.tabId)?.icon}
+          onChange={(style) => props.onStyle(styling.tabId, style)}
+          onClose={() => setStyling(undefined)}
+        />
+      )}
       <button className="tab-new" aria-label="Split right" title="Split right (Alt+Shift+=)" onClick={() => props.onSplit("row")}>
         <SplitIcon dir="row" />
       </button>

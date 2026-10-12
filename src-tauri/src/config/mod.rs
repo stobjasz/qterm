@@ -95,7 +95,16 @@ pub struct CustomProfile {
     pub theme: Option<String>,
     #[serde(default)]
     pub font_size: Option<f64>,
+    /// Colour of its tabs: one of TAB_COLORS.
+    #[serde(default)]
+    pub tab_color: Option<String>,
+    /// Shown before its tabs' titles: an emoji or a few letters.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
+
+/// The colours a tab can have (the UI maps them to the theme's palette).
+pub const TAB_COLORS: [&str; 8] = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
 
 impl CustomProfile {
     pub fn id(&self) -> String {
@@ -251,6 +260,14 @@ impl Config {
             }
             if let Some(size) = profile.font_size {
                 in_range(&format!("profile \"{}\" font_size", profile.name), size, 6.0, 72.0)?;
+            }
+            if let Some(color) = &profile.tab_color
+                && !TAB_COLORS.contains(&color.as_str())
+            {
+                return Err(format!("profile \"{}\" tab_color \"{color}\" is not one of {}", profile.name, TAB_COLORS.join(", ")));
+            }
+            if profile.icon.as_ref().is_some_and(|icon| icon.chars().count() > 4) {
+                return Err(format!("profile \"{}\" icon is longer than 4 characters", profile.name));
             }
         }
         let mut names = std::collections::BTreeSet::new();
@@ -726,6 +743,10 @@ panes = [
         assert!(Config::parse("[[profiles]]\nname = \"a\"\ncommand = \"ssh a\"\n[[profiles]]\nname = \"a\"\ncommand = \"ssh b\"")
             .unwrap_err()
             .contains("share the id"));
+        assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\ntab_color = \"mauve\"").unwrap_err().contains("tab_color"));
+        assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\nicon = \"abcdef\"").unwrap_err().contains("icon"));
+        let ok = Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\ntab_color = \"teal\"\nicon = \"🐳\"").unwrap();
+        assert_eq!(ok.profiles[0].tab_color.as_deref(), Some("teal"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\npanes = [{}, {}]").unwrap_err().contains("needs split"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\n[[layouts]]\nname = \"x\"").unwrap_err().contains("named"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\nsplit = \"diagonal\"").is_err());

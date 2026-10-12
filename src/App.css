@@ -204,6 +204,102 @@ body,
   box-shadow: inset 0 2px 0 var(--console-edge);
 }
 
+/* A tab with a colour (its own, or its profile's): a tint and a coloured top edge. */
+.tab.colored {
+  background: color-mix(in srgb, var(--tab-color) 12%, transparent);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--tab-color) 70%, transparent);
+}
+
+.tab.colored.active {
+  background: color-mix(in srgb, var(--tab-color) 24%, transparent);
+  box-shadow: inset 0 2px 0 var(--tab-color);
+}
+
+.tab-icon {
+  flex: none;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Right-click on a tab: colour and icon. */
+.tab-style-menu {
+  position: fixed;
+  z-index: 30;
+  width: 236px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.tab-style-label {
+  margin: 2px 0 4px;
+  color: var(--tab-fg);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tab-style-colors,
+.tab-style-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tab-style-swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+.tab-style-swatch.none {
+  background: linear-gradient(135deg, transparent 45%, var(--danger) 45%, var(--danger) 55%, transparent 55%);
+}
+
+.tab-style-swatch[aria-checked="true"] {
+  outline: 2px solid var(--theme-fg);
+  outline-offset: 1px;
+}
+
+.tab-style-icons button {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.tab-style-icons button:hover,
+.tab-style-icons button[aria-pressed="true"] {
+  background: var(--hover-bg);
+}
+
+.tab-style-row {
+  display: flex;
+  gap: 6px;
+}
+
+.tab-style-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: inherit;
+  background: var(--field-bg);
+  font: inherit;
+}
+
+.tab-style-row button {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
 /* Claude Code is waiting in this tab: a pulsing mark in the accent colour. */
 .tab-attention {
   color: var(--console-edge);

@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import type { LayoutDef } from "./workspace/layouts";
+import type { TabColor } from "./workspace/workspace";
 
 export type SessionId = number;
 
@@ -18,6 +19,9 @@ export interface Profile {
   /** Custom profiles may bring their own look. */
   theme?: string;
   fontSize?: number;
+  /** Marks its tabs ([[profiles]] tab_color / icon). */
+  tabColor?: TabColor;
+  icon?: string;
 }
 
 /** A [[profiles]] entry as written in config.toml. */
@@ -29,6 +33,8 @@ export interface CustomProfile {
   env: Record<string, string>;
   theme: string | null;
   fontSize: number | null;
+  tabColor: TabColor | null;
+  icon: string | null;
 }
 
 /** Mirrors config.toml (see src-tauri/src/config/default.toml), in camelCase. */

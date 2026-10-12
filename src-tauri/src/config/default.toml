@@ -109,7 +109,8 @@ ligatures = false
 
 # Your own shells, next to the detected ones (▾ menu, palette). Double quotes keep
 # spaces together in `command`. `theme` and `font_size` give its panes their own
-# look. An `id` of a detected profile ("pwsh", "cmd", ...) restyles that one.
+# look, `tab_color` and `icon` mark its tabs. An `id` of a detected profile ("pwsh",
+# "cmd", "ssh:<host>", ...) restyles that one.
 #
 # [[profiles]]
 # name = "API server"
@@ -118,6 +119,8 @@ ligatures = false
 # env = { NODE_ENV = "development" }
 # theme = "dracula"
 # font_size = 13
+# tab_color = "green"    # red, orange, yellow, green, teal, blue, purple, pink
+# icon = "🚀"            # shown before the tab's title
 #
 # [[profiles]]
 # name = "Build box"

@@ -73,6 +73,8 @@ import {
   openTabWith,
   paneIds,
   renameTab,
+  setTabStyle,
+  TAB_COLORS,
   resizeDivider,
   resizeFocused,
   restoreWorkspace,
@@ -565,6 +567,12 @@ export default function App() {
         run: () => openLayout(layout),
       })),
       { id: "layout:save", group: "Layout", label: "Save this tab as a layout", run: saveTabAsLayout },
+      ...[...TAB_COLORS, null].map((color) => ({
+        id: `tab-color:${color ?? "none"}`,
+        group: "Tab colour",
+        label: color ?? "none",
+        run: () => setWorkspace((ws) => (ws.activeTab ? setTabStyle(ws, ws.activeTab, { color }) : ws)),
+      })),
       ...(config?.snippets ?? []).map((snippet, i) => ({
         id: `snippet:${i}`,
         group: "Snippet",
@@ -950,6 +958,7 @@ export default function App() {
         onNewTab={(profileId) => newTab(profileId)}
         onSplit={(dir) => focusedPane && split(focusedPane, dir)}
         onRename={(tabId, title) => setWorkspace((ws) => renameTab(ws, tabId, title))}
+        onStyle={(tabId, style) => setWorkspace((ws) => setTabStyle(ws, tabId, style))}
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
         attention={attentionTabs}

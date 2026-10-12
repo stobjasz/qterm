@@ -49,6 +49,10 @@ pub struct Profile {
     pub theme: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// Shell integration for PowerShell: wraps whatever prompt the user's profile set up
@@ -94,6 +98,8 @@ impl Profile {
             env: Vec::new(),
             theme: None,
             font_size: None,
+            tab_color: None,
+            icon: None,
         }
     }
 
@@ -122,6 +128,8 @@ impl Profile {
             env: def.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             theme: def.theme.clone(),
             font_size: def.font_size,
+            tab_color: def.tab_color.clone(),
+            icon: def.icon.clone(),
         }
     }
 
@@ -435,6 +443,8 @@ mod tests {
             env: [("NODE_ENV".to_string(), "development".to_string())].into(),
             theme: Some("nord".into()),
             font_size: None,
+            tab_color: None,
+            icon: None,
         };
         let profile = Profile::custom(&def);
         assert_eq!(profile.id, "custom:API");
@@ -459,6 +469,8 @@ mod tests {
             env: Default::default(),
             theme: Some("dracula".into()),
             font_size: Some(13.0),
+            tab_color: Some("green".into()),
+            icon: None,
         };
         let extra = CustomProfile { id: None, name: "Box".into(), command: "ssh box".into(), theme: None, font_size: None, ..restyle.clone() };
         let all = merge(&detected, &[restyle, extra]);
