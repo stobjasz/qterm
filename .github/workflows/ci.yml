@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes an older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit, Rust and E2E tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # The newer ConPTY that release builds embed (pinned and signature-checked).
+      - name: Fetch the bundled ConPTY
+        shell: pwsh
+        run: ./scripts/fetch-conpty.ps1
+
+      - name: TypeScript checks
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec tsc -p e2e
+      - name: Unit tests (TypeScript)
+        run: pnpm test
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests (Rust)
+        working-directory: src-tauri
+        run: cargo test
+
+      # Builds the e2e app (own identifier), starts Vite, and drives the real app.
+      - name: E2E tests
+        run: pnpm e2e
+
+      - name: Upload the E2E report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

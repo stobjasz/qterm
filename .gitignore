@@ -25,3 +25,8 @@ dist-ssr
 
 # scripts/build-portable.ps1 output
 dist-portable
+
+# Playwright output
+/playwright-report/
+/test-results/
+/blob-report/

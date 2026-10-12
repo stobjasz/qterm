@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 // @ts-expect-error type error without @types/node package
@@ -10,6 +11,8 @@ export default defineConfig(() => ({
   // The bundle is embedded in the exe and loaded from memory, not downloaded,
   // so the web-oriented chunk-size warning doesn't apply.
   build: { chunkSizeWarningLimit: 2000 },
+  // Unit tests only; e2e/*.spec.ts belong to Playwright (pnpm e2e).
+  test: { include: ["src/**/*.test.{ts,tsx}"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
