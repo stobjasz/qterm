@@ -139,6 +139,18 @@ pub fn save_config(config: State<'_, ConfigState>, changes: serde_json::Map<Stri
     config.update(&changes)
 }
 
+/// Settings → Export: copies config.toml to `path`.
+#[tauri::command]
+pub fn export_settings(config: State<'_, ConfigState>, path: String) -> Result<(), String> {
+    config.export_to(std::path::Path::new(&path))
+}
+
+/// Settings → Import: replaces config.toml with `path` if it is valid (old one kept as .bak).
+#[tauri::command]
+pub fn import_settings(config: State<'_, ConfigState>, path: String) -> Result<(), String> {
+    config.import_from(std::path::Path::new(&path))
+}
+
 #[tauri::command]
 pub fn open_config_file(app: AppHandle) -> Result<(), String> {
     crate::tray::open_config_file(&app)

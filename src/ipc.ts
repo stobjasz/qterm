@@ -2,6 +2,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import type { LayoutDef } from "./workspace/layouts";
 
@@ -180,6 +181,24 @@ export function saveConfig(changes: Record<string, unknown>): Promise<void> {
 
 export function openConfigFile(): Promise<void> {
   return invoke("open_config_file");
+}
+
+const SETTINGS_FILTER = [{ name: "qterm settings", extensions: ["toml"] }];
+
+/** Asks where to save, then copies config.toml there. False when cancelled. */
+export async function exportSettings(): Promise<boolean> {
+  const path = await saveDialog({ title: "Export qterm settings", defaultPath: "qterm-settings.toml", filters: SETTINGS_FILTER });
+  if (!path) return false;
+  await invoke("export_settings", { path });
+  return true;
+}
+
+/** Asks for a settings file, then replaces config.toml with it if valid. False when cancelled. */
+export async function importSettings(): Promise<boolean> {
+  const path = await openDialog({ title: "Import qterm settings", multiple: false, directory: false, filters: SETTINGS_FILTER });
+  if (!path) return false;
+  await invoke("import_settings", { path });
+  return true;
 }
 
 export function getAutostart(): Promise<boolean> {

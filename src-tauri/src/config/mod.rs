@@ -379,6 +379,23 @@ impl ConfigState {
         Config::parse(&updated)?;
         crate::claude::write_atomically(&self.path, &updated)
     }
+
+    /// Settings export: config.toml as it is on disk, comments included.
+    pub fn export_to(&self, target: &Path) -> Result<(), String> {
+        std::fs::copy(&self.path, target).map(|_| ()).map_err(|e| format!("could not export settings: {e}"))
+    }
+
+    /// Settings import: replaces config.toml with `source` once it validates. The
+    /// previous file stays as config.toml.bak; the file watcher applies the new one.
+    pub fn import_from(&self, source: &Path) -> Result<(), String> {
+        let text = std::fs::read_to_string(source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
+        Config::parse(&text).map_err(|e| format!("not valid qterm settings: {e}"))?;
+        if self.path.exists() {
+            std::fs::copy(&self.path, self.path.with_extension("toml.bak"))
+                .map_err(|e| format!("could not back up the current settings: {e}"))?;
+        }
+        crate::claude::write_atomically(&self.path, &text)
+    }
 }
 
 fn apply_changes(text: &str, changes: &serde_json::Map<String, serde_json::Value>) -> Result<String, String> {
@@ -656,6 +673,28 @@ panes = [
         assert_eq!(config.scrollback.lines, 500);
         assert!(!config.scrollback.profiles["wsl:Ubuntu"]);
         assert!(Config::parse("[scrollback]\nlines = 5").unwrap_err().contains("scrollback.lines"));
+    }
+
+    #[test]
+    fn exports_and_imports_settings() {
+        let dir = std::env::temp_dir().join(format!("qterm-config-io-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = ConfigState::load(&dir);
+        let exported = dir.join("exported.toml");
+        state.export_to(&exported).unwrap();
+        assert_eq!(std::fs::read_to_string(&exported).unwrap(), DEFAULT_FILE, "comments and all");
+
+        let broken = dir.join("broken.toml");
+        std::fs::write(&broken, "height = \"tall\"").unwrap();
+        assert!(state.import_from(&broken).unwrap_err().contains("not valid qterm settings"));
+        assert_eq!(std::fs::read_to_string(state.path()).unwrap(), DEFAULT_FILE, "untouched after a bad import");
+
+        let other = dir.join("other.toml");
+        std::fs::write(&other, "height = 0.4\n").unwrap();
+        state.import_from(&other).unwrap();
+        assert_eq!(std::fs::read_to_string(state.path()).unwrap(), "height = 0.4\n");
+        assert_eq!(std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(), DEFAULT_FILE);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

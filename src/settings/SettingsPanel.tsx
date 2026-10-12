@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   claudeHookStatus,
+  exportSettings,
+  importSettings,
   getAutostart,
   installClaudeHook,
   openConfigFile,
@@ -39,6 +41,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
   const [draft, setDraft] = useState<Draft>(() => toDraft(snapshot.config));
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [hook, setHook] = useState<HookStatus>();
   const [usage, setUsage] = useState<ScrollbackUsage>();
@@ -309,9 +312,24 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
               {message}
             </p>
           ))}
+          {notice && !error && <p className="settings-notice">{notice}</p>}
         </div>
         <button className="link-button" onClick={() => void openConfigFile()} title={snapshot.path}>
           Open settings file
+        </button>
+        <button
+          className="link-button"
+          title="Save your settings (config.toml) to a file, e.g. for another PC"
+          onClick={() => void exportSettings().then((done) => done && setNotice("Settings exported."), (e) => setError(String(e)))}
+        >
+          Export…
+        </button>
+        <button
+          className="link-button"
+          title="Replace your settings with a file exported before (the current ones are kept as config.toml.bak)"
+          onClick={() => void importSettings().then((done) => done && onClose(), (e) => setError(String(e)))}
+        >
+          Import…
         </button>
         <button onClick={onClose}>Cancel</button>
         <button className="primary" disabled={!dirty || saving || keymapErrors.length > 0} onClick={() => void save()}>

@@ -43,6 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().arg(BACKGROUND_ARG).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
@@ -112,6 +113,8 @@ pub fn run() {
             commands::forget_claude_sessions,
             commands::save_config,
             commands::open_config_file,
+            commands::export_settings,
+            commands::import_settings,
             commands::get_autostart,
             commands::set_autostart,
             commands::resize_console,
