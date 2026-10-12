@@ -210,6 +210,36 @@ body,
   animation: attention-pulse 1.2s ease-in-out infinite;
 }
 
+/* A long command finished while you weren't looking. */
+.tab-attention.command_done {
+  color: #98c379;
+  animation: none;
+}
+
+.tab-attention.command_failed {
+  color: var(--danger);
+  animation: none;
+}
+
+/* Command marks: a thin bar at the left edge of each prompt (xterm decoration). */
+.command-mark {
+  width: 3px !important;
+  border-radius: 1px;
+  opacity: 0.85;
+}
+
+.command-mark.ok {
+  background: #98c379;
+}
+
+.command-mark.failed {
+  background: var(--danger);
+}
+
+.command-mark.unknown {
+  background: color-mix(in srgb, var(--tab-fg) 60%, transparent);
+}
+
 .tab.attention:not(.active) {
   color: var(--tab-active-fg);
   background: color-mix(in srgb, var(--console-edge) 14%, transparent);

@@ -20,6 +20,7 @@ export interface Draft {
   claudeSessions: boolean;
   claudeAlerts: boolean;
   editor: string;
+  longCommandAlert: number;
   fontFamily: string;
   fontSize: number;
   scrollbackRestore: boolean;
@@ -48,6 +49,7 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   claudeSessions: "claude_sessions",
   claudeAlerts: "claude_alerts",
   editor: "editor",
+  longCommandAlert: "long_command_alert",
   fontFamily: "font.family",
   fontSize: "font.size",
   scrollbackRestore: "scrollback.restore",
@@ -72,6 +74,7 @@ export function toDraft(config: Config): Draft {
     claudeSessions: config.claudeSessions,
     claudeAlerts: config.claudeAlerts,
     editor: config.editor,
+    longCommandAlert: config.longCommandAlert,
     fontFamily: config.font.family,
     fontSize: config.font.size,
     scrollbackRestore: config.scrollback.restore,

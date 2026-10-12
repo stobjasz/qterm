@@ -1,7 +1,7 @@
 // xterm.js instances live here, outside React. A pane component only parks the
 // terminal's wrapper element in its container, so switching tabs or re-parenting
 // a pane during a split never recreates a terminal or loses its scrollback.
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDecoration, type IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -28,6 +28,7 @@ import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "..
 import type { PaneId } from "../workspace/workspace";
 import { hasContent } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
+import { parseMark } from "./marks";
 import { findFileLinks } from "./links";
 import { terminalOptions } from "./theme";
 import { THEMES, withAlpha, xtermTheme, type Theme } from "./themes";
@@ -57,6 +58,34 @@ export interface RegistryEvents {
   /** First output since the pane went into the background (see setBackground). */
   onActivity(paneId: PaneId): void;
   onBell(paneId: PaneId): void;
+  /** A command the user ran ended (shell integration marks). */
+  onCommandFinished(paneId: PaneId, finished: FinishedCommand): void;
+}
+
+export interface FinishedCommand {
+  command: string;
+  /** Undefined when the shell doesn't say (cmd). */
+  exitCode?: number;
+  durationMs: number;
+}
+
+/** Most recent commands remembered per pane; older ones lose their marks. */
+const MAX_MARKS = 500;
+
+/** One prompt and the command typed at it, from OSC 133 marks. */
+interface CommandMark {
+  /** Where the prompt starts (A). */
+  prompt: IMarker;
+  /** Where typing starts (B), and its column. */
+  input?: IMarker;
+  inputCol: number;
+  /** Date.now() of the Enter that ran it. */
+  startedAt?: number;
+  /** Where it ended (D): output is between the command line and this. */
+  end?: IMarker;
+  exitCode?: number;
+  command?: string;
+  decoration?: IDecoration;
 }
 
 /** How to start a pane's shell. */
@@ -116,6 +145,8 @@ interface Entry {
   earlyInput: string[];
   /** Lines sent to the shell (Enter, pasted lines, startup input) since it started. */
   commands: number;
+  /** Prompts and commands, oldest first (needs shell integration). */
+  marks: CommandMark[];
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -270,6 +301,41 @@ export class TerminalRegistry {
     entry.spec.restored = undefined;
   }
 
+  /** Scrolls to the previous (-1) or next (1) command's prompt; past the last one, to the bottom. */
+  scrollToCommand(paneId: PaneId, direction: -1 | 1): void {
+    const entry = this.entries.get(paneId);
+    if (!entry) return;
+    const { term } = entry;
+    const top = term.buffer.active.viewportY;
+    const lines = entry.marks.map((m) => m.prompt.line).filter((line) => line >= 0);
+    const above = lines.filter((line) => line < top);
+    const target = direction < 0 ? above[above.length - 1] : lines.find((line) => line > top);
+    if (target !== undefined) term.scrollToLine(target);
+    else if (direction < 0) term.scrollToTop();
+    else term.scrollToBottom();
+  }
+
+  /** Copies the output of the last finished command; false when there is none. */
+  copyLastOutput(paneId: PaneId): boolean {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks.filter((m) => m.end && m.input && m.end.line >= 0 && m.input.line >= 0).pop();
+    if (!entry || !mark?.end || !mark.input) return false;
+    const buffer = entry.term.buffer.normal;
+    // Output starts below the command line and the lines it wrapped onto.
+    let line = mark.input.line + 1;
+    while (buffer.getLine(line)?.isWrapped) line++;
+    let text = "";
+    for (; line < mark.end.line; line++) {
+      const row = buffer.getLine(line);
+      if (!row) break;
+      text += (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped);
+    }
+    text = text.replace(/\s+$/, "");
+    if (!text) return false;
+    void writeText(text);
+    return true;
+  }
+
   /** Copies the selection; returns false when nothing is selected. */
   copy(paneId: PaneId): boolean {
     const selection = this.entries.get(paneId)?.term.getSelection();
@@ -357,6 +423,7 @@ export class TerminalRegistry {
       lastOutput: 0,
       earlyInput: [],
       commands: 0,
+      marks: [],
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -391,7 +458,12 @@ export class TerminalRegistry {
       // A broadcasting tab sends keystrokes to every pane in it.
       for (const target of this.broadcast.get(paneId) ?? [paneId]) {
         const targetEntry = this.entries.get(target);
-        if (targetEntry && data.includes("\r")) targetEntry.commands++;
+        if (targetEntry && data.includes("\r")) {
+          targetEntry.commands++;
+          // Enter at a prompt starts the command typed there (its duration counts from now).
+          const mark = targetEntry.marks[targetEntry.marks.length - 1];
+          if (mark?.input && mark.startedAt === undefined) mark.startedAt = Date.now();
+        }
         const session = targetEntry?.sessionId;
         if (session !== undefined) void ptyWrite(session, data);
         else if (target === paneId) entry.earlyInput.push(data);
@@ -415,6 +487,10 @@ export class TerminalRegistry {
     );
     this.wireClipboard(paneId, entry);
     this.wireCwd(paneId, entry);
+    term.parser.registerOscHandler(133, (data) => {
+      this.onMark(paneId, entry, data);
+      return true;
+    });
     term.onLineFeed(() => {
       if (!this.behavior.claudeSessions) return;
       entry.linesSinceScan++;
@@ -460,6 +536,49 @@ export class TerminalRegistry {
         for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
       })
       .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
+  }
+
+  /** OSC 133: A = prompt, B = typing starts, D = the command ended. */
+  private onMark(paneId: PaneId, entry: Entry, data: string): void {
+    const mark = parseMark(data);
+    if (!mark) return;
+    const { term } = entry;
+    const last = entry.marks[entry.marks.length - 1];
+    switch (mark.kind) {
+      case "A": {
+        const prompt = term.registerMarker(0);
+        if (!prompt) return;
+        entry.marks.push({ prompt, inputCol: 0 });
+        for (const old of entry.marks.splice(0, Math.max(0, entry.marks.length - MAX_MARKS))) disposeMark(old);
+        return;
+      }
+      case "B":
+        if (last && !last.input) {
+          last.input = term.registerMarker(0);
+          last.inputCol = term.buffer.active.cursorX;
+        }
+        return;
+      case "C":
+        return;
+      case "D": {
+        // D comes before the next prompt's A, so it closes the latest prompt, if a
+        // command was run there.
+        if (!last?.input || last.startedAt === undefined || last.end) return;
+        const command = commandAt(term, last);
+        if (!command) {
+          // Enter on an empty prompt: nothing ran.
+          entry.marks.pop();
+          disposeMark(last);
+          return;
+        }
+        last.end = term.registerMarker(0);
+        last.exitCode = mark.exitCode;
+        last.command = command;
+        last.decoration = decorate(term, last);
+        this.events.onCommandFinished(paneId, { command, exitCode: mark.exitCode, durationMs: Date.now() - last.startedAt });
+        return;
+      }
+    }
   }
 
   private wireClipboard(paneId: PaneId, entry: Entry): void {
@@ -581,4 +700,32 @@ function showRestored(term: Terminal, saved: string): Promise<void> {
       term.write(`${down}\r\n\x1b[90m──── restored ${when} ────\x1b[0m\r\n`, resolve);
     });
   });
+}
+
+/** The command typed at a prompt: from where typing started, over wrapped lines. */
+function commandAt(term: Terminal, mark: CommandMark): string {
+  const buffer = term.buffer.active;
+  const start = mark.input?.line ?? -1;
+  if (start < 0) return "";
+  let text = buffer.getLine(start)?.translateToString(true, mark.inputCol) ?? "";
+  for (let line = start + 1; buffer.getLine(line)?.isWrapped; line++) text += buffer.getLine(line)!.translateToString(true);
+  return text.trim();
+}
+
+/** A thin bar at the prompt's left edge: green for exit 0, red otherwise, grey when unknown. */
+function decorate(term: Terminal, mark: CommandMark): IDecoration | undefined {
+  const decoration = term.registerDecoration({ marker: mark.prompt, x: 0, width: 1, layer: "top" });
+  decoration?.onRender((el) => {
+    const state = mark.exitCode === undefined ? "unknown" : mark.exitCode === 0 ? "ok" : "failed";
+    el.classList.add("command-mark", state);
+    el.title = `${mark.command}${mark.exitCode === undefined ? "" : ` (exit ${mark.exitCode})`}`;
+  });
+  return decoration;
+}
+
+function disposeMark(mark: CommandMark): void {
+  mark.decoration?.dispose();
+  mark.prompt.dispose();
+  mark.input?.dispose();
+  mark.end?.dispose();
 }

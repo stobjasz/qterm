@@ -38,6 +38,8 @@ pub struct Config {
     pub claude_alerts: bool,
     /// Command that opens a file at a line; {file}, {line}, {col} are filled in.
     pub editor: String,
+    /// Notify when a command that ran this many seconds ends while you aren't looking; 0 = off.
+    pub long_command_alert: u32,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -188,6 +190,7 @@ impl Default for Config {
             claude_sessions: false,
             claude_alerts: true,
             editor: "code --goto {file}:{line}:{col}".into(),
+            long_command_alert: 30,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),

@@ -185,6 +185,19 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
             checked={draft.shellIntegration}
             onChange={(v) => set("shellIntegration", v)}
           />
+          <Field
+            label="Notify when a long command finishes"
+            hint="Seconds a command must run before its end gets a ✓/✗ on the tab and a Windows notification (when you aren't looking at it). 0 = off. Needs shell integration."
+          >
+            <input
+              type="number"
+              min={0}
+              max={86400}
+              step={5}
+              value={draft.longCommandAlert}
+              onChange={(e) => set("longCommandAlert", Math.max(0, Math.round(Number(e.target.value))))}
+            />
+          </Field>
           <Field label="Open files with" hint="Ctrl+click a file reference like src/app.ts:42. {file}, {line} and {col} are filled in.">
             <input type="text" value={draft.editor} onChange={(e) => set("editor", e.target.value)} spellCheck={false} />
           </Field>

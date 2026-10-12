@@ -52,19 +52,35 @@ pub struct Profile {
 }
 
 /// Shell integration for PowerShell: wraps whatever prompt the user's profile set up
-/// (oh-my-posh and the like keep working) and puts OSC 9;9, the working directory as
-/// Windows Terminal defines it, in front of it.
+/// (oh-my-posh and the like keep working). Around it go, as Windows Terminal defines
+/// them: OSC 133 command marks (D = the last command ended, with its exit code;
+/// A = prompt starts; B = typing starts) and OSC 9;9, the working directory.
+/// `$?` is read first, before anything else can reset it.
 const POWERSHELL_INTEGRATION: &str = r#"
 $global:__qtermPrompt = $function:prompt
+$global:__qtermLastId = -1
 function global:prompt {
+    $ok = $?
+    $code = if ($ok) { 0 } elseif ($global:LASTEXITCODE) { $global:LASTEXITCODE } else { 1 }
+    $e = [char]27
+    $last = Get-History -Count 1
+    $id = if ($last) { $last.Id } else { 0 }
+    $out = ''
+    if ($global:__qtermLastId -ne -1) {
+        if ($id -ne $global:__qtermLastId) { $out += "$e]133;D;$code$e\" } else { $out += "$e]133;D$e\" }
+    }
+    $global:__qtermLastId = $id
+    $out += "$e]133;A$e\"
     $location = $executionContext.SessionState.Path.CurrentLocation
-    $prompt = & $global:__qtermPrompt
-    if ($location.Provider.Name -eq 'FileSystem') { "$([char]27)]9;9;`"$($location.ProviderPath)`"$([char]27)\" + $prompt } else { $prompt }
+    if ($location.Provider.Name -eq 'FileSystem') { $out += "$e]9;9;`"$($location.ProviderPath)`"$e\" }
+    $out + (& $global:__qtermPrompt) + "$e]133;B$e\"
 }
 "#;
 
-/// Same for Git Bash, reporting the MSYS path ("/c/Users/me"); see `msys_to_windows`.
-const BASH_INTEGRATION: &str = r#"printf '\033]9;9;%s\033\\' "$PWD""#;
+/// Same for Git Bash: the marks and the MSYS path ("/c/Users/me"; see
+/// `msys_to_windows`). The profile sets PS1 after this is in place, so B is
+/// appended to whatever PS1 is, once.
+const BASH_INTEGRATION: &str = r#"__qterm_rc=$?; printf '\033]133;D;%s\007\033]133;A\007\033]9;9;%s\033\\' "$__qterm_rc" "$PWD"; [[ $PS1 == *'133;B'* ]] || PS1="$PS1"'\[\e]133;B\a\]'"#;
 
 impl Profile {
     fn new(id: &str, name: &str, program: impl Into<OsString>, args: &[&str], kind: Kind) -> Self {
@@ -143,9 +159,10 @@ impl Profile {
                     args.extend(["-NoExit".into(), "-EncodedCommand".into(), BASE64.encode(utf16)]);
                 }
                 Kind::Cmd => {
-                    // $e = ESC, $P = current folder; the user's own PROMPT follows.
+                    // $e = ESC, $P = current folder; the user's own PROMPT goes between
+                    // the marks. cmd's prompt can't see the exit code, so D has none.
                     let own = std::env::var("PROMPT").unwrap_or_else(|_| "$P$G".into());
-                    cmd.env("PROMPT", format!("$e]9;9;$P$e\\{own}"));
+                    cmd.env("PROMPT", format!("$e]133;D$e\\$e]133;A$e\\$e]9;9;$P$e\\{own}$e]133;B$e\\"));
                 }
                 Kind::Bash => cmd.env("PROMPT_COMMAND", BASH_INTEGRATION),
                 // Environment variables don't cross into WSL without WSLENV; not wired yet.
@@ -339,10 +356,12 @@ mod tests {
     }
 
     #[test]
-    fn cmd_integration_prefixes_the_prompt() {
+    fn cmd_integration_wraps_the_prompt() {
         let cmd = Profile::new("cmd", "cmd", "cmd.exe", &[], Kind::Cmd).command(None, true);
         let prompt = cmd.get_env("PROMPT").unwrap().to_string_lossy().into_owned();
-        assert!(prompt.starts_with("$e]9;9;$P$e\\"), "{prompt}");
+        // D (last command ended), A (prompt starts), the folder, the prompt, B (typing starts).
+        assert!(prompt.starts_with("$e]133;D$e\\$e]133;A$e\\$e]9;9;$P$e\\"), "{prompt}");
+        assert!(prompt.ends_with("$e]133;B$e\\"), "{prompt}");
     }
 
     #[test]

@@ -44,6 +44,7 @@ import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
+import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { SearchBar } from "./terminal/SearchBar";
 import { THEMES, themeOrDefault, withAlpha } from "./terminal/themes";
@@ -133,6 +134,7 @@ export default function App() {
         onSearchResults: (...args) => handlers.current.onSearchResults(...args),
         onActivity: (...args) => handlers.current.onActivity(...args),
         onBell: (...args) => handlers.current.onBell(...args),
+        onCommandFinished: (...args) => handlers.current.onCommandFinished(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -325,6 +327,12 @@ export default function App() {
           registry.clearHistory(paneId);
           void deleteScrollback([paneId]);
           break;
+        case "scrollToCommand":
+          registry.scrollToCommand(paneId, command.direction);
+          break;
+        case "copyLastOutput":
+          registry.copyLastOutput(paneId);
+          break;
       }
     },
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
@@ -342,6 +350,18 @@ export default function App() {
       // A bell in the pane you are looking at needs no marker.
       if (shownRef.current && activeTab(workspaceRef.current)?.focusedPane === paneId) return;
       setBells((current) => new Set(current).add(paneId));
+    },
+    onCommandFinished: (paneId, finished) => {
+      const seconds = configRef.current?.longCommandAlert ?? 0;
+      if (!seconds || finished.durationMs < seconds * 1000) return;
+      const failed = finished.exitCode !== undefined && finished.exitCode !== 0;
+      raiseAlert({
+        paneId,
+        title: failed ? `Command failed (exit ${finished.exitCode})` : "Command finished",
+        message: `${finished.command} · ${formatDuration(finished.durationMs)}`,
+        kind: failed ? "command_failed" : "command_done",
+        sessionId: null,
+      });
     },
   };
 
@@ -374,15 +394,19 @@ export default function App() {
   alertsOn.current = config?.claudeAlerts ?? true;
   const onAlert = useRef<(alert: ClaudeAlert) => void>(null!);
   onAlert.current = (alert) => {
+    if (alertsOn.current) raiseAlert(alert);
+  };
+  /** Marks the pane's tab and, unless you are in the console, shows a Windows notification. */
+  function raiseAlert(alert: ClaudeAlert) {
     const ws = workspaceRef.current;
-    if (!alertsOn.current || !ws.panes[alert.paneId]) return;
+    if (!ws.panes[alert.paneId]) return;
     const consoleInFocus = shownRef.current && document.hasFocus();
     // Already looking at that very pane: nothing to tell.
     if (consoleInFocus && activeTab(ws)?.focusedPane === alert.paneId) return;
     setAttention((current) => new Map(current).set(alert.paneId, alert));
     // Console up and focused, but on another tab or pane: the tab marker is enough.
     if (!consoleInFocus) void showClaudeAlert(alert);
-  };
+  }
   useEffect(() => void setAttentionCount(attention.size), [attention.size]);
   // Looking at the pane again clears its marker.
   useEffect(() => {

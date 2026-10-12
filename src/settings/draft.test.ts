@@ -20,6 +20,7 @@ const config: Config = {
   claudeSessions: false,
   claudeAlerts: true,
   editor: "code --goto {file}:{line}:{col}",
+  longCommandAlert: 30,
   font: { family: "Cascadia Mono", size: 14 },
   keybindings: {},
   profiles: [],

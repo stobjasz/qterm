@@ -58,6 +58,11 @@ claude_alerts = true
 # opens in its default app.
 editor = "code --goto {file}:{line}:{col}"
 
+# When a command that ran at least this many seconds finishes and you aren't
+# looking at its pane: a ✓ or ✗ on the tab and a Windows notification. 0 = off.
+# Needs shell_integration (PowerShell, cmd, Git Bash).
+long_command_alert = 30
+
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
 # `profiles` switches it per shell, overriding `restore`, e.g.

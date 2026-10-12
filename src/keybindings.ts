@@ -19,7 +19,9 @@ export type Command =
   | { type: "toggleBroadcast" }
   | { type: "swapPane"; direction: Direction }
   | { type: "commandPalette" }
-  | { type: "clearHistory" };
+  | { type: "clearHistory" }
+  | { type: "scrollToCommand"; direction: -1 | 1 }
+  | { type: "copyLastOutput" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -50,6 +52,10 @@ const ACTIONS = {
   swap_up: { command: { type: "swapPane", direction: "up" }, chord: "" },
   swap_down: { command: { type: "swapPane", direction: "down" }, chord: "" },
   clear_history: { command: { type: "clearHistory" }, chord: "" },
+  // Command marks need shell integration (PowerShell, cmd, Git Bash).
+  prev_command: { command: { type: "scrollToCommand", direction: -1 }, chord: "ctrl+up" },
+  next_command: { command: { type: "scrollToCommand", direction: 1 }, chord: "ctrl+down" },
+  copy_last_output: { command: { type: "copyLastOutput" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -82,6 +88,9 @@ const LABELS: Record<Action, string> = {
   swap_up: "Swap pane up",
   swap_down: "Swap pane down",
   clear_history: "Clear pane history",
+  prev_command: "Scroll to previous command",
+  next_command: "Scroll to next command",
+  copy_last_output: "Copy last command's output",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

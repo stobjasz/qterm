@@ -49,6 +49,8 @@ export interface Config {
   claudeSessions: boolean;
   claudeAlerts: boolean;
   editor: string;
+  /** Seconds; 0 = off. */
+  longCommandAlert: number;
   font: { family: string; size: number };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];

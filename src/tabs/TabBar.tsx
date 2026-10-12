@@ -147,8 +147,13 @@ export function TabBar(props: Props) {
                 <span className="tab-mark activity" title="New output" aria-label="New output" />
               )}
               {waiting && (
-                <span className="tab-attention" role="status" aria-label={`Claude is waiting: ${waiting.message}`}>
-                  ✳
+                <span
+                  className={`tab-attention ${waiting.kind ?? ""}`}
+                  role="status"
+                  aria-label={waiting.kind?.startsWith("command_") ? `${waiting.title}: ${waiting.message}` : `Claude is waiting: ${waiting.message}`}
+                  title={waiting.kind?.startsWith("command_") ? `${waiting.title}: ${waiting.message}` : undefined}
+                >
+                  {waiting.kind === "command_done" ? "✓" : waiting.kind === "command_failed" ? "✗" : "✳"}
                 </span>
               )}
               <button
