@@ -1,7 +1,7 @@
 # qterm roadmap
 
 Feature ideas collected along the way. The original milestones (M0 to M6) and what each
-delivered are in [foundation.md](foundation.md). Status: ✅ done, 🚧 in progress, ⬜ open.
+delivered are in [foundation.md](foundation.md). Status: ✅ done, 🚧 in progress, ⬜ open, ✖ descoped.
 
 Effort: S = small, M = medium, L = large.
 
@@ -44,7 +44,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 14 | **Alert when Claude finishes**: hook Claude Code's Stop event for an instant ✳ and notification when a reply ends and you're not looking at that pane. (Today's Notification hook fires only for permission prompts, rare in auto mode, and after 60 s idle.) | S | ⬜ |
+| 14 | **Alert when Claude finishes**: hook Claude Code's Stop event for an instant ✳ and notification when a reply ends and you're not looking at that pane. (Today's Notification hook fires only for permission prompts, rare in auto mode, and after 60 s idle.) | S | ✖ descoped 2026-10-12: a notification after every reply would be too many |
 | 15 | **Bring Claude sessions back after a restart**: panes that were running Claude reopen with `claude --resume <id>` typed for you (opt-in). | M | ✅ `claude_restore` (off by default); also "here" to resume a saved session in the current tab |
 | 16 | **"Ask Claude about this"**: select an error, then a palette action opens a pane in that folder with `claude "<selection>"`. | S | ⬜ |
 | 17 | **Context and cost per tab**: token use read from the session's transcript, shown in the tab tooltip and the ✳ menu. | M | ✅ context % on the tab, details in its tooltip, "Running now" in the ✳ menu; SessionStart hook maps panes to sessions |
@@ -79,4 +79,4 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 30 | **Publish to winget** (after #13). | S | ⬜ |
 | 31 | **Settings export/import** for moving to another PC. | S | ✅ Settings footer: Export… / Import… |
 
-Suggested next: #14 and #15 (Claude reliability across "is it done?" and restarts), #29.
+Suggested next: #29 (log file), then #11 (E2E in CI) before #13 (installer and auto-update).
