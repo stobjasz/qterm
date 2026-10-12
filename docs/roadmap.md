@@ -31,7 +31,7 @@ Effort: S = small, M = medium, L = large.
 
 | # | Feature | Status |
 |---|---|---|
-| 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ⬜ |
+| 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ✅ `e2e/` (5 risk-tied specs) + `.github/workflows/ci.yml`, see foundation.md §23 |
 | 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ already guaranteed by ConPTY (verified); locked in by a regression test instead of a Job Object, see foundation.md §19 |
 | 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). Designed: Tauri updater with signed `latest.json` for the installer; the portable exe either self-replaces or only announces updates. Waiting on two choices: where releases are hosted (a private repo's assets need a token, so a public releases-only repo, the user's `gh` login, or other hosting), and the portable exe's behaviour. | ⬜ |
 
@@ -79,4 +79,4 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 30 | **Publish to winget** (after #13). | S | ⬜ |
 | 31 | **Settings export/import** for moving to another PC. | S | ✅ Settings footer: Export… / Import… |
 
-Suggested next: #29 (log file), then #11 (E2E in CI) before #13 (installer and auto-update).
+Suggested next: #29 (log file), then #13 (installer and auto-update), now that CI tests every push.

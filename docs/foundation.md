@@ -793,3 +793,47 @@ commands run it harmlessly, so the real Claude Code is never started.
   its own background (its profile's theme, or a new `background` colour, at the same
   opacity), and the gaps (dividers, the console's padding, the tab bar) keep the
   console's.
+
+## 23. End-to-end tests in CI (#11, 2026-10-12)
+
+**How it works.**
+- Playwright (`@playwright/test`) drives a debug build of the real app.
+- The debug build is made with `TAURI_CONFIG={"identifier":"dev.qterm.e2e"}` in
+  `src-tauri/target/e2e`. It has its own settings, data, single-instance key and alert
+  inbox, so it never touches an installed qterm or the `pnpm tauri dev` build.
+- It loads the UI from the Vite dev server (Playwright starts it), which keeps the
+  dev-only test hook (`window.__qterm`) for reading terminal text off the canvas.
+- Playwright attaches over CDP: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=
+  --remote-debugging-port=9333`.
+- `e2e/qterm.ts` gives every test a fresh instance: state wiped, settings written, the
+  app started, and at the end killed with its shells. `restart()` quits the way the tray
+  does.
+
+**Conventions.** `e2e/RULES.md` and `e2e/seed.spec.ts`; one spec per risk (R1–R5 in
+`e2e/README.md`). Each was checked with a deliberate break:
+
+| Spec | Break |
+|---|---|
+| seed | typed input dropped |
+| split | typing sent to every pane |
+| restore | saved output not shown |
+| long command | no alert raised |
+| settings | font change not applied |
+
+**Bugs it found, fixed:**
+- **An extra tab at start, and the console hiding itself.** The start-up effect re-ran
+  while the session was loading: StrictMode in development, or any dependency change.
+  Start-up now has three states.
+- **Quitting lost the latest tabs and folders.** The tabs are saved 400 ms after a
+  change, and quit didn't flush them. It does now.
+- **Any second instance watched the installed qterm's alert inbox** and dropped its
+  pending alerts on start. The inbox is now per identifier; shells get `QTERM_INBOX`.
+
+**A test lesson.** The split test first asserted only that the left pane didn't show
+the right pane's *result*. Leaked keystrokes arrived garbled by a terminal reply, so the
+command failed and no result appeared, and the test stayed green. It now also asserts
+the typed text never shows up.
+
+**CI** (`.github/workflows/ci.yml`, windows-latest): TypeScript checks, Vitest, clippy
+`-D warnings`, `cargo test`, then `pnpm e2e`. The Playwright report and traces are
+uploaded on failure. Locally the five specs take ~17 s after the build.

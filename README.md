@@ -67,8 +67,13 @@ pnpm install
 pnpm tauri dev                     # run the app (tray icon → Quit to exit)
 pnpm test                          # workspace + keybinding unit tests (Vitest)
 cd src-tauri && cargo test         # PTY session and profile tests
+pnpm e2e                           # end-to-end tests against the real app (see e2e/README.md)
 pwsh scripts/smoke.ps1             # hotkey/window smoke check against the running app
 ```
+
+CI (`.github/workflows/ci.yml`, Windows runner) runs the type checks, unit tests,
+clippy, the Rust tests and the end-to-end tests on every push to master and every pull
+request.
 
 Inside qterm, `scripts/bench.ps1` measures output throughput.
 
