@@ -1,6 +1,7 @@
 # qterm
 
 [![CI](https://github.com/stobjasz/qterm/actions/workflows/ci.yml/badge.svg)](https://github.com/stobjasz/qterm/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/stobjasz/qterm)](https://github.com/stobjasz/qterm/releases/latest)
 
 A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slides a
 translucent console down from the top of the screen.

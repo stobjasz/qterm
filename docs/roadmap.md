@@ -33,7 +33,7 @@ Effort: S = small, M = medium, L = large.
 |---|---|---|
 | 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ✅ `e2e/` (5 risk-tied specs) + `.github/workflows/ci.yml`, see foundation.md §23 |
 | 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ already guaranteed by ConPTY (verified); locked in by a regression test instead of a Job Object, see foundation.md §19 |
-| 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). | ✅ Per-user NSIS installer and portable exe, published by `release.yml` on a version tag with a signed `latest.json` on GitHub Releases. Checks on start and daily (switchable); banner, tray and Settings offer one-click update; the portable exe replaces itself. Tested locally end to end (update and a tampered download); the first real release goes out once the repo is public. |
+| 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). | ✅ Per-user NSIS installer and portable exe, published by `release.yml` on a version tag with a signed `latest.json` on GitHub Releases. Checks on start and daily (switchable); banner, tray and Settings offer one-click update; the portable exe replaces itself. Tested locally end to end (update and a tampered download). v0.2.0, the first public release, published 2026-10-12. |
 
 Also done outside the list: file drag and drop from Explorer, with paths quoted per shell
 (foundation.md §20); autostart limited to release builds and re-pointed on launch (§15).
