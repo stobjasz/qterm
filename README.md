@@ -3,6 +3,8 @@
 A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slides a
 translucent console down from the top of the screen.
 
+How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
+
 - Tabs and split panes for PowerShell, cmd, Git Bash and WSL; rename (double-click)
   and reorder (drag) tabs
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
