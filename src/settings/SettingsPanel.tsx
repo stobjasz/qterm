@@ -8,6 +8,9 @@ import {
   installClaudeHook,
   openConfigFile,
   removeClaudeHook,
+  openSudoSettings,
+  sudoStatus,
+  type SudoMode,
   scrollbackUsage,
   saveConfig,
   setAutostart,
@@ -45,6 +48,8 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
   const [saving, setSaving] = useState(false);
   const [hook, setHook] = useState<HookStatus>();
   const [usage, setUsage] = useState<ScrollbackUsage>();
+  const [sudo, setSudo] = useState<SudoMode>();
+  useEffect(() => void sudoStatus().then(setSudo, () => setSudo("missing")), []);
   const [confirmClear, setConfirmClear] = useState(false);
   const refreshUsage = () => void scrollbackUsage().then(setUsage, (e) => setError(String(e)));
   useEffect(refreshUsage, []);
@@ -265,6 +270,23 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
           </div>
         </Group>
 
+        <Group title="Administrator tabs">
+          <div className="settings-field">
+            <span className="settings-hint">
+              “New admin tab” in the command palette runs a shell as administrator through Windows' own sudo, after the
+              UAC prompt. It needs sudo set to <em>Inline</em>; otherwise the shell opens as administrator in its own
+              window. Microsoft's warning applies: in Inline mode, other programs running as you can type into an
+              administrator tab.
+            </span>
+            <div className="settings-actions">
+              <span>{sudo === undefined ? "Checking…" : SUDO_LABELS[sudo]}</span>
+              {sudo !== undefined && sudo !== "missing" && sudo !== "inline" && (
+                <button onClick={() => void openSudoSettings().catch((e) => setError(String(e)))}>Open Windows sudo settings</button>
+              )}
+            </div>
+          </div>
+        </Group>
+
         <Group title="Claude Code">
           <Toggle
             label="Remember Claude Code sessions"
@@ -365,6 +387,14 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
     </section>
   );
 }
+
+const SUDO_LABELS: Record<SudoMode, string> = {
+  missing: "Windows' sudo isn't available (Windows 11 24H2 or later)",
+  disabled: "Windows' sudo is off",
+  newWindow: "Windows' sudo opens a new window",
+  inputClosed: "Windows' sudo runs with input closed",
+  inline: "✓ Windows' sudo runs inline",
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

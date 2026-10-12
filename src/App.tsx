@@ -9,6 +9,8 @@ import {
   claudeUsage,
   type ClaudeUsage,
   type PaneClaudeSession,
+  openElevatedWindow,
+  sudoStatus,
   onFocusPane,
   onFileDrag,
   setAttentionCount,
@@ -97,6 +99,8 @@ const SAVE_DELAY_MS = 400;
 const SCROLLBACK_SAVE_MS = 30_000;
 /** How often to look for Claude Code in the panes, and how recent output means "working". */
 const CLAUDE_POLL_MS = 2000;
+/** How long a notice stays over the tab bar. */
+const NOTICE_MS = 10_000;
 /** Transcripts are read incrementally, so this is cheap. */
 const CLAUDE_USAGE_POLL_MS = 5000;
 const CLAUDE_BUSY_MS = 2500;
@@ -185,14 +189,49 @@ export default function App() {
 
   // --- workspace actions -------------------------------------------------------
   const newTab = useCallback(
-    (profileId?: string, cwd?: string) => {
+    (profileId?: string, cwd?: string, elevated?: boolean) => {
       const profile = profileId ? profiles?.find((p) => p.id === profileId) : defaultProfile;
       if (!profile) return undefined;
       const ids = { tab: nextId("tab"), pane: nextId("pane") };
-      setWorkspace((ws) => openTab(ws, ids, profile, cwd));
+      setWorkspace((ws) => openTab(ws, ids, profile, cwd, elevated));
       return ids.pane;
     },
     [profiles, defaultProfile],
+  );
+
+  /** A short message over the tab bar, e.g. why an admin tab opened as a window. */
+  const [notice, setNotice] = useState<string>();
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(undefined), NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  /**
+   * An administrator tab when Windows' sudo runs inline; otherwise the shell opens
+   * as administrator in its own window, and the notice says how to get tabs.
+   */
+  const openAdminTab = useCallback(
+    async (profileId: string) => {
+      const mode = await sudoStatus().catch(() => "missing" as const);
+      if (mode === "inline") {
+        newTab(profileId, undefined, true);
+        return;
+      }
+      const ws = workspaceRef.current;
+      const cwd = ws.panes[activeTab(ws)?.focusedPane ?? ""]?.cwd;
+      const why =
+        mode === "missing"
+          ? "Windows' sudo isn't available (Windows 11 24H2 or later)"
+          : "Windows' sudo isn't set to Inline (Settings → System → Advanced → Enable sudo → Inline)";
+      try {
+        await openElevatedWindow(profileId, cwd);
+        setNotice(`Opened as administrator in its own window. For administrator tabs here: ${why}.`);
+      } catch (e) {
+        setNotice(`${String(e)}. For administrator tabs here: ${why}.`);
+      }
+    },
+    [newTab],
   );
 
   // A split runs the same profile in the same folder as the pane being split.
@@ -255,6 +294,7 @@ export default function App() {
       cwd: pane.cwd,
       startupInput: startupInput.current.get(pane.id),
       restored: restoredOutput.current.get(pane.id),
+      elevated: pane.elevated,
       theme: profile?.theme ? THEMES[profile.theme] : undefined,
       fontSize: profile?.fontSize,
     };
@@ -476,6 +516,12 @@ export default function App() {
         label: profile.name,
         run: () => void newTab(profile.id),
       })),
+      ...(profiles ?? []).map((profile) => ({
+        id: `admin:${profile.id}`,
+        group: "New admin tab",
+        label: profile.name,
+        run: () => void openAdminTab(profile.id),
+      })),
       ...Object.entries(THEMES).map(([name, theme]) => ({
         id: `theme:${name}`,
         group: "Theme",
@@ -508,7 +554,7 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab]);
 
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
   // in the last moments (its spinner animates while it works).
@@ -576,7 +622,7 @@ export default function App() {
           ] as const;
         }),
       ),
-    [workspace.tabs, activity, bells, claudeStatus, claudeUsages],
+    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages],
   );
   /** Claude sessions running now, for the ✳ menu. */
   const runningClaude = useMemo(
@@ -823,6 +869,14 @@ export default function App() {
           <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} onClearHistory={clearAllHistory} />
         )}
       </div>
+      {notice && (
+        <div className="app-notice" role="status">
+          {notice}
+          <button className="icon-button" aria-label="Dismiss" onClick={() => setNotice(undefined)}>
+            ×
+          </button>
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="settings-errors" role="alert">
           <strong>Settings problem</strong> (previous values stay in effect until it is fixed):

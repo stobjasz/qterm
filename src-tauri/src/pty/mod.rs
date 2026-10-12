@@ -54,6 +54,9 @@ pub struct SpawnRequest {
     pub pane_id: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Run as administrator through Windows' sudo (inline mode only).
+    #[serde(default)]
+    pub elevated: bool,
 }
 
 #[derive(Default)]
@@ -86,6 +89,12 @@ impl SessionManager {
         let mut cmd = profile.command(request.cwd.as_deref(), integrate);
         if let Some(pane_id) = &request.pane_id {
             cmd.env(crate::alerts::PANE_ENV, pane_id);
+        }
+        if request.elevated {
+            if crate::elevation::sudo_mode() != crate::elevation::SudoMode::Inline {
+                return Err("administrator tabs need Windows' sudo set to Inline".into());
+            }
+            crate::elevation::elevate(&mut cmd);
         }
         self.spawn(cmd, request.cols, request.rows, on_output, on_exit)
     }

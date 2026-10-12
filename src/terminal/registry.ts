@@ -103,6 +103,8 @@ export interface PaneSpec {
   fontSize?: number;
   /** Output saved before the last restart, shown above the new shell. */
   restored?: string;
+  /** Run as administrator (Windows' sudo, inline). */
+  elevated?: boolean;
 }
 
 export interface Behavior {
@@ -586,7 +588,7 @@ export class TerminalRegistry {
     (entry.spec.restored ? showRestored(term, entry.spec.restored) : Promise.resolve())
       .then(() => {
         entry.markReady();
-        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput);
+        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput, entry.spec.elevated);
       })
       .then((id) => {
         // The pane may have been closed while the shell was starting.

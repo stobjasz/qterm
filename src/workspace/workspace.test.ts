@@ -305,3 +305,13 @@ describe("pane tools", () => {
 function paneOrder(ws: Workspace): string[] {
   return JSON.stringify(ws.tabs[0].root).match(/p\d+/g) ?? [];
 }
+
+describe("administrator panes", () => {
+  it("are marked, but a restart reopens them unelevated", () => {
+    const ws = openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, { id: "pwsh", name: "PowerShell" }, "C:/x", true);
+    expect(ws.panes.p1.elevated).toBe(true);
+    const restored = restoreWorkspace(saveWorkspace(ws), [{ id: "pwsh", name: "PowerShell" }])!;
+    expect(restored.panes.p1.elevated).toBeUndefined();
+    expect(restored.panes.p1.cwd).toBe("C:/x");
+  });
+});

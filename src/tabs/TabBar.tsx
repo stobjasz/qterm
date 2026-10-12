@@ -41,6 +41,8 @@ export interface TabMarkers {
   claude?: "busy" | "idle";
   /** Its token use, when its transcript was found. */
   claudeUsage?: ClaudeUsage;
+  /** A pane runs as administrator. */
+  admin?: boolean;
 }
 
 // Mouse-down default is prevented (except in text fields) so clicking the bar never
@@ -133,6 +135,11 @@ export function TabBar(props: Props) {
                   aria-label={`Claude context ${contextPercent(marks.claudeUsage)}% full`}
                 >
                   {contextPercent(marks.claudeUsage)}%
+                </span>
+              )}
+              {marks?.admin && (
+                <span className="tab-admin" title="Runs as administrator" aria-label="Administrator">
+                  admin
                 </span>
               )}
               {marks?.broadcast && (

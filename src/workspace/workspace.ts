@@ -27,6 +27,8 @@ export interface Pane {
   title: string;
   /** Last folder the shell reported (shell integration), or where it was started. */
   cwd?: string;
+  /** Runs as administrator (Windows' sudo). Not saved: a restart reopens it unelevated. */
+  elevated?: boolean;
 }
 
 export interface Tab {
@@ -62,9 +64,12 @@ export function openTab(
   ids: { tab: TabId; pane: PaneId },
   profile: ProfileRef,
   cwd?: string,
+  elevated?: boolean,
 ): Workspace {
   const tab: Tab = { id: ids.tab, root: { kind: "leaf", pane: ids.pane }, focusedPane: ids.pane };
-  return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes: withPane(ws.panes, ids.pane, profile, cwd) };
+  const panes = withPane(ws.panes, ids.pane, profile, cwd);
+  if (elevated) panes[ids.pane] = { ...panes[ids.pane], elevated };
+  return { tabs: [...ws.tabs, tab], activeTab: tab.id, panes };
 }
 
 /** A new tab with a prepared layout (see layouts.ts), focused on its first pane. */

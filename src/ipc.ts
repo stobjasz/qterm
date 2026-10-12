@@ -110,11 +110,12 @@ export function ptySpawn(
   rows: number,
   cwd: string | undefined,
   onOutput: (data: Uint8Array) => void,
+  elevated = false,
 ): Promise<SessionId> {
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows }, onOutput: channel });
+  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows, elevated }, onOutput: channel });
 }
 
 export function ptyWrite(id: SessionId, data: string): Promise<void> {
@@ -338,6 +339,22 @@ export interface PaneClaudeSession {
 
 export function onClaudeSessionStart(handler: (session: PaneClaudeSession) => void): Promise<UnlistenFn> {
   return listen<PaneClaudeSession>("claude-session-start", (event) => handler(event.payload));
+}
+
+/** How Windows' sudo is set up; administrator tabs need "inline". */
+export type SudoMode = "missing" | "disabled" | "newWindow" | "inputClosed" | "inline";
+
+export function sudoStatus(): Promise<SudoMode> {
+  return invoke("sudo_status");
+}
+
+export function openSudoSettings(): Promise<void> {
+  return invoke("open_sudo_settings");
+}
+
+/** Opens a shell as administrator in its own window (UAC prompt), outside qterm. */
+export function openElevatedWindow(profileId: string, cwd: string | undefined): Promise<void> {
+  return invoke("open_elevated_window", { profileId, cwd: cwd ?? null });
 }
 
 /** Sessions with Claude Code running inside their shell. */

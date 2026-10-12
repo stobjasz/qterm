@@ -5,6 +5,7 @@ mod claude_usage;
 mod commands;
 mod config;
 mod editor;
+mod elevation;
 mod hotkey;
 mod procs;
 mod pty;
@@ -138,6 +139,9 @@ pub fn run() {
             commands::delete_scrollback,
             commands::scrollback_usage,
             commands::claude_usage,
+            commands::sudo_status,
+            commands::open_elevated_window,
+            commands::open_sudo_settings,
             commands::quit_now,
         ])
         .run(tauri::generate_context!())

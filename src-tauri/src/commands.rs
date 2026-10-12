@@ -283,6 +283,32 @@ pub async fn claude_usage(
     path.map(|path| usage.usage(&path)).transpose()
 }
 
+/// How Windows' sudo is set up: admin tabs need it Inline.
+#[tauri::command]
+pub fn sudo_status() -> crate::elevation::SudoMode {
+    crate::elevation::sudo_mode()
+}
+
+/// Windows' Settings page where sudo is switched on and set to Inline.
+#[tauri::command]
+pub fn open_sudo_settings(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url("ms-settings:developers", None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Opens a shell as administrator in its own window (when admin tabs aren't possible).
+#[tauri::command]
+pub fn open_elevated_window(
+    sessions: State<'_, SessionManager>,
+    config: State<'_, ConfigState>,
+    profile_id: String,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    let profiles = all_profiles(&sessions, &config);
+    let profile = profiles.iter().find(|p| p.id == profile_id).ok_or_else(|| format!("unknown profile {profile_id}"))?;
+    crate::elevation::open_elevated_window(&profile.command(cwd.as_deref(), false))
+}
+
 /// Deletes saved output: of these panes, or of all when `pane_ids` is None.
 #[tauri::command]
 pub fn delete_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pane_ids: Option<Vec<String>>) {

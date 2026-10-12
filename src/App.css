@@ -210,6 +210,34 @@ body,
   animation: attention-pulse 1.2s ease-in-out infinite;
 }
 
+/* A pane runs as administrator. */
+.tab-admin {
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent);
+  border-radius: 3px;
+  color: var(--danger);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* A short message over the tab bar (dismissed after a few seconds). */
+.app-notice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--console-edge);
+  border-radius: 3px;
+  background: var(--panel-bg);
+  font-size: 12.5px;
+}
+
+.app-notice .icon-button {
+  margin-left: auto;
+}
+
 /* How full the context of the tab's Claude session is. */
 .tab-context {
   font-size: 10.5px;
