@@ -655,6 +655,11 @@ export default function App() {
       ),
     [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages],
   );
+  /** Pane → Claude session running in it, saved with the tabs (see claude_restore). */
+  const claudeByPane = useMemo(
+    () => new Map([...claudeUsages].filter(([paneId]) => claudeStatus.has(paneId)).map(([paneId, usage]) => [paneId, usage.sessionId])),
+    [claudeUsages, claudeStatus],
+  );
   /** Claude sessions running now, for the ✳ menu. */
   const runningClaude = useMemo(
     () =>
@@ -764,6 +769,12 @@ export default function App() {
             if (text && hasContent(plainLines(text))) restoredOutput.current.set(pane.id, text);
           }),
       );
+      // Claude Code sessions that ran in panes come back too, if asked for.
+      if (config.claudeRestore) {
+        for (const pane of Object.values(restored.panes)) {
+          if (pane.claudeSession) startupInput.current.set(pane.id, `claude --resume ${pane.claudeSession}\r`);
+        }
+      }
       setWorkspace(restored);
     });
   }, [workspace.tabs.length, profiles, config, newTab]);
@@ -816,14 +827,14 @@ export default function App() {
   const lastSaved = useRef<string>(undefined);
   useEffect(() => {
     if (!started.current || workspace.tabs.length === 0) return;
-    const text = saveWorkspace(workspace);
+    const text = saveWorkspace(workspace, claudeByPane);
     if (text === lastSaved.current) return;
     const timer = window.setTimeout(() => {
       lastSaved.current = text;
       void saveSession(text);
     }, SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [workspace]);
+  }, [workspace, claudeByPane]);
 
   // Re-parenting a terminal (zoom, split, swap) drops its keyboard focus, so focus
   // again whenever the active tab's layout changes, not only the focused pane.

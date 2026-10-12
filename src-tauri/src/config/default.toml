@@ -53,6 +53,12 @@ claude_sessions = false
 # Settings → "Set up Claude Code alerts" adds it.
 claude_alerts = true
 
+# When tabs are reopened on start (restore_session), also resume the Claude Code
+# session that was running in each pane: `claude --resume <id>` is typed for you.
+# Works best with the Claude Code hook set up (Settings), which says exactly which
+# session runs where.
+claude_restore = false
+
 # Ctrl+click a file reference like src/app.ts:42 to open it with this command.
 # {file}, {line} and {col} are filled in. Without the editor installed, the file
 # opens in its default app.
@@ -66,6 +72,10 @@ long_command_alert = 30
 # Show images that programs print as sixel, iTerm or Kitty graphics (e.g. chafa,
 # img2sixel, timg).
 inline_images = true
+
+# Offer each Host in ~/.ssh/config as a shell ("SSH <host>" in the ▾ menu and the
+# palette). Patterns like *.internal are left out; Include files aren't read.
+ssh_profiles = true
 
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.

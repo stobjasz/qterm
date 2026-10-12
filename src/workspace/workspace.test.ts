@@ -16,6 +16,7 @@ import {
   restoreWorkspace,
   saveWorkspace,
   setPaneCwd,
+  setTabStyle,
   resizeDivider,
   resizeFocused,
   setPaneTitle,
@@ -313,5 +314,36 @@ describe("administrator panes", () => {
     const restored = restoreWorkspace(saveWorkspace(ws), [{ id: "pwsh", name: "PowerShell" }])!;
     expect(restored.panes.p1.elevated).toBeUndefined();
     expect(restored.panes.p1.cwd).toBe("C:/x");
+  });
+});
+
+describe("tab style and Claude sessions across restarts", () => {
+  const profiles = [{ id: "pwsh", name: "PowerShell" }];
+  const base = () => openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, profiles[0], "C:/x");
+
+  it("keeps a tab's colour and icon, and clears them", () => {
+    let ws = setTabStyle(base(), "t1", { color: "green", icon: " 🚀 " });
+    expect(ws.tabs[0]).toMatchObject({ color: "green", icon: "🚀" });
+    const restored = restoreWorkspace(saveWorkspace(ws), profiles)!;
+    expect(restored.tabs[0]).toMatchObject({ color: "green", icon: "🚀" });
+    ws = setTabStyle(ws, "t1", { color: null });
+    expect(ws.tabs[0].color).toBeUndefined();
+    expect(ws.tabs[0].icon).toBe("🚀");
+    expect(setTabStyle(ws, "t1", { icon: "toolongicon" }).tabs[0].icon).toBe("tool");
+  });
+
+  it("drops colours and icons it doesn't know", () => {
+    const text = saveWorkspace(base()).replace('"id":"t1"', '"id":"t1","color":"#ff0000","icon":"way too long"');
+    const restored = restoreWorkspace(text, profiles)!;
+    expect(restored.tabs[0].color).toBeUndefined();
+    expect(restored.tabs[0].icon).toBeUndefined();
+  });
+
+  it("remembers which Claude session ran in a pane, if it looks like one", () => {
+    const text = saveWorkspace(base(), new Map([["p1", "4c766d1a-f139-42df-90f0-a04fe20d3056"]]));
+    expect(restoreWorkspace(text, profiles)!.panes.p1.claudeSession).toBe("4c766d1a-f139-42df-90f0-a04fe20d3056");
+    expect(restoreWorkspace(saveWorkspace(base()), profiles)!.panes.p1.claudeSession).toBeUndefined();
+    const evil = saveWorkspace(base(), new Map([["p1", "x; rm -rf /"]]));
+    expect(restoreWorkspace(evil, profiles)!.panes.p1.claudeSession).toBeUndefined();
   });
 });

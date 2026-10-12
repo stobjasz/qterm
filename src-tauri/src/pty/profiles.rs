@@ -248,6 +248,51 @@ pub fn detect() -> Vec<Profile> {
     profiles
 }
 
+/// SSH hosts from ~/.ssh/config as profiles ("ssh:<host>"), when ssh.exe is there.
+/// Read on every listing, so a newly added host shows up without a restart.
+pub fn ssh_profiles() -> Vec<Profile> {
+    let Some(ssh) = ssh_exe() else { return Vec::new() };
+    let Some(home) = std::env::var_os("USERPROFILE") else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(PathBuf::from(home).join(".ssh").join("config")) else { return Vec::new() };
+    ssh_hosts(&text)
+        .into_iter()
+        .map(|host| Profile::new(&format!("ssh:{host}"), &format!("SSH {host}"), ssh.clone(), &[&host], Kind::Other))
+        .collect()
+}
+
+/// Windows' OpenSSH client, else one on PATH (e.g. Git's).
+fn ssh_exe() -> Option<PathBuf> {
+    let system = std::env::var_os("SystemRoot").map(|root| PathBuf::from(root).join(r"System32\OpenSSH\ssh.exe"));
+    system.filter(|p| p.is_file()).or_else(|| find_on_path("ssh.exe"))
+}
+
+/// The concrete names of `Host` lines (`Host a b`, `Host=a`), in order, once each.
+/// Patterns (`*`, `?`, `!`) aren't hosts you can connect to; `Include`d files and
+/// `Match` blocks aren't followed.
+fn ssh_hosts(config: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = Vec::new();
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let (keyword, rest) = match line.split_once(|c: char| c.is_whitespace() || c == '=') {
+            Some((k, r)) => (k, r.trim_start_matches(|c: char| c.is_whitespace() || c == '=')),
+            None => continue,
+        };
+        if !keyword.eq_ignore_ascii_case("host") {
+            continue;
+        }
+        for name in rest.split_whitespace().map(|n| n.trim_matches('"')) {
+            let plain = !name.is_empty() && !name.contains(['*', '?', '!']) && !name.starts_with('-');
+            if plain && !hosts.iter().any(|h| h == name) {
+                hosts.push(name.to_string());
+            }
+        }
+    }
+    hosts
+}
+
 fn find_on_path(exe: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
@@ -362,6 +407,13 @@ mod tests {
         // D (last command ended), A (prompt starts), the folder, the prompt, B (typing starts).
         assert!(prompt.starts_with("$e]133;D$e\\$e]133;A$e\\$e]9;9;$P$e\\"), "{prompt}");
         assert!(prompt.ends_with("$e]133;B$e\\"), "{prompt}");
+    }
+
+    #[test]
+    fn reads_ssh_hosts_but_not_patterns() {
+        let config = "# mine\nHost build-box gpu\n  HostName 10.0.0.5\n  User me\nHost *.internal !bad\nhost=pi\nHost \"quoted\" build-box\nMatch host x\nHostName not-a-host\n";
+        assert_eq!(ssh_hosts(config), ["build-box", "gpu", "pi", "quoted"]);
+        assert!(ssh_hosts("Host *\n  ForwardAgent yes\n").is_empty());
     }
 
     #[test]

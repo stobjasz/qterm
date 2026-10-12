@@ -36,12 +36,16 @@ pub struct Config {
     pub shell_integration: bool,
     pub claude_sessions: bool,
     pub claude_alerts: bool,
+    /// Reopen the Claude Code sessions that ran in panes, when tabs are restored.
+    pub claude_restore: bool,
     /// Command that opens a file at a line; {file}, {line}, {col} are filled in.
     pub editor: String,
     /// Notify when a command that ran this many seconds ends while you aren't looking; 0 = off.
     pub long_command_alert: u32,
     /// Show sixel, iTerm and Kitty images in the terminal.
     pub inline_images: bool,
+    /// Offer the hosts in ~/.ssh/config as shells ("SSH <host>").
+    pub ssh_profiles: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -193,9 +197,11 @@ impl Default for Config {
             shell_integration: true,
             claude_sessions: false,
             claude_alerts: true,
+            claude_restore: false,
             editor: "code --goto {file}:{line}:{col}".into(),
             long_command_alert: 30,
             inline_images: true,
+            ssh_profiles: true,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),

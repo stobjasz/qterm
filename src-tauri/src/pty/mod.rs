@@ -8,7 +8,7 @@ pub mod conpty;
 mod flow;
 mod profiles;
 
-pub use profiles::{merge as merge_profiles, split_command, Profile};
+pub use profiles::{merge as merge_profiles, split_command, ssh_profiles, Profile};
 
 use std::collections::HashMap;
 use std::io::{Read, Write};

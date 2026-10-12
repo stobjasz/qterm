@@ -19,9 +19,11 @@ export interface Draft {
   shellIntegration: boolean;
   claudeSessions: boolean;
   claudeAlerts: boolean;
+  claudeRestore: boolean;
   editor: string;
   longCommandAlert: number;
   inlineImages: boolean;
+  sshProfiles: boolean;
   fontFamily: string;
   fontSize: number;
   fontLigatures: boolean;
@@ -50,9 +52,11 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   shellIntegration: "shell_integration",
   claudeSessions: "claude_sessions",
   claudeAlerts: "claude_alerts",
+  claudeRestore: "claude_restore",
   editor: "editor",
   longCommandAlert: "long_command_alert",
   inlineImages: "inline_images",
+  sshProfiles: "ssh_profiles",
   fontFamily: "font.family",
   fontSize: "font.size",
   fontLigatures: "font.ligatures",
@@ -77,9 +81,11 @@ export function toDraft(config: Config): Draft {
     shellIntegration: config.shellIntegration,
     claudeSessions: config.claudeSessions,
     claudeAlerts: config.claudeAlerts,
+    claudeRestore: config.claudeRestore,
     editor: config.editor,
     longCommandAlert: config.longCommandAlert,
     inlineImages: config.inlineImages,
+    sshProfiles: config.sshProfiles,
     fontFamily: config.font.family,
     fontSize: config.font.size,
     fontLigatures: config.font.ligatures,

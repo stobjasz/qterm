@@ -48,10 +48,12 @@ export interface Config {
   shellIntegration: boolean;
   claudeSessions: boolean;
   claudeAlerts: boolean;
+  claudeRestore: boolean;
   editor: string;
   /** Seconds; 0 = off. */
   longCommandAlert: number;
   inlineImages: boolean;
+  sshProfiles: boolean;
   font: { family: string; size: number; ligatures: boolean };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];

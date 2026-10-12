@@ -21,9 +21,14 @@ pub fn get_config(config: State<'_, ConfigState>) -> Snapshot {
     config.snapshot()
 }
 
-/// Detected shells plus the [[profiles]] from the settings.
+/// Detected shells, SSH hosts (if switched on), then the [[profiles]] from the settings.
 fn all_profiles(sessions: &SessionManager, config: &ConfigState) -> Vec<Profile> {
-    crate::pty::merge_profiles(sessions.detected_profiles(), &config.get().profiles)
+    let config = config.get();
+    let mut detected = sessions.detected_profiles().to_vec();
+    if config.ssh_profiles {
+        detected.extend(crate::pty::ssh_profiles());
+    }
+    crate::pty::merge_profiles(&detected, &config.profiles)
 }
 
 /// Async so the first call, which detects profiles, runs off the main thread.

@@ -29,7 +29,16 @@ export interface Pane {
   cwd?: string;
   /** Runs as administrator (Windows' sudo). Not saved: a restart reopens it unelevated. */
   elevated?: boolean;
+  /** Claude Code session that ran here before the restart (see saveWorkspace). */
+  claudeSession?: string;
 }
+
+/** Colours a tab can be marked with (right-click a tab). */
+export const TAB_COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"] as const;
+export type TabColor = (typeof TAB_COLORS)[number];
+
+/** Longest tab icon: an emoji or a few letters. */
+const MAX_ICON = 4;
 
 export interface Tab {
   id: TabId;
@@ -41,6 +50,9 @@ export interface Tab {
   zoomed?: PaneId;
   /** Typing goes to every pane of the tab (not saved). */
   broadcast?: boolean;
+  /** Chosen by right-clicking the tab; wins over its profile's colour and icon. */
+  color?: TabColor;
+  icon?: string;
 }
 
 export interface Workspace {
@@ -212,6 +224,23 @@ export function setPaneTitle(ws: Workspace, paneId: PaneId, title: string): Work
 }
 
 /** A blank title removes the custom one, so the shell's shows again. */
+/** Sets (or, with undefined, clears) a tab's colour and/or icon. */
+export function setTabStyle(ws: Workspace, tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): Workspace {
+  const tab = ws.tabs.find((t) => t.id === tabId);
+  if (!tab) return ws;
+  const next: Tab = { ...tab };
+  if (style.color !== undefined) {
+    if (style.color) next.color = style.color;
+    else delete next.color;
+  }
+  if (style.icon !== undefined) {
+    const icon = style.icon ? [...style.icon.trim()].slice(0, MAX_ICON).join("") : "";
+    if (icon) next.icon = icon;
+    else delete next.icon;
+  }
+  return replaceTab(ws, next);
+}
+
 export function renameTab(ws: Workspace, tabId: TabId, title: string): Workspace {
   const tab = ws.tabs.find((t) => t.id === tabId);
   if (!tab) return ws;
@@ -267,17 +296,23 @@ function withPane(panes: Record<PaneId, Pane>, id: PaneId, profile: ProfileRef, 
 interface SavedSession {
   version: 1;
   activeTab?: TabId;
-  tabs: { id: TabId; title?: string; root: LayoutNode; focusedPane: PaneId }[];
-  panes: Record<PaneId, { profileId: string; cwd?: string }>;
+  tabs: { id: TabId; title?: string; color?: TabColor; icon?: string; root: LayoutNode; focusedPane: PaneId }[];
+  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string }>;
 }
 
-/** What is worth keeping: layout, profiles, folders, custom titles. Shell titles are not. */
-export function saveWorkspace(ws: Workspace): string {
+/**
+ * What is worth keeping: layout, profiles, folders, custom titles, tab colours and
+ * icons, and which Claude Code session runs in each pane (`claude`, pane → session
+ * id), for resuming them on start. Shell titles are not kept.
+ */
+export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string> = new Map()): string {
   const saved: SavedSession = {
     version: 1,
     activeTab: ws.activeTab,
-    tabs: ws.tabs.map(({ id, title, root, focusedPane }) => ({ id, title, root, focusedPane })),
-    panes: Object.fromEntries(Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd }])),
+    tabs: ws.tabs.map(({ id, title, color, icon, root, focusedPane }) => ({ id, title, color, icon, root, focusedPane })),
+    panes: Object.fromEntries(
+      Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id) }]),
+    ),
   };
   return JSON.stringify(saved);
 }
@@ -307,10 +342,19 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
       if (typeof savedPane?.profileId !== "string") return undefined;
       const profile = profiles.find((p) => p.id === savedPane.profileId) ?? profiles[0];
       const cwd = typeof savedPane.cwd === "string" ? savedPane.cwd : undefined;
-      panes[id] = { id, profileId: profile.id, profileName: profile.name, title: "", cwd };
+      // Typed into a shell later, so only something shaped like a session id.
+      const claudeSession = typeof savedPane.claude === "string" && /^[\w-]{1,64}$/.test(savedPane.claude) ? savedPane.claude : undefined;
+      panes[id] = { id, profileId: profile.id, profileName: profile.name, title: "", cwd, ...(claudeSession ? { claudeSession } : {}) };
     }
     const focusedPane = ids.includes(raw.focusedPane) ? raw.focusedPane : ids[0];
-    tabs.push({ id: raw.id, root: raw.root, focusedPane, ...(typeof raw.title === "string" && raw.title ? { title: raw.title } : {}) });
+    tabs.push({
+      id: raw.id,
+      root: raw.root,
+      focusedPane,
+      ...(typeof raw.title === "string" && raw.title ? { title: raw.title } : {}),
+      ...(TAB_COLORS.includes(raw.color as TabColor) ? { color: raw.color } : {}),
+      ...(typeof raw.icon === "string" && raw.icon && [...raw.icon].length <= MAX_ICON ? { icon: raw.icon } : {}),
+    });
   }
   const activeTab = tabs.some((t) => t.id === saved.activeTab) ? saved.activeTab : tabs[0].id;
   return { tabs, activeTab, panes };

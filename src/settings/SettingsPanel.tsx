@@ -183,6 +183,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
               ))}
             </select>
           </Field>
+          <Toggle
+            label="SSH hosts as shells"
+            hint="Each Host in your ~/.ssh/config appears as “SSH <host>” in the ▾ menu and the palette."
+            checked={draft.sshProfiles}
+            onChange={(v) => set("sshProfiles", v)}
+          />
           <Toggle label="Copy selected text automatically" checked={draft.copyOnSelect} onChange={(v) => set("copyOnSelect", v)} />
           <Toggle
             label="Right-click copies, or pastes when nothing is selected"
@@ -299,6 +305,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
             hint="A Windows notification and a ✳ on the tab when Claude Code in a qterm pane needs you (a permission or your next message)."
             checked={draft.claudeAlerts}
             onChange={(v) => set("claudeAlerts", v)}
+          />
+          <Toggle
+            label="Resume Claude Code sessions on start"
+            hint="When tabs reopen, panes that were running Claude Code get “claude --resume <id>” typed for them. Needs “Reopen tabs and layout on start”; most reliable with the hook below set up."
+            checked={draft.claudeRestore}
+            onChange={(v) => set("claudeRestore", v)}
           />
           <div className="settings-field">
             <span className="settings-label">Notification hook</span>
