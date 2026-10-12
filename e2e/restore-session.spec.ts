@@ -8,7 +8,9 @@ import { expect, test } from "./qterm";
 
 test("a restart brings back the tab, the folder it was in and its earlier output", async ({ qterm }) => {
   const marker = Date.now() % 100_000;
-  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "qterm-e2e-restore-"));
+  // The full path: TEMP can be an 8.3 short name (C:\Users\RUNNER~1\...), and the
+  // shell reports folders in full.
+  const folder = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "qterm-e2e-restore-")));
   try {
     const pane = await qterm.activePane();
     await qterm.waitForPrompt(pane);
