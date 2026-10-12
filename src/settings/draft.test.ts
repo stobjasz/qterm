@@ -24,6 +24,7 @@ const config: Config = {
   keybindings: {},
   profiles: [],
   layouts: [],
+  snippets: [],
   scrollback: { restore: true, lines: 1000, profiles: {} },
 };
 

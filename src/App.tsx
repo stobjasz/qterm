@@ -433,6 +433,16 @@ export default function App() {
         run: () => openLayout(layout),
       })),
       { id: "layout:save", group: "Layout", label: "Save this tab as a layout", run: saveTabAsLayout },
+      ...(config?.snippets ?? []).map((snippet, i) => ({
+        id: `snippet:${i}`,
+        group: "Snippet",
+        label: snippet.name,
+        hint: snippet.command.length > 40 ? `${snippet.command.slice(0, 39)}…` : snippet.command,
+        run: () => {
+          const pane = target();
+          if (pane) registry.typeSnippet(pane, snippet.command, snippet.run);
+        },
+      })),
       ...(config?.claudeSessions ? claudeSessions : []).map((session) => ({
         id: `claude:${session.id}`,
         group: "Resume Claude",

@@ -52,6 +52,7 @@ export interface Config {
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
   layouts: LayoutDef[];
+  snippets: Snippet[];
   scrollback: {
     /** For shells not listed in `profiles`. */
     restore: boolean;
@@ -59,6 +60,14 @@ export interface Config {
     /** Profile id → on/off. */
     profiles: Record<string, boolean>;
   };
+}
+
+/** A [[snippets]] entry: a named command for the current pane. */
+export interface Snippet {
+  name: string;
+  command: string;
+  /** Press Enter after typing it. */
+  run: boolean;
 }
 
 /** The config in effect, plus why the file on disk was rejected if it was. */

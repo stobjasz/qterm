@@ -45,6 +45,8 @@ pub struct Config {
     pub profiles: Vec<CustomProfile>,
     /// Named tab layouts ([[layouts]]).
     pub layouts: Vec<LayoutDef>,
+    /// Named commands typed into the current pane from the palette ([[snippets]]).
+    pub snippets: Vec<Snippet>,
     /// Keeping each pane's output across restarts ([scrollback]).
     pub scrollback: ScrollbackSettings,
 }
@@ -91,6 +93,17 @@ impl CustomProfile {
     pub fn id(&self) -> String {
         self.id.clone().unwrap_or_else(|| format!("custom:{}", self.name))
     }
+}
+
+/// A named command, typed into the current pane from the command palette.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct Snippet {
+    pub name: String,
+    pub command: String,
+    /// Press Enter after typing it.
+    #[serde(default)]
+    pub run: bool,
 }
 
 /// A named arrangement of panes for a new tab: a pane (or split) with a name.
@@ -179,6 +192,7 @@ impl Default for Config {
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),
             layouts: Vec::new(),
+            snippets: Vec::new(),
             scrollback: ScrollbackSettings::default(),
         }
     }
@@ -642,6 +656,15 @@ panes = [
         assert_eq!(config.scrollback.lines, 500);
         assert!(!config.scrollback.profiles["wsl:Ubuntu"]);
         assert!(Config::parse("[scrollback]\nlines = 5").unwrap_err().contains("scrollback.lines"));
+    }
+
+    #[test]
+    fn reads_snippets() {
+        let config = Config::parse("[[snippets]]\nname = \"log\"\ncommand = \"git log -5\"\nrun = true\n[[snippets]]\nname = \"edit\"\ncommand = \"code .\"").unwrap();
+        assert_eq!(config.snippets.len(), 2);
+        assert!(config.snippets[0].run);
+        assert!(!config.snippets[1].run, "waits at the prompt by default");
+        assert!(Config::parse("[[snippets]]\nname = \"x\"").unwrap_err().contains("command"));
     }
 
     #[test]

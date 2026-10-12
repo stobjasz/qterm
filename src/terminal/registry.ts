@@ -283,6 +283,17 @@ export class TerminalRegistry {
     if (text) this.pasteText(paneId, text);
   }
 
+  /**
+   * Types a snippet: pasted (so a multi-line one isn't run line by line), then Enter
+   * as a keystroke of its own when `run`, since a bracketed paste never runs.
+   */
+  typeSnippet(paneId: PaneId, command: string, run: boolean): void {
+    const term = this.entries.get(paneId)?.term;
+    if (!term) return;
+    term.paste(command);
+    if (run) term.input("\r", true);
+  }
+
   /** Types `text` as a paste: broadcast like typing, and bracketed when the shell asked for it. */
   pasteText(paneId: PaneId, text: string): void {
     this.entries.get(paneId)?.term.paste(text);

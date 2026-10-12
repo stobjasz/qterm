@@ -106,6 +106,15 @@ size = 14   # 6 - 72
 # name; `command` is typed into the shell once it starts. "Save this tab as a
 # layout" in the ▾ menu writes one of these for you.
 #
+# Snippets: named commands typed into the current pane from the palette
+# (Ctrl+Shift+P, then the name). `run = true` presses Enter too; without it the
+# command waits at the prompt for you to edit.
+#
+# [[snippets]]
+# name = "Git log graph"
+# command = "git log --oneline --graph -20"
+# run = true
+
 # [[layouts]]
 # name = "dev"
 # split = "row"
