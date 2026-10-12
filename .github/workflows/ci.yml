@@ -34,6 +34,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          # A failed run's build is still worth keeping: the next one starts from it.
+          cache-on-failure: true
 
       # The newer ConPTY that release builds embed (pinned and signature-checked).
       - name: Fetch the bundled ConPTY
@@ -53,6 +55,19 @@ jobs:
       - name: Unit tests (Rust)
         working-directory: src-tauri
         run: cargo test
+
+      # The app's UI runs in the Edge WebView2 runtime; install it if the image lacks it.
+      - name: WebView2 runtime
+        shell: pwsh
+        run: |
+          [Environment]::OSVersion.VersionString
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
+          if ($version) { "WebView2 $version"; exit 0 }
+          'WebView2 missing: installing the Evergreen runtime'
+          Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\webview2.exe"
+          Start-Process "$env:RUNNER_TEMP\webview2.exe" -ArgumentList '/silent', '/install' -Wait
+          "WebView2 $((Get-ItemProperty $key).pv)"
 
       # Builds the e2e app (own identifier), starts Vite, and drives the real app.
       - name: E2E tests

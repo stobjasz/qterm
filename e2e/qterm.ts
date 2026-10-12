@@ -16,6 +16,8 @@ export const IDENTIFIER = "dev.qterm.e2e";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const EXE = path.join(ROOT, "src-tauri", "target", "e2e", "debug", "qterm.exe");
 const CDP_PORT = 9333;
+/** The app's own output (stdout and stderr), kept with the test results. */
+const APP_LOG = path.join(ROOT, "test-results", "qterm-app.log");
 const CONFIG_DIR = path.join(process.env.APPDATA ?? "", IDENTIFIER);
 const LOCAL_DIR = path.join(process.env.LOCALAPPDATA ?? "", IDENTIFIER);
 const DEFAULT_SETTINGS = fs.readFileSync(path.join(ROOT, "src-tauri", "src", "config", "default.toml"), "utf8");
@@ -68,11 +70,22 @@ export class Qterm {
 
   /** Starts the app (keeping whatever it saved before) and waits until its UI is up. */
   async start(): Promise<void> {
-    this.process = spawn(EXE, [], {
+    fs.mkdirSync(path.dirname(APP_LOG), { recursive: true });
+    const logFd = fs.openSync(APP_LOG, "a");
+    fs.writeSync(logFd, `\n--- qterm started ${new Date().toISOString()}\n`);
+    const child = spawn(EXE, [], {
       env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}` },
-      stdio: "ignore",
+      stdio: ["ignore", logFd, logFd],
     });
-    await expect.poll(cdpReady, { timeout: 60_000, message: "qterm's WebView2 debugging port" }).toBe(true);
+    fs.closeSync(logFd);
+    this.process = child;
+    // Up within a minute, or a clear reason: an app that quit says so at once.
+    const deadline = Date.now() + 60_000;
+    while (!(await cdpReady())) {
+      if (child.exitCode !== null) throw new Error(`qterm quit during start-up (exit code ${child.exitCode}); its output is in ${APP_LOG}`);
+      if (Date.now() > deadline) throw new Error(`qterm's WebView2 debugging port didn't open within a minute; its output is in ${APP_LOG}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     log("debugging port open");
     this.browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
     const context = this.browser.contexts()[0];
