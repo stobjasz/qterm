@@ -281,8 +281,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
           <div className="settings-field">
             <span className="settings-label">Notification hook</span>
             <span className="settings-hint">
-              Claude Code tells qterm through a hook in {hook?.settingsPath ?? "its settings.json"}. It only acts inside
-              qterm; other terminals are unaffected. Applies to Claude sessions started afterwards.
+              Claude Code tells qterm through hooks in {hook?.settingsPath ?? "its settings.json"}: when it waits for you, and
+              which session each pane runs (for the context and cost shown on its tab). They only act inside qterm; other
+              terminals are unaffected. Applies to Claude sessions started afterwards.
             </span>
             <div className="settings-actions">
               <span>

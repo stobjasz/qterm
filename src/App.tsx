@@ -5,6 +5,10 @@ import {
   claudeSessionSeen,
   claudeRunning,
   onClaudeAttention,
+  onClaudeSessionStart,
+  claudeUsage,
+  type ClaudeUsage,
+  type PaneClaudeSession,
   onFocusPane,
   onFileDrag,
   setAttentionCount,
@@ -93,6 +97,8 @@ const SAVE_DELAY_MS = 400;
 const SCROLLBACK_SAVE_MS = 30_000;
 /** How often to look for Claude Code in the panes, and how recent output means "working". */
 const CLAUDE_POLL_MS = 2000;
+/** Transcripts are read incrementally, so this is cheap. */
+const CLAUDE_USAGE_POLL_MS = 5000;
 const CLAUDE_BUSY_MS = 2500;
 
 // Random, so ids from a restored session never collide with new ones.
@@ -116,6 +122,9 @@ export default function App() {
   const [searchAllOpen, setSearchAllOpen] = useState(false);
   /** Panes with Claude Code running: working (recent output) or idle. */
   const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
+  const [claudeUsages, setClaudeUsages] = useState<ReadonlyMap<PaneId, ClaudeUsage>>(new Map());
+  /** Which Claude session each pane runs, from the SessionStart hook. */
+  const paneSessions = useRef(new Map<PaneId, PaneClaudeSession>());
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -525,12 +534,35 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [claudeFeatures, registry]);
 
+  // Token use of the Claude sessions running in panes, re-read every few seconds.
+  useEffect(() => {
+    if (claudeStatus.size === 0) {
+      setClaudeUsages((current) => (current.size ? new Map() : current));
+      return;
+    }
+    const poll = async () => {
+      const next = new Map<PaneId, ClaudeUsage>();
+      for (const paneId of claudeStatus.keys()) {
+        const known = paneSessions.current.get(paneId)?.transcriptPath ?? undefined;
+        const cwd = known ? undefined : workspaceRef.current.panes[paneId]?.cwd;
+        const usage = await claudeUsage(known, cwd).catch(() => null);
+        if (usage) next.set(paneId, usage);
+      }
+      setClaudeUsages(next);
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), CLAUDE_USAGE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [claudeStatus]);
+
   const tabMarkers = useMemo(
     () =>
       new Map(
         workspace.tabs.map((tab) => {
           const ids = paneIds(tab.root);
           const statuses = ids.map((id) => claudeStatus.get(id));
+          // The focused pane's session if it runs one, else the tab's first.
+          const usage = claudeUsages.get(tab.focusedPane) ?? ids.map((id) => claudeUsages.get(id)).find(Boolean);
           return [
             tab.id,
             {
@@ -539,11 +571,18 @@ export default function App() {
               zoomed: Boolean(tab.zoomed),
               broadcast: Boolean(tab.broadcast),
               claude: statuses.includes("busy") ? ("busy" as const) : statuses.includes("idle") ? ("idle" as const) : undefined,
+              claudeUsage: usage,
             },
           ] as const;
         }),
       ),
-    [workspace.tabs, activity, bells, claudeStatus],
+    [workspace.tabs, activity, bells, claudeStatus, claudeUsages],
+  );
+  /** Claude sessions running now, for the ✳ menu. */
+  const runningClaude = useMemo(
+    () =>
+      [...claudeUsages].map(([paneId, usage]) => ({ paneId, label: paneLabel(paneId), usage })),
+    [claudeUsages, paneLabel, workspace.tabs],
   );
   const attentionTabs = useMemo(
     () =>
@@ -570,6 +609,7 @@ export default function App() {
       onClaudeSessionsChanged(setClaudeSessions),
       onOpenSettings(() => setSettingsOpen(true)),
       onClaudeAttention((alert) => onAlert.current(alert)),
+      onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
       onQuakeVisibility(({ visible, slideMs }) => {
         setSlideMs(slideMs);
@@ -803,6 +843,8 @@ export default function App() {
                 onResume: resumeClaude,
                 onForget: (ids) => void forgetClaudeSessions(ids),
                 onNewSession: newClaudeSession,
+                running: runningClaude,
+                onFocusPane: (paneId: PaneId) => setWorkspace((ws) => focusPane(ws, paneId)),
               }
             : undefined
         }

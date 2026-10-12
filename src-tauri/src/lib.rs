@@ -1,6 +1,7 @@
 mod alerts;
 mod claude;
 mod claude_hook;
+mod claude_usage;
 mod commands;
 mod config;
 mod editor;
@@ -48,6 +49,7 @@ pub fn run() {
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
         .manage(claude::TranscriptIndex::default())
+        .manage(claude_usage::UsageIndex::default())
         .setup(|app| {
             // Before anything can open a PTY: the first one fixes which ConPTY is used.
             match pty::conpty::install(&app.path().app_local_data_dir()?) {
@@ -135,6 +137,7 @@ pub fn run() {
             commands::prune_scrollback,
             commands::delete_scrollback,
             commands::scrollback_usage,
+            commands::claude_usage,
             commands::quit_now,
         ])
         .run(tauri::generate_context!())

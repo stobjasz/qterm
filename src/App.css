@@ -210,6 +210,77 @@ body,
   animation: attention-pulse 1.2s ease-in-out infinite;
 }
 
+/* How full the context of the tab's Claude session is. */
+.tab-context {
+  font-size: 10.5px;
+  color: var(--tab-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-context.full {
+  color: var(--danger);
+}
+
+/* ✳ menu: Claude sessions running in panes now, with their token use. */
+.claude-running {
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.claude-running-title {
+  margin-bottom: 4px;
+  color: var(--tab-fg);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.claude-running-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.claude-running-row:hover {
+  background: var(--hover-bg);
+}
+
+.claude-running-tab {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-running-model,
+.claude-running-cost {
+  color: var(--tab-fg);
+  font-size: 12px;
+}
+
+.claude-running-context {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.claude-running-context meter {
+  width: 60px;
+  height: 6px;
+}
+
+.claude-running-note {
+  margin: 4px 6px 0;
+  color: var(--tab-fg);
+  font-size: 11px;
+}
+
 /* A long command finished while you weren't looking. */
 .tab-attention.command_done {
   color: #98c379;

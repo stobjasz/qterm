@@ -1,7 +1,8 @@
 import { useRef, useState, type PointerEvent } from "react";
 
-import { ClaudeMenu } from "../claude/ClaudeMenu";
-import type { ClaudeAlert, ClaudeSession, Profile } from "../ipc";
+import { ClaudeMenu, type ClaudeMenuProps } from "../claude/ClaudeMenu";
+import { contextPercent, usageSummary } from "../claude/usage";
+import type { ClaudeAlert, ClaudeUsage, Profile } from "../ipc";
 import type { LayoutDef } from "../workspace/layouts";
 import { tabTitle, type SplitDir, type TabId, type Workspace } from "../workspace/workspace";
 import { Popup } from "./Popup";
@@ -13,12 +14,7 @@ interface Props {
   workspace: Workspace;
   profiles: Profile[];
   /** Present when remembering Claude sessions is switched on. */
-  claude?: {
-    sessions: ClaudeSession[];
-    onResume(session: ClaudeSession): void;
-    onForget(ids: string[]): void;
-    onNewSession(cwd: string): void;
-  };
+  claude?: ClaudeMenuProps;
   onActivate(tabId: TabId): void;
   onClose(tabId: TabId): void;
   onNewTab(profileId?: string): void;
@@ -43,6 +39,8 @@ export interface TabMarkers {
   broadcast: boolean;
   /** Claude Code in one of the tab's panes: working, or idle at its prompt. */
   claude?: "busy" | "idle";
+  /** Its token use, when its transcript was found. */
+  claudeUsage?: ClaudeUsage;
 }
 
 // Mouse-down default is prevented (except in text fields) so clicking the bar never
@@ -123,9 +121,18 @@ export function TabBar(props: Props) {
                   className={`tab-claude ${marks.claude}`}
                   role="status"
                   aria-label={marks.claude === "busy" ? "Claude is working" : "Claude is idle"}
-                  title={marks.claude === "busy" ? "Claude Code is working" : "Claude Code is idle"}
+                  title={`${marks.claude === "busy" ? "Claude Code is working" : "Claude Code is idle"}${marks.claudeUsage ? `\n${usageSummary(marks.claudeUsage)}` : ""}`}
                 >
                   ✳
+                </span>
+              )}
+              {marks?.claude && marks.claudeUsage && contextPercent(marks.claudeUsage) !== undefined && (
+                <span
+                  className={`tab-context${contextPercent(marks.claudeUsage)! >= 80 ? " full" : ""}`}
+                  title={usageSummary(marks.claudeUsage)}
+                  aria-label={`Claude context ${contextPercent(marks.claudeUsage)}% full`}
+                >
+                  {contextPercent(marks.claudeUsage)}%
                 </span>
               )}
               {marks?.broadcast && (

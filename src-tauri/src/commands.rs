@@ -265,6 +265,24 @@ pub fn load_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pan
     store.load(&pane_id)
 }
 
+/// Token use of the Claude session in a pane: from its transcript (known through the
+/// SessionStart hook), else the newest transcript of the pane's folder. None when
+/// neither leads to one.
+#[tauri::command]
+pub async fn claude_usage(
+    usage: State<'_, crate::claude_usage::UsageIndex>,
+    transcript: Option<String>,
+    cwd: Option<String>,
+) -> Result<Option<crate::claude_usage::ClaudeUsage>, String> {
+    let Some(home) = crate::claude::claude_home() else { return Ok(None) };
+    let path = match transcript.map(std::path::PathBuf::from) {
+        Some(path) if crate::claude_usage::is_transcript(&home, &path) => Some(path),
+        Some(path) => return Err(format!("not a Claude Code transcript: {}", path.display())),
+        None => cwd.as_deref().and_then(|cwd| crate::claude_usage::newest_transcript(&home, cwd)),
+    };
+    path.map(|path| usage.usage(&path)).transpose()
+}
+
 /// Deletes saved output: of these panes, or of all when `pane_ids` is None.
 #[tauri::command]
 pub fn delete_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pane_ids: Option<Vec<String>>) {

@@ -1,6 +1,8 @@
-//! Adds or removes qterm's Notification hook in Claude Code's settings.json.
-//! Everything else in the file is kept, in its original order (serde_json's
-//! preserve_order), and the previous file is backed up before each change.
+//! Adds or removes qterm's hooks in Claude Code's settings.json: Notification
+//! (Claude is waiting for you) and SessionStart (which session and transcript a
+//! pane runs, for its token use). Everything else in the file is kept, in its
+//! original order (serde_json's preserve_order), and the previous file is backed
+//! up before each change.
 
 use std::path::{Path, PathBuf};
 
@@ -8,6 +10,9 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use crate::alerts::HOOK_ARG;
+
+/// The hook events qterm listens to, all handled by the same command.
+const EVENTS: [&str; 2] = ["Notification", "SessionStart"];
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,11 +32,13 @@ pub fn command_for(exe: &Path) -> String {
     format!("\"{}\" {HOOK_ARG}", exe.to_string_lossy().replace('\\', "/"))
 }
 
+/// Installed: any of qterm's hooks is there. Current: every event has this exe's
+/// command (an older qterm set up only Notification, so it needs an update).
 pub fn status(settings: &Path, command: &str) -> Result<HookStatus, String> {
-    let commands = qterm_commands(&read(settings)?);
+    let doc = read(settings)?;
     Ok(HookStatus {
-        installed: !commands.is_empty(),
-        current: commands.iter().any(|c| c == command),
+        installed: EVENTS.iter().any(|event| !qterm_commands(&doc, event).is_empty()),
+        current: EVENTS.iter().all(|event| qterm_commands(&doc, event).iter().any(|c| c == command)),
         settings_path: settings.to_string_lossy().into_owned(),
     })
 }
@@ -41,16 +48,15 @@ pub fn install(settings: &Path, command: &str) -> Result<(), String> {
     let mut doc = read(settings)?;
     remove_ours(&mut doc);
     let root = doc.as_object_mut().ok_or("settings.json is not a JSON object")?;
-    let hooks = root.entry("hooks").or_insert_with(|| json!({}));
-    let notification = hooks
-        .as_object_mut()
-        .ok_or("\"hooks\" is not an object")?
-        .entry("Notification")
-        .or_insert_with(|| json!([]));
-    notification
-        .as_array_mut()
-        .ok_or("\"hooks.Notification\" is not a list")?
-        .push(json!({ "matcher": "", "hooks": [{ "type": "command", "command": command }] }));
+    let hooks = root.entry("hooks").or_insert_with(|| json!({})).as_object_mut().ok_or("\"hooks\" is not an object")?;
+    for event in EVENTS {
+        hooks
+            .entry(event)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or(format!("\"hooks.{event}\" is not a list"))?
+            .push(json!({ "matcher": "", "hooks": [{ "type": "command", "command": command }] }));
+    }
     write(settings, &doc)
 }
 
@@ -66,8 +72,8 @@ fn is_ours(command: &str) -> bool {
     command.contains(HOOK_ARG)
 }
 
-fn qterm_commands(doc: &Value) -> Vec<String> {
-    doc.pointer("/hooks/Notification")
+fn qterm_commands(doc: &Value, event: &str) -> Vec<String> {
+    doc.pointer(&format!("/hooks/{event}"))
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -79,9 +85,17 @@ fn qterm_commands(doc: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Drops qterm's hooks, and any matcher group or Notification list left empty.
+/// Drops qterm's hooks, and any matcher group or event list left empty.
 fn remove_ours(doc: &mut Value) -> bool {
-    let Some(groups) = doc.pointer_mut("/hooks/Notification").and_then(Value::as_array_mut) else {
+    let mut changed = false;
+    for event in EVENTS {
+        changed |= remove_ours_from(doc, event);
+    }
+    changed
+}
+
+fn remove_ours_from(doc: &mut Value, event: &str) -> bool {
+    let Some(groups) = doc.pointer_mut(&format!("/hooks/{event}")).and_then(Value::as_array_mut) else {
         return false;
     };
     let before = groups.len();
@@ -98,7 +112,7 @@ fn remove_ours(doc: &mut Value) -> bool {
     if groups.is_empty()
         && let Some(hooks) = doc.get_mut("hooks").and_then(Value::as_object_mut)
     {
-        hooks.remove("Notification");
+        hooks.remove(event);
         if hooks.is_empty() {
             doc.as_object_mut().map(|root| root.remove("hooks"));
         }
@@ -157,6 +171,7 @@ mod tests {
         assert_eq!(keys, ["model", "hooks", "zeta"], "order kept");
         assert_eq!(doc.pointer("/hooks/Notification/0/hooks/0/command").unwrap(), "say hi");
         assert_eq!(doc.pointer("/hooks/Notification/1/hooks/0/command").unwrap(), CMD);
+        assert_eq!(doc.pointer("/hooks/SessionStart/0/hooks/0/command").unwrap(), CMD);
         assert!(doc.pointer("/hooks/Stop").is_some());
         assert!(path.with_extension("json.qterm-backup").exists());
 
@@ -170,7 +185,19 @@ mod tests {
         install(&path, "\"D:/old/qterm.exe\" --claude-notify").unwrap();
         assert_eq!(status(&path, CMD).unwrap(), HookStatus { installed: true, current: false, settings_path: path.to_string_lossy().into() });
         install(&path, CMD).unwrap();
-        assert_eq!(qterm_commands(&read(&path).unwrap()), [CMD]);
+        let doc = read(&path).unwrap();
+        assert_eq!(qterm_commands(&doc, "Notification"), [CMD]);
+        assert_eq!(qterm_commands(&doc, "SessionStart"), [CMD]);
+    }
+
+    #[test]
+    fn an_older_notification_only_setup_needs_an_update() {
+        let path = fixture("older", Some(&format!(r#"{{"hooks":{{"Notification":[{{"matcher":"","hooks":[{{"type":"command","command":{CMD:?}}}]}}]}}}}"#)));
+        let before = status(&path, CMD).unwrap();
+        assert!(before.installed && !before.current);
+        install(&path, CMD).unwrap();
+        assert!(status(&path, CMD).unwrap().current);
+        assert_eq!(qterm_commands(&read(&path).unwrap(), "Notification"), [CMD], "not added twice");
     }
 
     #[test]

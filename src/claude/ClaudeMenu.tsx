@@ -1,19 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { listAllClaudeSessions, type ClaudeSession, type TranscriptSummary } from "../ipc";
+import { listAllClaudeSessions, type ClaudeSession, type ClaudeUsage, type TranscriptSummary } from "../ipc";
 import { Popup } from "../tabs/Popup";
 import { groupSessions, type GroupableSession } from "./groups";
+import { contextPercent, formatCost, formatTokens, modelName, usageSummary } from "./usage";
 
 /** Above this many sessions the menu offers a filter box. */
 const FILTER_FROM = 6;
 
-interface Props {
+/** Claude Code running in a pane now, with its token use. */
+export interface RunningClaude {
+  paneId: string;
+  /** Where the pane is, e.g. "2 · PowerShell". */
+  label: string;
+  usage: ClaudeUsage;
+}
+
+export interface ClaudeMenuProps {
   sessions: ClaudeSession[];
   onResume(session: ClaudeSession): void;
   onForget(ids: string[]): void;
   /** Starts a fresh Claude Code session in this folder. */
   onNewSession(cwd: string): void;
+  running: RunningClaude[];
+  onFocusPane(paneId: string): void;
 }
+
+type Props = ClaudeMenuProps;
 
 /** One row of either view. */
 interface Row extends GroupableSession {
@@ -24,7 +37,7 @@ interface Row extends GroupableSession {
 }
 
 /** The ✳ tab-bar button: remembered Claude Code sessions, grouped by folder. */
-export function ClaudeMenu({ sessions, onResume, onForget, onNewSession }: Props) {
+export function ClaudeMenu({ sessions, onResume, onForget, onNewSession, running, onFocusPane }: Props) {
   return (
     <Popup
       label="Claude sessions"
@@ -34,24 +47,55 @@ export function ClaudeMenu({ sessions, onResume, onForget, onNewSession }: Props
       className="claude-menu"
     >
       {(close) => (
-        <SessionList
-          sessions={sessions}
-          onResume={(session) => {
-            close();
-            onResume(session);
-          }}
-          onForget={onForget}
-          onNewSession={(cwd) => {
-            close();
-            onNewSession(cwd);
-          }}
-        />
+        <>
+          {running.length > 0 && (
+            <section className="claude-running" aria-label="Claude running now">
+              <div className="claude-running-title">Running now</div>
+              {running.map(({ paneId, label, usage }) => {
+                const percent = contextPercent(usage);
+                return (
+                  <button
+                    key={paneId}
+                    className="claude-running-row"
+                    title={usageSummary(usage)}
+                    onClick={() => {
+                      close();
+                      onFocusPane(paneId);
+                    }}
+                  >
+                    <span className="claude-running-tab">{label}</span>
+                    <span className="claude-running-model">{modelName(usage.model)}</span>
+                    <span className="claude-running-context">
+                      {percent !== undefined && <meter min={0} max={100} low={60} high={80} optimum={0} value={percent} />}
+                      {formatTokens(usage.contextTokens)}
+                      {percent !== undefined && ` (${percent}%)`}
+                    </span>
+                    <span className="claude-running-cost">{formatCost(usage) ?? ""}</span>
+                  </button>
+                );
+              })}
+              <p className="claude-running-note">Cost is an estimate at API list prices; a Claude subscription isn't billed per token.</p>
+            </section>
+          )}
+          <SessionList
+            sessions={sessions}
+            onResume={(session) => {
+              close();
+              onResume(session);
+            }}
+            onForget={onForget}
+            onNewSession={(cwd) => {
+              close();
+              onNewSession(cwd);
+            }}
+          />
+        </>
       )}
     </Popup>
   );
 }
 
-function SessionList({ sessions, onResume, onForget, onNewSession }: Props) {
+function SessionList({ sessions, onResume, onForget, onNewSession }: Pick<Props, "sessions" | "onResume" | "onForget" | "onNewSession">) {
   const [view, setView] = useState<"remembered" | "all">(sessions.length > 0 ? "remembered" : "all");
   const [all, setAll] = useState<TranscriptSummary[]>();
   const [filter, setFilter] = useState("");

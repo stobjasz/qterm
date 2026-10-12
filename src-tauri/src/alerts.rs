@@ -41,13 +41,33 @@ pub struct Alert {
     pub session_id: Option<String>,
 }
 
-/// The fields of Claude Code's Notification hook input that matter here.
+/// Claude Code started (or resumed, cleared, compacted) a session in a pane: its
+/// transcript is where that pane's token use is read from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneSession {
+    pub pane_id: String,
+    pub session_id: String,
+    pub transcript_path: Option<String>,
+}
+
+/// What the hook leaves in the inbox.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum InboxMessage {
+    Alert(Alert),
+    Session(PaneSession),
+}
+
+/// The fields of Claude Code's hook input that matter here.
 #[derive(Deserialize)]
 struct HookInput {
+    hook_event_name: Option<String>,
     message: Option<String>,
     title: Option<String>,
     notification_type: Option<String>,
     session_id: Option<String>,
+    transcript_path: Option<String>,
 }
 
 /// Hook mode: never fails loudly, since a failing hook would bother Claude Code.
@@ -61,21 +81,28 @@ pub fn run_hook() {
         let _ = tx.send(ok.then_some(input));
     });
     let Ok(Some(input)) = rx.recv_timeout(INPUT_TIMEOUT) else { return };
-    let Some(alert) = alert_from_hook(&pane_id, &input) else { return };
+    let Some(message) = message_from_hook(&pane_id, &input) else { return };
     if let Some(inbox) = inbox_dir() {
-        let _ = deliver(&inbox, &alert);
+        let _ = deliver(&inbox, &message);
     }
 }
 
-fn alert_from_hook(pane_id: &str, input: &str) -> Option<Alert> {
+fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
     let hook: HookInput = serde_json::from_str(input).ok()?;
-    Some(Alert {
+    if hook.hook_event_name.as_deref() == Some("SessionStart") {
+        return Some(InboxMessage::Session(PaneSession {
+            pane_id: pane_id.to_string(),
+            session_id: hook.session_id?,
+            transcript_path: hook.transcript_path,
+        }));
+    }
+    Some(InboxMessage::Alert(Alert {
         pane_id: pane_id.to_string(),
         title: hook.title,
         message: hook.message.unwrap_or_else(|| "Claude Code needs your attention".into()),
         kind: hook.notification_type,
         session_id: hook.session_id,
-    })
+    }))
 }
 
 fn inbox_dir() -> Option<PathBuf> {
@@ -83,11 +110,11 @@ fn inbox_dir() -> Option<PathBuf> {
 }
 
 /// Written under a temporary name and renamed, so the watcher never reads half a file.
-fn deliver(inbox: &Path, alert: &Alert) -> std::io::Result<()> {
+fn deliver(inbox: &Path, message: &InboxMessage) -> std::io::Result<()> {
     std::fs::create_dir_all(inbox)?;
     let name = format!("{}-{}", std::process::id(), uuid_like());
     let partial = inbox.join(format!("{name}.partial"));
-    std::fs::write(&partial, serde_json::to_vec(alert)?)?;
+    std::fs::write(&partial, serde_json::to_vec(message)?)?;
     std::fs::rename(partial, inbox.join(format!("{name}.json")))
 }
 
@@ -99,8 +126,9 @@ fn uuid_like() -> String {
     format!("{nanos:x}")
 }
 
-/// Reads, deletes and returns the alerts waiting in the inbox, oldest first.
-fn take_inbox(inbox: &Path) -> Vec<Alert> {
+/// Reads, deletes and returns the messages waiting in the inbox, oldest first.
+/// A bare alert is what a qterm from before SessionStart wrote.
+fn take_inbox(inbox: &Path) -> Vec<InboxMessage> {
     let Ok(entries) = std::fs::read_dir(inbox) else { return Vec::new() };
     let mut files: Vec<PathBuf> = entries
         .flatten()
@@ -111,14 +139,18 @@ fn take_inbox(inbox: &Path) -> Vec<Alert> {
     files
         .into_iter()
         .filter_map(|file| {
-            let alert = std::fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+            let bytes = std::fs::read(&file).ok();
             let _ = std::fs::remove_file(&file);
-            alert
+            let bytes = bytes?;
+            serde_json::from_slice(&bytes)
+                .ok()
+                .or_else(|| serde_json::from_slice(&bytes).ok().map(InboxMessage::Alert))
         })
         .collect()
 }
 
-/// Watches the inbox and emits each alert to the UI as `claude-attention`.
+/// Watches the inbox and emits each alert to the UI as `claude-attention`, and
+/// each session start as `claude-session-start`.
 /// Alerts left over from before this start are stale and dropped.
 pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     let inbox = inbox_dir().ok_or_else(|| notify::Error::generic("no LOCALAPPDATA"))?;
@@ -133,8 +165,11 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     std::thread::spawn(move || {
         while rx.recv().is_ok() {
             while rx.recv_timeout(Duration::from_millis(30)).is_ok() {}
-            for alert in take_inbox(&inbox) {
-                let _ = app.emit("claude-attention", alert);
+            for message in take_inbox(&inbox) {
+                let _ = match message {
+                    InboxMessage::Alert(alert) => app.emit("claude-attention", alert),
+                    InboxMessage::Session(session) => app.emit("claude-session-start", session),
+                };
             }
         }
     });
@@ -193,21 +228,37 @@ mod tests {
             "message":"Claude needs your permission to use Bash","title":"Permission needed",
             "notification_type":"permission_prompt"}"#;
         assert_eq!(
-            alert_from_hook("pane-1", input),
-            Some(Alert {
+            message_from_hook("pane-1", input),
+            Some(InboxMessage::Alert(Alert {
                 pane_id: "pane-1".into(),
                 title: Some("Permission needed".into()),
                 message: "Claude needs your permission to use Bash".into(),
                 kind: Some("permission_prompt".into()),
                 session_id: Some("abc".into()),
-            })
+            }))
         );
     }
 
     #[test]
+    fn reads_a_session_start() {
+        let input = r#"{"session_id":"s-1","transcript_path":"C:\\Users\\me\\.claude\\projects\\x\\s-1.jsonl",
+            "cwd":"C:\\x","hook_event_name":"SessionStart","source":"resume"}"#;
+        assert_eq!(
+            message_from_hook("pane-2", input),
+            Some(InboxMessage::Session(PaneSession {
+                pane_id: "pane-2".into(),
+                session_id: "s-1".into(),
+                transcript_path: Some(r"C:\Users\me\.claude\projects\x\s-1.jsonl".into()),
+            }))
+        );
+        assert!(message_from_hook("p", r#"{"hook_event_name":"SessionStart"}"#).is_none(), "no session id, nothing to map");
+    }
+
+    #[test]
     fn tolerates_minimal_or_broken_input() {
-        assert_eq!(alert_from_hook("p", "{}").unwrap().message, "Claude Code needs your attention");
-        assert!(alert_from_hook("p", "not json").is_none());
+        let Some(InboxMessage::Alert(alert)) = message_from_hook("p", "{}") else { panic!("an alert") };
+        assert_eq!(alert.message, "Claude Code needs your attention");
+        assert!(message_from_hook("p", "not json").is_none());
     }
 
     #[test]
@@ -215,12 +266,19 @@ mod tests {
         let inbox = std::env::temp_dir().join(format!("qterm-inbox-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&inbox);
         let alert = |m: &str| Alert { pane_id: "p".into(), title: None, message: m.into(), kind: None, session_id: None };
-        deliver(&inbox, &alert("first")).unwrap();
+        deliver(&inbox, &InboxMessage::Alert(alert("first"))).unwrap();
         std::thread::sleep(Duration::from_millis(5));
-        deliver(&inbox, &alert("second")).unwrap();
+        // What a qterm from before SessionStart wrote: a bare alert.
+        std::fs::write(inbox.join(format!("{}-zz-old.json", std::process::id())), serde_json::to_vec(&alert("second")).unwrap()).unwrap();
         std::fs::write(inbox.join("half.partial"), "{").unwrap();
 
-        let taken: Vec<String> = take_inbox(&inbox).into_iter().map(|a| a.message).collect();
+        let taken: Vec<String> = take_inbox(&inbox)
+            .into_iter()
+            .map(|m| match m {
+                InboxMessage::Alert(a) => a.message,
+                InboxMessage::Session(s) => s.session_id,
+            })
+            .collect();
         assert_eq!(taken, ["first", "second"]);
         assert!(take_inbox(&inbox).is_empty());
         let _ = std::fs::remove_dir_all(&inbox);

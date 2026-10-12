@@ -310,6 +310,36 @@ export function listAllClaudeSessions(): Promise<TranscriptSummary[]> {
   return invoke("list_all_claude_sessions");
 }
 
+/** Token use of a Claude Code session (see src-tauri/src/claude_usage.rs). */
+export interface ClaudeUsage {
+  sessionId: string;
+  model: string | null;
+  /** What the latest request sent: how full the context is. */
+  contextTokens: number;
+  contextLimit: number | null;
+  /** At API list prices; null until a request of a known model was seen. */
+  costUsd: number | null;
+  costComplete: boolean;
+  outputTokens: number;
+  requests: number;
+}
+
+/** From the session's transcript if known, else the newest transcript of `cwd`. */
+export function claudeUsage(transcript: string | undefined, cwd: string | undefined): Promise<ClaudeUsage | null> {
+  return invoke("claude_usage", { transcript: transcript ?? null, cwd: cwd ?? null });
+}
+
+/** Claude Code started, resumed or cleared a session in a pane (its SessionStart hook). */
+export interface PaneClaudeSession {
+  paneId: string;
+  sessionId: string;
+  transcriptPath: string | null;
+}
+
+export function onClaudeSessionStart(handler: (session: PaneClaudeSession) => void): Promise<UnlistenFn> {
+  return listen<PaneClaudeSession>("claude-session-start", (event) => handler(event.payload));
+}
+
 /** Sessions with Claude Code running inside their shell. */
 export function claudeRunning(): Promise<SessionId[]> {
   return invoke("claude_running");
