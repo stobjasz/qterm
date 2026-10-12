@@ -82,8 +82,9 @@ jobs:
             --setup "release/qterm_${version}_x64-setup.exe" --portable $portable --out release/latest.json
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Push-Location release
-          Get-ChildItem -Filter *.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
-            Set-Content SHA256SUMS -Encoding ascii
+          # LF endings, so `sha256sum -c SHA256SUMS` works too.
+          $sums = Get-ChildItem -Filter *.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)`n" }
+          [IO.File]::WriteAllText("$PWD/SHA256SUMS", -join $sums)
           Get-Content SHA256SUMS
           Pop-Location
 
