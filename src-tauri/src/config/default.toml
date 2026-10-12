@@ -126,6 +126,7 @@ ligatures = false
 # font_size = 13
 # tab_color = "green"    # red, orange, yellow, green, teal, blue, purple, pink
 # icon = "🚀"            # shown before the tab's title
+# background = "#1e1e2e" # its panes' background (a `theme` brings its own)
 #
 # [[profiles]]
 # name = "Build box"

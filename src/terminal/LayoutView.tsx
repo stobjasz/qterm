@@ -16,6 +16,8 @@ interface Props {
   broadcast?: boolean;
   registry: TerminalRegistry;
   spec(pane: Pane): PaneSpec;
+  /** A pane's own background, if its shell has one. */
+  background(pane: Pane): string | undefined;
   onFocusPane(paneId: PaneId): void;
   /** Divider after child `index` of the split at `path` moved by `delta` (share of the split). */
   onResize(path: number[], index: number, delta: number): void;
@@ -31,6 +33,7 @@ export function LayoutView(props: Props) {
         spec={props.spec}
         focused={props.showFocus && node.pane === props.focusedPane}
         broadcast={props.broadcast}
+        background={props.background(props.panes[node.pane])}
         onFocus={props.onFocusPane}
       />
     );

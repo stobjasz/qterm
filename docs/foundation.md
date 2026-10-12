@@ -852,3 +852,26 @@ Edge policies). It took four runs:
 
 The first run (cold cache) took 27 minutes; with the cache a run takes about 5½ minutes,
 1.1 minutes of it the E2E specs.
+
+## 24. A background per shell (#32, 2026-10-12)
+
+**Setting:** `[[profiles]] background = "#rrggbb"`, or a profile `theme`, which brings
+its background. The panes of that shell are painted in it, at the console's `opacity`.
+
+**How it avoids stacking:**
+- `.console` no longer paints a background itself. `.console::before` paints
+  `--console-bg` everywhere except the terminal area: a CSS mask with an excluded
+  rectangle (`mask-composite: exclude`) at `--hole-x/y/w/h`. A ResizeObserver in
+  `App.tsx` measures `.tab-panels` against the console and sets those.
+- Inside the hole each `.pane` paints `var(--pane-bg, var(--console-bg))`, and
+  `.divider` paints `--console-bg`. Panes are square now: rounded corners would let the
+  desktop through.
+- Overlays (palette, settings, search) keep their own backgrounds.
+
+**Verified:**
+- E2E R6 (`pane-background.spec.ts`): a "Deep" profile's pane computes to
+  `rgba(32, 48, 64, 0.82)` while the first pane keeps the theme's. Deliberate break:
+  not passing the pane's background → red.
+- Visual check: a screenshot with transparency kept read alpha 209 (= 0.82) on both
+  panes, the divider between them and the console edge. Two stacked layers would read
+  about 247.

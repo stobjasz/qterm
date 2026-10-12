@@ -30,7 +30,7 @@ body,
   /* The bottom accent line is drawn by .height-handle. */
   padding: 6px 8px 3px;
   color: var(--theme-fg);
-  background: var(--console-bg);
+  /* Painted by ::before, around the terminal area; panes paint their own. */
   font: 13px/1.4 system-ui, sans-serif;
   transform: translateY(-100%);
   transition: transform var(--slide-ms) ease-out;
@@ -38,6 +38,23 @@ body,
 
 .console.shown {
   transform: none;
+}
+
+/* The console's background everywhere but the terminal area (--hole-*, measured in
+   App.tsx): there each pane paints its own, so a shell can have its own colour
+   without two translucent layers stacking. */
+.console::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--console-bg);
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-size: 100% 100%, var(--hole-w, 0) var(--hole-h, 0);
+  mask-position: 0 0, var(--hole-x, 0) var(--hole-y, 0);
+  mask-repeat: no-repeat;
+  mask-composite: exclude;
 }
 
 .tab-panels {
@@ -76,7 +93,8 @@ body,
 .pane {
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: 3px;
+  /* Square: rounded corners would leave the desktop showing through. */
+  background: var(--pane-bg, var(--console-bg));
 }
 
 .pane.focused {
@@ -85,7 +103,8 @@ body,
 
 .divider {
   flex: 0 0 5px;
-  background: transparent;
+  /* In the terminal area, so it paints the console's background itself. */
+  background: var(--console-bg);
   transition: background 120ms;
 }
 
@@ -99,7 +118,9 @@ body,
 
 .divider:hover,
 .divider:active {
-  background: color-mix(in srgb, var(--console-edge) 35%, transparent);
+  background:
+    linear-gradient(color-mix(in srgb, var(--console-edge) 35%, transparent), color-mix(in srgb, var(--console-edge) 35%, transparent)),
+    var(--console-bg);
 }
 
 /* xterm 6 keeps the old .xterm-viewport (#000, overflow-y: scroll) underneath its

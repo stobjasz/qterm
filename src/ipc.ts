@@ -22,6 +22,8 @@ export interface Profile {
   /** Marks its tabs ([[profiles]] tab_color / icon). */
   tabColor?: TabColor;
   icon?: string;
+  /** Its panes' background colour ("#rrggbb"). */
+  background?: string;
 }
 
 /** A [[profiles]] entry as written in config.toml. */
@@ -35,6 +37,7 @@ export interface CustomProfile {
   fontSize: number | null;
   tabColor: TabColor | null;
   icon: string | null;
+  background: string | null;
 }
 
 /** Mirrors config.toml (see src-tauri/src/config/default.toml), in camelCase. */

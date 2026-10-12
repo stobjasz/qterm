@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 
 import type { Pane, PaneId } from "../workspace/workspace";
 import type { PaneSpec, TerminalRegistry } from "./registry";
@@ -11,13 +11,15 @@ interface Props {
   /** Draw the focus outline (only meaningful when the tab has several panes). */
   focused: boolean;
   broadcast?: boolean;
+  /** Its own background (CSS colour), when its shell has one; else the console's. */
+  background?: string;
   onFocus(paneId: PaneId): void;
 }
 
 // A slot for one pane's terminal. It never disposes the terminal: closing a pane
 // is an explicit workspace action, not a side effect of unmounting, so a pane can
 // move to a new slot when the layout around it changes.
-export function PaneView({ pane, registry, spec, focused, broadcast, onFocus }: Props) {
+export function PaneView({ pane, registry, spec, focused, broadcast, background, onFocus }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -35,6 +37,7 @@ export function PaneView({ pane, registry, spec, focused, broadcast, onFocus }: 
     <div
       className={`pane${focused ? " focused" : ""}${broadcast ? " broadcast" : ""}`}
       ref={hostRef}
+      style={background ? ({ "--pane-bg": background } as CSSProperties) : undefined}
       data-pane-id={pane.id}
       // Panes all hold an identical "Terminal input" textbox; tests tell them apart by id.
       data-testid={pane.id}

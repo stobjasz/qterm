@@ -52,8 +52,10 @@ When Claude Code is waiting for you, the tray tooltip says in how many panes.
 - **Width, monitor, transparency, animation:** in Settings → Console and Appearance.
 - **Background effect** (Settings → Appearance): **Acrylic** blurs what's behind the
   console like frosted glass, **Mica** tints it with your wallpaper's colours. Lower the
-  opacity to see more of it. Each shell can't have its own background colour yet (a
-  shell's theme changes its text colours only).
+  opacity to see more of it.
+- **A background per shell:** give a shell its own `background` or `theme` in the
+  settings file (see Profiles below) and its panes use that colour, at the same
+  opacity as the rest of the console.
 - **Hide when another window is clicked:** off by default. Turn it on if you want the
   console to get out of the way by itself.
 - **Closing the last tab** hides the console; the next time it opens with a fresh tab.
@@ -184,10 +186,11 @@ starts in a project folder, or one with its own colours:
 [[profiles]]
 name = "Build box"
 command = "ssh me@build-box"
-theme = "dracula"        # optional: its own text colours
+theme = "dracula"        # optional: its own colours, background included
 font_size = 13
 tab_color = "green"      # red, orange, yellow, green, teal, blue, purple, pink
 icon = "🛠"
+background = "#1e1e2e"   # its panes' background (instead of the theme's)
 ```
 
 To restyle a detected shell, give the profile its `id` (`pwsh`, `cmd`, `git-bash`,

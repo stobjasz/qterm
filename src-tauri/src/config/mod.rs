@@ -103,6 +103,14 @@ pub struct CustomProfile {
     /// Shown before its tabs' titles: an emoji or a few letters.
     #[serde(default)]
     pub icon: Option<String>,
+    /// Background colour of its panes ("#rrggbb"), at the console's opacity.
+    #[serde(default)]
+    pub background: Option<String>,
+}
+
+/// "#rrggbb".
+fn is_hex_color(text: &str) -> bool {
+    text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// The colours a tab can have (the UI maps them to the theme's palette).
@@ -279,6 +287,11 @@ impl Config {
                 && !TAB_COLORS.contains(&color.as_str())
             {
                 return Err(format!("profile \"{}\" tab_color \"{color}\" is not one of {}", profile.name, TAB_COLORS.join(", ")));
+            }
+            if let Some(background) = &profile.background
+                && !is_hex_color(background)
+            {
+                return Err(format!("profile \"{}\" background \"{background}\" is not a colour like \"#1e1e2e\"", profile.name));
             }
             if profile.icon.as_ref().is_some_and(|icon| icon.chars().count() > 4) {
                 return Err(format!("profile \"{}\" icon is longer than 4 characters", profile.name));
@@ -761,6 +774,9 @@ panes = [
         assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\nicon = \"abcdef\"").unwrap_err().contains("icon"));
         let ok = Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\ntab_color = \"teal\"\nicon = \"🐳\"").unwrap();
         assert_eq!(ok.profiles[0].tab_color.as_deref(), Some("teal"));
+        assert!(Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\nbackground = \"navy\"").unwrap_err().contains("background"));
+        let dark = Config::parse("[[profiles]]\nname = \"x\"\ncommand = \"ssh x\"\nbackground = \"#1E1E2e\"").unwrap();
+        assert_eq!(dark.profiles[0].background.as_deref(), Some("#1E1E2e"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\npanes = [{}, {}]").unwrap_err().contains("needs split"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\n[[layouts]]\nname = \"x\"").unwrap_err().contains("named"));
         assert!(Config::parse("[[layouts]]\nname = \"x\"\nsplit = \"diagonal\"").is_err());

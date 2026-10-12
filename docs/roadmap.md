@@ -68,7 +68,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ⬜ |
 | 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ✅ `background_effect` = none / acrylic / mica |
 | 27 | **A second console on its own hotkey** (scratch console, or docked bottom/side). | M | ⬜ |
-| 32 | **A background colour per shell**: today every pane sits on the console's one background (the global theme at `opacity`), so a profile's `theme` changes text colours only. Needs the console to stop painting behind the panes (each pane paints its own, dividers and the tab bar keep the console's), because two translucent layers compound. See foundation.md §22. | M | ⬜ |
+| 32 | **A background colour per shell**: today every pane sits on the console's one background (the global theme at `opacity`), so a profile's `theme` changes text colours only. Needs the console to stop painting behind the panes (each pane paints its own, dividers and the tab bar keep the console's), because two translucent layers compound. See foundation.md §22. | M | ✅ `[[profiles]] background` (or a profile `theme`); the console paints around the terminal area, panes paint their own; foundation.md §24 |
 | 28 | **Run a tab as administrator**. | L | ✅ through Windows' sudo set to Inline; otherwise an elevated window. Elevation itself untested here (sudo is off on the dev machine) |
 
 ### Robustness and release

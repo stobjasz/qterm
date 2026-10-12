@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
@@ -883,6 +883,40 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [keymap]);
 
+  // The console paints its background around the terminal area, not under it: each
+  // pane paints its own there (its shell's colour, or the theme's), and two
+  // translucent layers would stack. The terminal area is cut out of the console's
+  // background (App.css .console::before), so it is measured as the layout changes.
+  const consoleRef = useRef<HTMLDivElement>(null);
+  const panelsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const consoleEl = consoleRef.current;
+    const panels = panelsRef.current;
+    if (!consoleEl || !panels) return;
+    const measure = () => {
+      const outer = consoleEl.getBoundingClientRect();
+      const inner = panels.getBoundingClientRect();
+      consoleEl.style.setProperty("--hole-x", `${inner.left - outer.left}px`);
+      consoleEl.style.setProperty("--hole-y", `${inner.top - outer.top}px`);
+      consoleEl.style.setProperty("--hole-w", `${inner.width}px`);
+      consoleEl.style.setProperty("--hole-h", `${inner.height}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(consoleEl);
+    observer.observe(panels);
+    return () => observer.disconnect();
+  }, []);
+  /** A pane's own background: its profile's `background`, else its profile theme's. */
+  const paneBackground = useCallback(
+    (pane: Pane) => {
+      const profile = profiles?.find((p) => p.id === pane.profileId);
+      const color = profile?.background ?? (profile?.theme ? THEMES[profile.theme]?.background : undefined);
+      return color ? withAlpha(color, config?.opacity ?? DEFAULT_OPACITY) : undefined;
+    },
+    [profiles, config?.opacity],
+  );
+
   const closeSearch = () => {
     if (search) registry.clearSearch(search.pane);
     setSearch(undefined);
@@ -890,6 +924,7 @@ export default function App() {
 
   return (
     <div
+      ref={consoleRef}
       className={`console${shown ? " shown" : ""}${theme.light ? " light" : ""}`}
       style={
         {
@@ -901,7 +936,7 @@ export default function App() {
         } as CSSProperties
       }
     >
-      <div className="tab-panels">
+      <div className="tab-panels" ref={panelsRef}>
         {workspace.tabs.map((tab) => (
           <div key={tab.id} className="tab-panel" role="tabpanel" hidden={tab.id !== workspace.activeTab}>
             <LayoutView
@@ -913,6 +948,7 @@ export default function App() {
               broadcast={tab.broadcast}
               registry={registry}
               spec={paneSpec}
+              background={paneBackground}
               onFocusPane={(paneId) => setWorkspace((ws) => focusPane(ws, paneId))}
               onResize={(path, index, delta) => setWorkspace((ws) => resizeDivider(ws, tab.id, path, index, delta))}
             />

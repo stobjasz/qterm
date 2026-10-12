@@ -53,6 +53,8 @@ pub struct Profile {
     pub tab_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
 }
 
 /// Shell integration for PowerShell: wraps whatever prompt the user's profile set up
@@ -100,6 +102,7 @@ impl Profile {
             font_size: None,
             tab_color: None,
             icon: None,
+            background: None,
         }
     }
 
@@ -130,6 +133,7 @@ impl Profile {
             font_size: def.font_size,
             tab_color: def.tab_color.clone(),
             icon: def.icon.clone(),
+            background: def.background.clone(),
         }
     }
 
@@ -445,6 +449,7 @@ mod tests {
             font_size: None,
             tab_color: None,
             icon: None,
+            background: None,
         };
         let profile = Profile::custom(&def);
         assert_eq!(profile.id, "custom:API");
@@ -471,6 +476,7 @@ mod tests {
             font_size: Some(13.0),
             tab_color: Some("green".into()),
             icon: None,
+            background: None,
         };
         let extra = CustomProfile { id: None, name: "Box".into(), command: "ssh box".into(), theme: None, font_size: None, ..restyle.clone() };
         let all = merge(&detected, &[restyle, extra]);
