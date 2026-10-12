@@ -53,9 +53,12 @@ When Claude Code is waiting for you, the tray tooltip says in how many panes.
 - **Background effect** (Settings → Appearance): **Acrylic** blurs what's behind the
   console like frosted glass, **Mica** tints it with your wallpaper's colours. Lower the
   opacity to see more of it.
+- **A background per pane:** Shift+right-click a pane (or "Pane background…" in the
+  command palette) and pick a tint or any colour; only that pane changes, and it keeps
+  the colour across restarts. **Reset** returns it to its shell's background.
 - **A background per shell:** give a shell its own `background` or `theme` in the
-  settings file (see Profiles below) and its panes use that colour, at the same
-  opacity as the rest of the console.
+  settings file (see Profiles below) and its panes use that colour, unless a pane has
+  its own. Both are drawn at the same opacity as the rest of the console.
 - **Hide when another window is clicked:** off by default. Turn it on if you want the
   console to get out of the way by itself.
 - **Closing the last tab** hides the console; the next time it opens with a fresh tab.
@@ -347,6 +350,7 @@ All of these can be changed in Settings → Keyboard shortcuts.
 | Find in the pane | Ctrl+Shift+F |
 | Search all panes | Alt+Shift+F |
 | Previous / next command | Ctrl+↑ / Ctrl+↓ |
+| Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
 | Swap panes, clear pane history, copy last command's output | (palette; no shortcut by default) |
 
 Ctrl+Shift+1…9 and Ctrl+Alt+1…9 are fixed. On keyboards where Ctrl+Alt (AltGr) types

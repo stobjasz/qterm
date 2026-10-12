@@ -875,3 +875,15 @@ its background. The panes of that shell are painted in it, at the console's `opa
 - Visual check: a screenshot with transparency kept read alpha 209 (= 0.82) on both
   panes, the divider between them and the console edge. Two stacked layers would read
   about 247.
+
+**Per pane (added the same day).** A pane can have its own background chosen:
+- Shift+right-click on it (plain right-click stays copy/paste), or "Pane background…" in
+  the palette (bindable as `pane_background`).
+- Eight dark tints, Default, a custom colour box and Reset.
+- Precedence: the pane's own colour, then its shell's `background` or theme, then the
+  console's.
+- Saved with the tabs (`background` per pane, `#rrggbb` only); a new split starts with
+  the default.
+- E2E R7 (`pane-background-picker.spec.ts`): navy on the right pane only, still there
+  after a restart. Both deliberate breaks (colour ignored, colour not saved) were
+  caught.

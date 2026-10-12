@@ -31,6 +31,7 @@ unit tests can't reproduce. One spec per risk.
 | R4 | A long command that fails in a tab you aren't looking at marks that tab. | `long-command-alert.spec.ts` |
 | R5 | A setting saved in the Settings panel reaches config.toml and applies to open terminals. | `settings.spec.ts` |
 | R6 | A shell with its own background shows it in its panes, at the console's opacity; others keep the theme's. | `pane-background.spec.ts` |
+| R7 | A background chosen for one pane colours that pane only and survives a restart. | `pane-background-picker.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

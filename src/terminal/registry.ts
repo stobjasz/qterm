@@ -61,6 +61,8 @@ export interface RegistryEvents {
   /** First output since the pane went into the background (see setBackground). */
   onActivity(paneId: PaneId): void;
   onBell(paneId: PaneId): void;
+  /** Shift+right-click on the pane, at page position (x, y). */
+  onPaneMenu(paneId: PaneId, x: number, y: number): void;
   /** A command the user ran ended (shell integration marks). */
   onCommandFinished(paneId: PaneId, finished: FinishedCommand): void;
 }
@@ -667,6 +669,12 @@ export class TerminalRegistry {
     const { term } = entry;
     // Like Windows Terminal: right-click copies the selection, or pastes without one.
     entry.wrapper.addEventListener("contextmenu", (e) => {
+      // Shift+right-click: the pane's own menu (its background) instead.
+      if (e.shiftKey) {
+        e.preventDefault();
+        this.events.onPaneMenu(paneId, e.clientX, e.clientY);
+        return;
+      }
       if (!this.behavior.rightClickPaste) return;
       e.preventDefault();
       if (this.copy(paneId)) term.clearSelection();

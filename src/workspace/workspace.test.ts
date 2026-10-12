@@ -17,6 +17,7 @@ import {
   saveWorkspace,
   setPaneCwd,
   setTabStyle,
+  setPaneBackground,
   resizeDivider,
   resizeFocused,
   setPaneTitle,
@@ -345,5 +346,26 @@ describe("tab style and Claude sessions across restarts", () => {
     expect(restoreWorkspace(saveWorkspace(base()), profiles)!.panes.p1.claudeSession).toBeUndefined();
     const evil = saveWorkspace(base(), new Map([["p1", "x; rm -rf /"]]));
     expect(restoreWorkspace(evil, profiles)!.panes.p1.claudeSession).toBeUndefined();
+  });
+});
+
+describe("a background for one pane", () => {
+  const profiles = [{ id: "pwsh", name: "PowerShell" }];
+  const twoPanes = () => splitPane(openTab(emptyWorkspace(), { tab: "t1", pane: "left" }, profiles[0]), "left", "row", "right", profiles[0]);
+
+  it("is set on that pane only, kept across a restart, and cleared again", () => {
+    let ws = setPaneBackground(twoPanes(), "right", "#1A2B3C");
+    expect(ws.panes.right.background).toBe("#1a2b3c");
+    expect(ws.panes.left.background).toBeUndefined();
+    expect(restoreWorkspace(saveWorkspace(ws), profiles)!.panes.right.background).toBe("#1a2b3c");
+    ws = setPaneBackground(ws, "right", null);
+    expect(ws.panes.right.background).toBeUndefined();
+  });
+
+  it("only takes colours like #rrggbb", () => {
+    const ws = twoPanes();
+    expect(setPaneBackground(ws, "right", "red")).toBe(ws);
+    const text = saveWorkspace(ws).replace('"profileId":"pwsh"', '"profileId":"pwsh","background":"url(x)"');
+    expect(Object.values(restoreWorkspace(text, profiles)!.panes).every((p) => p.background === undefined)).toBe(true);
   });
 });

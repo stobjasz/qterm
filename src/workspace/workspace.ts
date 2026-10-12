@@ -31,6 +31,13 @@ export interface Pane {
   elevated?: boolean;
   /** Claude Code session that ran here before the restart (see saveWorkspace). */
   claudeSession?: string;
+  /** Chosen for this pane ("#rrggbb"); wins over its shell's background. */
+  background?: string;
+}
+
+/** A pane background colour as stored: "#rrggbb". */
+export function isPaneColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
 }
 
 /** Colours a tab can be marked with (right-click a tab). */
@@ -257,6 +264,16 @@ export function moveTab(ws: Workspace, tabId: TabId, toIndex: number): Workspace
   return { ...ws, tabs };
 }
 
+/** Sets (or, with null, clears) the background chosen for one pane. */
+export function setPaneBackground(ws: Workspace, paneId: PaneId, color: string | null): Workspace {
+  const pane = ws.panes[paneId];
+  if (!pane || (color !== null && !isPaneColor(color))) return ws;
+  const next: Pane = { ...pane };
+  if (color) next.background = color.toLowerCase();
+  else delete next.background;
+  return { ...ws, panes: { ...ws.panes, [paneId]: next } };
+}
+
 export function setPaneCwd(ws: Workspace, paneId: PaneId, cwd: string): Workspace {
   const pane = ws.panes[paneId];
   if (!pane || pane.cwd === cwd) return ws;
@@ -297,7 +314,7 @@ interface SavedSession {
   version: 1;
   activeTab?: TabId;
   tabs: { id: TabId; title?: string; color?: TabColor; icon?: string; root: LayoutNode; focusedPane: PaneId }[];
-  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string }>;
+  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; background?: string }>;
 }
 
 /**
@@ -311,7 +328,7 @@ export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string>
     activeTab: ws.activeTab,
     tabs: ws.tabs.map(({ id, title, color, icon, root, focusedPane }) => ({ id, title, color, icon, root, focusedPane })),
     panes: Object.fromEntries(
-      Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id) }]),
+      Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), background: p.background }]),
     ),
   };
   return JSON.stringify(saved);
@@ -344,7 +361,15 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
       const cwd = typeof savedPane.cwd === "string" ? savedPane.cwd : undefined;
       // Typed into a shell later, so only something shaped like a session id.
       const claudeSession = typeof savedPane.claude === "string" && /^[\w-]{1,64}$/.test(savedPane.claude) ? savedPane.claude : undefined;
-      panes[id] = { id, profileId: profile.id, profileName: profile.name, title: "", cwd, ...(claudeSession ? { claudeSession } : {}) };
+      panes[id] = {
+        id,
+        profileId: profile.id,
+        profileName: profile.name,
+        title: "",
+        cwd,
+        ...(claudeSession ? { claudeSession } : {}),
+        ...(isPaneColor(savedPane.background) ? { background: savedPane.background } : {}),
+      };
     }
     const focusedPane = ids.includes(raw.focusedPane) ? raw.focusedPane : ids[0];
     tabs.push({

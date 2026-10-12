@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { TAB_COLORS, type TabColor } from "../workspace/workspace";
+import { useFitInViewport } from "./useFitInViewport";
 
 /** The palette tab colours map to (One Dark's, readable on every theme). */
 export const TAB_COLOR_VALUES: Record<TabColor, string> = {
@@ -30,18 +31,7 @@ interface Props {
 export function TabStyleMenu({ x, y, color, icon, onChange, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(icon ?? "");
-  // Opens below and right of the pointer, flipped up / left where it wouldn't fit
-  // (the tab bar sits at the console's bottom edge).
-  const [position, setPosition] = useState({ left: x, top: y });
-  useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    const margin = 4;
-    setPosition({
-      left: x + box.width + margin > window.innerWidth ? Math.max(margin, x - box.width) : x,
-      top: y + box.height + margin > window.innerHeight ? Math.max(margin, y - box.height) : y,
-    });
-  }, [x, y]);
+  const position = useFitInViewport(ref, x, y);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();

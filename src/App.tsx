@@ -53,6 +53,7 @@ import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
+import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
 import { SearchAllPanel } from "./terminal/SearchAllPanel";
 import { SearchBar } from "./terminal/SearchBar";
 import type { SearchHit, SearchOptions } from "./terminal/searchAll";
@@ -74,6 +75,7 @@ import {
   paneIds,
   renameTab,
   setTabStyle,
+  setPaneBackground,
   TAB_COLORS,
   resizeDivider,
   resizeFocused,
@@ -127,6 +129,7 @@ export default function App() {
   const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchAllOpen, setSearchAllOpen] = useState(false);
+  const [paneMenu, setPaneMenu] = useState<{ paneId: PaneId; x: number; y: number }>();
   /** Panes with Claude Code running: working (recent output) or idle. */
   const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
   const [claudeUsages, setClaudeUsages] = useState<ReadonlyMap<PaneId, ClaudeUsage>>(new Map());
@@ -154,6 +157,7 @@ export default function App() {
         onActivity: (...args) => handlers.current.onActivity(...args),
         onBell: (...args) => handlers.current.onBell(...args),
         onCommandFinished: (...args) => handlers.current.onCommandFinished(...args),
+        onPaneMenu: (...args) => handlers.current.onPaneMenu(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -421,6 +425,12 @@ export default function App() {
         case "searchAll":
           setSearchAllOpen((open) => !open);
           break;
+        case "paneBackground": {
+          // From the keyboard or the palette: open it over the middle of the pane.
+          const box = document.querySelector(`[data-pane-id="${paneId}"]`)?.getBoundingClientRect();
+          if (box) setPaneMenu({ paneId, x: box.left + box.width / 2, y: box.top + box.height / 3 });
+          break;
+        }
       }
     },
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
@@ -439,6 +449,7 @@ export default function App() {
       if (shownRef.current && activeTab(workspaceRef.current)?.focusedPane === paneId) return;
       setBells((current) => new Set(current).add(paneId));
     },
+    onPaneMenu: (paneId, x, y) => setPaneMenu({ paneId, x, y }),
     onCommandFinished: (paneId, finished) => {
       const seconds = configRef.current?.longCommandAlert ?? 0;
       if (!seconds || finished.durationMs < seconds * 1000) return;
@@ -907,11 +918,11 @@ export default function App() {
     observer.observe(panels);
     return () => observer.disconnect();
   }, []);
-  /** A pane's own background: its profile's `background`, else its profile theme's. */
+  /** A pane's own background: chosen for it, else its profile's `background`, else its profile theme's. */
   const paneBackground = useCallback(
     (pane: Pane) => {
       const profile = profiles?.find((p) => p.id === pane.profileId);
-      const color = profile?.background ?? (profile?.theme ? THEMES[profile.theme]?.background : undefined);
+      const color = pane.background ?? profile?.background ?? (profile?.theme ? THEMES[profile.theme]?.background : undefined);
       return color ? withAlpha(color, config?.opacity ?? DEFAULT_OPACITY) : undefined;
     },
     [profiles, config?.opacity],
@@ -962,6 +973,16 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+      {paneMenu && workspace.panes[paneMenu.paneId] && (
+        <PaneBackgroundMenu
+          key={paneMenu.paneId}
+          x={paneMenu.x}
+          y={paneMenu.y}
+          color={workspace.panes[paneMenu.paneId].background}
+          onChange={(color) => setWorkspace((ws) => setPaneBackground(ws, paneMenu.paneId, color))}
+          onClose={() => setPaneMenu(undefined)}
+        />
+      )}
       {searchAllOpen && (
         <SearchAllPanel search={searchAllPanes} paneLabel={paneLabel} onPick={revealHit} onClose={() => setSearchAllOpen(false)} />
       )}

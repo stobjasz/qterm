@@ -316,6 +316,22 @@ body,
   font: inherit;
 }
 
+.pane-color-custom {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+}
+
+.pane-color-custom input {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+}
+
 .tab-style-row button {
   padding: 2px 8px;
   border: 1px solid var(--line);
