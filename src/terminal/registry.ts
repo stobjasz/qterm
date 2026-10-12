@@ -26,9 +26,10 @@ import {
 } from "../ipc";
 import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
-import { hasContent } from "./content";
+import { hasContent, plainLines } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
 import { parseMark } from "./marks";
+import { findInLines, SEARCH_ALL_LIMIT, type SearchHit, type SearchOptions } from "./searchAll";
 import { findFileLinks } from "./links";
 import { terminalOptions } from "./theme";
 import { THEMES, withAlpha, xtermTheme, type Theme } from "./themes";
@@ -147,6 +148,9 @@ interface Entry {
   commands: number;
   /** Prompts and commands, oldest first (needs shell integration). */
   marks: CommandMark[];
+  /** Settles once restored output is on screen (or right away without any). */
+  ready: Promise<void>;
+  markReady(): void;
 }
 
 const SEARCH_DECORATIONS = (theme: Theme): ISearchOptions["decorations"] => ({
@@ -301,6 +305,37 @@ export class TerminalRegistry {
     entry.spec.restored = undefined;
   }
 
+  /**
+   * Matches in every pane's output, pane by pane. A restored pane whose tab hasn't
+   * been shown yet has no shell or buffer, so its saved output is searched instead.
+   */
+  searchAll(query: string, options: SearchOptions): SearchHit[] {
+    const hits: SearchHit[] = [];
+    for (const [paneId, entry] of this.entries) {
+      const lines = entry.started ? bufferLines(entry.term) : entry.spec.restored ? plainLines(entry.spec.restored) : [];
+      const found = findInLines(lines, query, options);
+      for (let index = 0; index < found.length && hits.length < SEARCH_ALL_LIMIT; index++) {
+        hits.push({ paneId, index, ...found[index], text: lines[found[index].line] });
+      }
+      if (hits.length >= SEARCH_ALL_LIMIT) break;
+    }
+    return hits;
+  }
+
+  /** Scrolls to a pane's `index`-th match and selects it, once the pane's output is there. */
+  async revealMatch(paneId: PaneId, index: number, query: string, options: SearchOptions): Promise<void> {
+    const entry = this.entries.get(paneId);
+    if (!entry) return;
+    await entry.ready;
+    const found = findInLines(bufferLines(entry.term), query, options);
+    const match = found[Math.min(index, found.length - 1)];
+    if (!match) return;
+    const { term } = entry;
+    term.scrollToLine(Math.max(0, match.line - Math.floor(term.rows / 3)));
+    term.select(match.col, match.line, match.length);
+    term.focus();
+  }
+
   /** Scrolls to the previous (-1) or next (1) command's prompt; past the last one, to the bottom. */
   scrollToCommand(paneId: PaneId, direction: -1 | 1): void {
     const entry = this.entries.get(paneId);
@@ -396,6 +431,8 @@ export class TerminalRegistry {
   }
 
   private create(paneId: PaneId, spec: PaneSpec): Entry {
+    let markReady = () => {};
+    const ready = new Promise<void>((resolve) => (markReady = resolve));
     const wrapper = document.createElement("div");
     wrapper.className = "terminal-wrapper";
     const term = new Terminal({
@@ -424,6 +461,8 @@ export class TerminalRegistry {
       earlyInput: [],
       commands: 0,
       marks: [],
+      ready,
+      markReady,
     };
     this.entries.set(paneId, entry);
     return entry;
@@ -527,7 +566,10 @@ export class TerminalRegistry {
       });
     // Earlier output first: ConPTY asks where the cursor is and starts the shell there.
     (entry.spec.restored ? showRestored(term, entry.spec.restored) : Promise.resolve())
-      .then(() => ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput))
+      .then(() => {
+        entry.markReady();
+        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput);
+      })
       .then((id) => {
         // The pane may have been closed while the shell was starting.
         if (this.entries.get(paneId) !== entry) return void ptyKill(id);
@@ -728,4 +770,12 @@ function disposeMark(mark: CommandMark): void {
   mark.prompt.dispose();
   mark.input?.dispose();
   mark.end?.dispose();
+}
+
+/** The text of every line of the pane's normal buffer (scrollback included). */
+function bufferLines(term: Terminal): string[] {
+  const buffer = term.buffer.normal;
+  const lines: string[] = [];
+  for (let y = 0; y < buffer.length; y++) lines.push(buffer.getLine(y)?.translateToString(true) ?? "");
+  return lines;
 }

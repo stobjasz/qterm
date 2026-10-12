@@ -46,7 +46,9 @@ import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
+import { SearchAllPanel } from "./terminal/SearchAllPanel";
 import { SearchBar } from "./terminal/SearchBar";
+import type { SearchHit, SearchOptions } from "./terminal/searchAll";
 import { THEMES, themeOrDefault, withAlpha } from "./terminal/themes";
 import { buildLayout, findProfile, layoutFromTab, type LayoutDef, type LayoutPane } from "./workspace/layouts";
 import {
@@ -111,6 +113,7 @@ export default function App() {
   const [activity, setActivity] = useState<ReadonlySet<PaneId>>(new Set());
   const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchAllOpen, setSearchAllOpen] = useState(false);
   /** Panes with Claude Code running: working (recent output) or idle. */
   const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
   const config = settings?.config;
@@ -333,6 +336,9 @@ export default function App() {
         case "copyLastOutput":
           registry.copyLastOutput(paneId);
           break;
+        case "searchAll":
+          setSearchAllOpen((open) => !open);
+          break;
       }
     },
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
@@ -412,6 +418,22 @@ export default function App() {
   useEffect(() => {
     if (shown && focusedPane && attention.has(focusedPane)) setAttention((current) => without(current, focusedPane));
   }, [shown, focusedPane, attention]);
+  // --- search across all panes -------------------------------------------------------
+  const searchAllPanes = useCallback((query: string, options: SearchOptions) => registry.searchAll(query, options), [registry]);
+  /** "2 · PowerShell": the tab's position and title. */
+  const paneLabel = useCallback((paneId: PaneId) => {
+    const ws = workspaceRef.current;
+    const index = ws.tabs.findIndex((tab) => paneIds(tab.root).includes(paneId));
+    return index < 0 ? "?" : `${index + 1} · ${tabTitle(ws, ws.tabs[index])}`;
+  }, []);
+  const revealHit = useCallback(
+    (hit: SearchHit, query: string, options: SearchOptions) => {
+      setWorkspace((ws) => focusPane(ws, hit.paneId));
+      void registry.revealMatch(hit.paneId, hit.index, query, options);
+    },
+    [registry],
+  );
+
   // --- command palette: everything you can do, by name ------------------------------
   const paletteItems = useMemo((): PaletteItem[] => {
     const chordFor = (name: string) => {
@@ -752,6 +774,9 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+      {searchAllOpen && (
+        <SearchAllPanel search={searchAllPanes} paneLabel={paneLabel} onPick={revealHit} onClose={() => setSearchAllOpen(false)} />
+      )}
         {settingsOpen && settings && profiles && (
           <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} onClearHistory={clearAllHistory} />
         )}

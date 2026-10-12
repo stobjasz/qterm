@@ -21,7 +21,8 @@ export type Command =
   | { type: "commandPalette" }
   | { type: "clearHistory" }
   | { type: "scrollToCommand"; direction: -1 | 1 }
-  | { type: "copyLastOutput" };
+  | { type: "copyLastOutput" }
+  | { type: "searchAll" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -56,6 +57,7 @@ const ACTIONS = {
   prev_command: { command: { type: "scrollToCommand", direction: -1 }, chord: "ctrl+up" },
   next_command: { command: { type: "scrollToCommand", direction: 1 }, chord: "ctrl+down" },
   copy_last_output: { command: { type: "copyLastOutput" }, chord: "" },
+  search_all: { command: { type: "searchAll" }, chord: "alt+shift+f" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -91,6 +93,7 @@ const LABELS: Record<Action, string> = {
   prev_command: "Scroll to previous command",
   next_command: "Scroll to next command",
   copy_last_output: "Copy last command's output",
+  search_all: "Search all panes",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */
