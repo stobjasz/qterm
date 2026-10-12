@@ -353,6 +353,13 @@ export class TerminalRegistry {
     term.focus();
   }
 
+  /** A command typed at the latest prompt is still running (known with shell integration only). */
+  commandRunning(paneId: PaneId): boolean {
+    const marks = this.entries.get(paneId)?.marks ?? [];
+    const last = marks[marks.length - 1];
+    return Boolean(last && last.startedAt !== undefined && !last.end);
+  }
+
   /** Scrolls to the previous (-1) or next (1) command's prompt; past the last one, to the bottom. */
   scrollToCommand(paneId: PaneId, direction: -1 | 1): void {
     const entry = this.entries.get(paneId);

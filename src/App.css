@@ -716,6 +716,26 @@ body,
   min-width: 0;
 }
 
+/* Resume in the current tab instead of a new one. */
+.claude-session .claude-here {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--tab-fg);
+  font-size: 11px;
+  opacity: 0;
+}
+
+.claude-session:hover .claude-here,
+.claude-session .claude-here:focus-visible {
+  opacity: 1;
+}
+
+.claude-session .claude-here:hover {
+  color: var(--tab-active-fg);
+  background: var(--hover-bg);
+}
+
 .claude-title,
 .claude-meta {
   overflow: hidden;

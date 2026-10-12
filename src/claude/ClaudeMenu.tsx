@@ -19,6 +19,8 @@ export interface RunningClaude {
 export interface ClaudeMenuProps {
   sessions: ClaudeSession[];
   onResume(session: ClaudeSession): void;
+  /** Resumes it in the focused pane instead of a new tab. */
+  onResumeHere(session: ClaudeSession): void;
   onForget(ids: string[]): void;
   /** Starts a fresh Claude Code session in this folder. */
   onNewSession(cwd: string): void;
@@ -37,7 +39,7 @@ interface Row extends GroupableSession {
 }
 
 /** The ✳ tab-bar button: remembered Claude Code sessions, grouped by folder. */
-export function ClaudeMenu({ sessions, onResume, onForget, onNewSession, running, onFocusPane }: Props) {
+export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSession, running, onFocusPane }: Props) {
   return (
     <Popup
       label="Claude sessions"
@@ -83,6 +85,10 @@ export function ClaudeMenu({ sessions, onResume, onForget, onNewSession, running
               close();
               onResume(session);
             }}
+            onResumeHere={(session) => {
+              close();
+              onResumeHere(session);
+            }}
             onForget={onForget}
             onNewSession={(cwd) => {
               close();
@@ -95,7 +101,13 @@ export function ClaudeMenu({ sessions, onResume, onForget, onNewSession, running
   );
 }
 
-function SessionList({ sessions, onResume, onForget, onNewSession }: Pick<Props, "sessions" | "onResume" | "onForget" | "onNewSession">) {
+function SessionList({
+  sessions,
+  onResume,
+  onResumeHere,
+  onForget,
+  onNewSession,
+}: Pick<Props, "sessions" | "onResume" | "onResumeHere" | "onForget" | "onNewSession">) {
   const [view, setView] = useState<"remembered" | "all">(sessions.length > 0 ? "remembered" : "all");
   const [all, setAll] = useState<TranscriptSummary[]>();
   const [filter, setFilter] = useState("");
@@ -120,7 +132,8 @@ function SessionList({ sessions, onResume, onForget, onNewSession }: Pick<Props,
     }));
   }, [view, sessions, all]);
   const groups = useMemo(() => groupSessions(rows, filter), [rows, filter]);
-  const resume = (row: Row) => onResume({ id: row.id, cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
+  const asSession = (row: Row): ClaudeSession => ({ id: row.id, cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
+  const resume = (row: Row) => onResume(asSession(row));
 
   const toggle = (key: string) =>
     setCollapsed((current) => {
@@ -216,6 +229,14 @@ function SessionList({ sessions, onResume, onForget, onNewSession }: Pick<Props,
                       <span className="claude-meta">
                         {session.meta} · {session.id.slice(0, 8)}
                       </span>
+                    </button>
+                    <button
+                      className="claude-here"
+                      title="Resume in the current tab (goes to its folder first)"
+                      aria-label={`Resume ${session.title ?? session.id} in the current tab`}
+                      onClick={() => onResumeHere(asSession(session))}
+                    >
+                      here
                     </button>
                     {session.remembered && view === "remembered" && (
                       <button

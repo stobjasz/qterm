@@ -50,6 +50,7 @@ import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
+import { resumeHereCommand } from "./claude/resume";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { SearchAllPanel } from "./terminal/SearchAllPanel";
@@ -278,6 +279,34 @@ export default function App() {
 
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
+  const claudeStatusRef = useRef<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
+  /**
+   * Resumes a session in the focused pane: its folder, then `claude --resume`. A new
+   * tab instead when that pane is busy (Claude or another command running) or its
+   * shell can't reach the folder.
+   */
+  const resumeClaudeHere = useCallback(
+    (session: ClaudeSession) => {
+      const ws = workspaceRef.current;
+      const paneId = activeTab(ws)?.focusedPane;
+      const pane = paneId ? ws.panes[paneId] : undefined;
+      const kind = profilesRef.current?.find((p) => p.id === pane?.profileId)?.kind ?? "other";
+      const command = resumeHereCommand(session.id, session.cwd, kind);
+      const busy = paneId && (claudeStatusRef.current.has(paneId) || registry.commandRunning(paneId));
+      if (!paneId || !command || busy) {
+        setNotice(
+          busy
+            ? "That tab is busy (Claude Code or another command is running there), so the session opened in a new tab."
+            : "That tab's shell can't open this session's folder, so it opened in a new tab.",
+        );
+        resumeClaude(session);
+        return;
+      }
+      registry.focus(paneId);
+      registry.typeSnippet(paneId, command, true);
+    },
+    [registry, resumeClaude],
+  );
   /** A fresh Claude Code session in `cwd`, in a new tab with the default shell. */
   const newClaudeSession = useCallback(
     (cwd: string) => {
@@ -546,16 +575,18 @@ export default function App() {
           if (pane) registry.typeSnippet(pane, snippet.command, snippet.run);
         },
       })),
-      ...(config?.claudeSessions ? claudeSessions : []).map((session) => ({
-        id: `claude:${session.id}`,
-        group: "Resume Claude",
-        label: `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`,
-        run: () => resumeClaude(session),
-      })),
+      ...(config?.claudeSessions ? claudeSessions : []).flatMap((session) => {
+        const label = `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`;
+        return [
+          { id: `claude:${session.id}`, group: "Resume Claude", label, run: () => resumeClaude(session) },
+          { id: `claude-here:${session.id}`, group: "Resume Claude here", label, run: () => resumeClaudeHere(session) },
+        ];
+      }),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere]);
 
+  claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
   // in the last moments (its spinner animates while it works).
   const claudeFeatures = Boolean(config?.claudeSessions || config?.claudeAlerts);
@@ -895,6 +926,7 @@ export default function App() {
             ? {
                 sessions: claudeSessions,
                 onResume: resumeClaude,
+                onResumeHere: resumeClaudeHere,
                 onForget: (ids) => void forgetClaudeSessions(ids),
                 onNewSession: newClaudeSession,
                 running: runningClaude,

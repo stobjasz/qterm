@@ -28,6 +28,11 @@ export function shellPath(path: string, shell: ShellKind): string {
   return path;
 }
 
+/** A path as one word for this shell, quoted only when it needs to be. */
+export function shellQuote(path: string, shell: ShellKind): string {
+  return quote(path, shell);
+}
+
 function quote(path: string, shell: ShellKind): string {
   if (SAFE.test(path)) return path;
   switch (shell) {
