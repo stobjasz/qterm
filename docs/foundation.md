@@ -766,3 +766,30 @@ Notes:
 - **Vite's watcher** sometimes missed files rewritten by scripts during development; a
   touch (or restart) fixed it. Comments are stripped from served modules, so checking
   served code for a comment proves nothing.
+
+## 22. Claude here and on start, SSH, tab colours, backdrop (2026-10-12)
+
+| What | How | Verified |
+|---|---|---|
+| Resume here | ✳ menu "here" / palette "Resume Claude here": the focused pane gets `cd <folder>; claude --resume <id>` spelled for its shell (`claude/resume.ts`). A new tab plus a notice when Claude or another command runs there (`commandRunning` from the command marks) or the shell can't reach the folder (WSL vs Windows, custom programs). | Unit tests per shell. Live: idle pane typed in place; busy pane (stand-in claude running) → new tab and the notice. |
+| #15 Claude on start | The saved tabs carry pane → session (from the usage poll: the SessionStart mapping, else the folder's newest transcript). With `claude_restore` (off by default) restored panes get `claude --resume <id>` as startup input. Ids must look like ids. | Unit tests (round trip, rejecting `x; rm -rf /`). Live: a saved session was typed on restore; a pane running the stand-in was saved with its session id. |
+| #22 SSH | `ssh_profiles` (on): `Host` names from `~/.ssh/config` → "SSH <host>" profiles (`ssh:<host>`, Windows OpenSSH or ssh on PATH), re-read on every listing. Patterns, `Include` and `Match` are skipped. | Unit test. Live: the dev machine's config has only a wildcard Host, so none, as intended. |
+| #24 Tab colours, icons | Right-click a tab: 8 colours, quick icons or any short text, Reset; saved with the tabs. `[[profiles]] tab_color / icon` give defaults (validated). The menu flips up/left to fit (the tab bar is at the bottom). | Unit tests. Live: profile teal + 🧪 shown; right-click purple + 🚀 applied and saved. |
+| #26 Backdrop | `background_effect` none / acrylic / mica via Tauri window effects, cleared before each change (DWM otherwise keeps the old backdrop). No "blur": Tauri documents it for Windows 11 22H1 and older. | DWM `SYSTEMBACKDROP_TYPE` read from the window: 1 none, 3 acrylic, 2 mica, back to 1. |
+
+**Testing Claude features without Claude:** a test profile puts a renamed `ping.exe`
+first on PATH as `claude.exe`. It is detected as Claude and typed `claude --resume`
+commands run it harmlessly, so the real Claude Code is never started.
+
+**A background colour per shell (research, roadmap #32).** Not possible today:
+- Every terminal is drawn on a transparent background (`xtermTheme` sets it to
+  `rgba(0,0,0,0)`), and `.console` paints one background for all of them: the global
+  theme's colour at `opacity`.
+- A profile's `theme` therefore changes text and ANSI colours, not the background.
+- Painting a second translucent colour on a pane doesn't work: layers compound. With
+  opacity 0.82, a pane layer over the console layer lets only 3% of the desktop through
+  instead of 18%.
+- The way to do it: the console stops painting behind the tab panels, each pane paints
+  its own background (its profile's theme, or a new `background` colour, at the same
+  opacity), and the gaps (dividers, the console's padding, the tab bar) keep the
+  console's.

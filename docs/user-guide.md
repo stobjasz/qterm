@@ -50,6 +50,10 @@ When Claude Code is waiting for you, the tray tooltip says in how many panes.
 - **Height:** drag the console's bottom edge. Double-click the edge for half the screen.
   The height is remembered.
 - **Width, monitor, transparency, animation:** in Settings → Console and Appearance.
+- **Background effect** (Settings → Appearance): **Acrylic** blurs what's behind the
+  console like frosted glass, **Mica** tints it with your wallpaper's colours. Lower the
+  opacity to see more of it. Each shell can't have its own background colour yet (a
+  shell's theme changes its text colours only).
 - **Hide when another window is clicked:** off by default. Turn it on if you want the
   console to get out of the way by itself.
 - **Closing the last tab** hides the console; the next time it opens with a fresh tab.
@@ -64,7 +68,9 @@ When Claude Code is waiting for you, the tray tooltip says in how many panes.
 - **Switch:** click a tab, Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+Alt+1…9.
 - **Rename:** double-click the tab title.
 - **Reorder:** drag a tab.
-- **Close:** the × on the tab, or Ctrl+Shift+W for the current pane.
+- **Close:** the × on the tab, a middle click on the tab, or Ctrl+Shift+W for the current pane.
+- **Colour and icon:** right-click a tab to give it one of eight colours and an icon
+  (an emoji or a few letters). A shell can bring its own, see Profiles below.
 
 **Split panes**
 
@@ -90,6 +96,7 @@ When Claude Code is waiting for you, the tray tooltip says in how many panes.
 | ✳ (pulsing) | Claude Code is waiting for you there. |
 | ✓ / ✗ | A long command finished there, successfully / with an error. |
 | ADMIN | A pane in the tab runs as administrator. |
+| Coloured edge, icon | The colour and icon you gave the tab, or its shell's. |
 
 Markers disappear when you look at the tab.
 
@@ -177,9 +184,17 @@ starts in a project folder, or one with its own colours:
 [[profiles]]
 name = "Build box"
 command = "ssh me@build-box"
-theme = "dracula"        # optional: its own look
+theme = "dracula"        # optional: its own text colours
 font_size = 13
+tab_color = "green"      # red, orange, yellow, green, teal, blue, purple, pink
+icon = "🛠"
 ```
+
+To restyle a detected shell, give the profile its `id` (`pwsh`, `cmd`, `git-bash`,
+`wsl:<distro>`, `ssh:<host>`).
+
+**SSH hosts:** every `Host` in your `~/.ssh/config` shows up as a shell named
+"SSH <host>" (wildcard patterns don't). Switch this off in Settings → Terminal.
 
 ## Picking up where you left off
 
@@ -224,13 +239,21 @@ full its context is, e.g. **44%**. Hover for the model, context size, number of 
 and an estimated cost. The cost uses Anthropic's API prices; with a Claude subscription
 you aren't billed per token, so treat it as a measure of how much the session has done.
 
+**Back after a restart.** With **Resume Claude Code sessions on start** on (off by
+default), the Claude sessions that were running when qterm closed come back too: each
+restored pane gets `claude --resume <id>` typed for it. It needs "Reopen tabs and
+layout on start", and works best with the hook set up, which says exactly which session
+ran where.
+
 **The ✳ menu** in the tab bar:
 
 - **Running now:** the Claude sessions in your panes, with context and cost. Click one
   to go to its pane.
 - **Remembered:** with "Remember Claude Code sessions" on, every time a terminal prints
   `claude --resume <id>` (as Claude Code does when you quit it), qterm keeps that session
-  with its folder. Click it later to reopen it in a new tab, in the right folder.
+  with its folder. Click it later to reopen it in a new tab, in the right folder, or
+  click **here** on its row to reopen it in the tab you're in (the tab goes to the
+  session's folder first). If that tab is busy, a new tab is used instead.
 - **All on this PC:** every Claude Code session on this computer, grouped by folder,
   with a **+** per folder to start a new session there.
 
@@ -274,12 +297,14 @@ click **Save**; Esc or Cancel discards them. At the bottom:
 | | Start with Windows | off |
 | Appearance | Theme (nine built in) | qterm |
 | | Background opacity | 82% |
+| | Background effect: none / acrylic / mica | none |
 | | Font, font size | Cascadia Mono, 14 |
 | | Font ligatures | off |
 | Terminal | Shell for new tabs | first found (PowerShell 7 if installed) |
 | | Copy selected text automatically | off |
 | | Right-click copies, or pastes when nothing is selected | on |
 | | Show inline images | on |
+| | SSH hosts as shells | on |
 | | Reopen tabs and layout on start | on |
 | | Shell integration (folder tracking, command marks) | on |
 | | Notify when a long command finishes (seconds, 0 = off) | 30 |
@@ -291,6 +316,7 @@ click **Save**; Esc or Cancel discards them. At the bottom:
 | Administrator tabs | Windows sudo status and settings link | |
 | Claude Code | Remember Claude Code sessions | off |
 | | Alert me when Claude is waiting | on |
+| | Resume Claude Code sessions on start | off |
 | | Notification hook: set up / update / remove | |
 | Keyboard shortcuts | Every shortcut below; empty switches one off | |
 

@@ -45,7 +45,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 14 | **Alert when Claude finishes**: hook Claude Code's Stop event for an instant ✳ and notification when a reply ends and you're not looking at that pane. (Today's Notification hook fires only for permission prompts, rare in auto mode, and after 60 s idle.) | S | ⬜ |
-| 15 | **Bring Claude sessions back after a restart**: panes that were running Claude reopen with `claude --resume <id>` typed for you (opt-in). | M | ⬜ |
+| 15 | **Bring Claude sessions back after a restart**: panes that were running Claude reopen with `claude --resume <id>` typed for you (opt-in). | M | ✅ `claude_restore` (off by default); also "here" to resume a saved session in the current tab |
 | 16 | **"Ask Claude about this"**: select an error, then a palette action opens a pane in that folder with `claude "<selection>"`. | S | ⬜ |
 | 17 | **Context and cost per tab**: token use read from the session's transcript, shown in the tab tooltip and the ✳ menu. | M | ✅ context % on the tab, details in its tooltip, "Running now" in the ✳ menu; SessionStart hook maps panes to sessions |
 
@@ -57,17 +57,18 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 19 | **"Long command finished" notifications** for commands over N seconds while you're not looking (needs #18). | S | ✅ `long_command_alert` (default 30 s) |
 | 20 | **Snippets**: named commands in config (`[[snippets]]`), run from the palette into the current pane. | S | ✅ |
 | 21 | **Search across all panes**, restored output included. | M | ✅ Alt+Shift+F |
-| 22 | **SSH quick-connect**: profiles from `~/.ssh/config`. | S | ⬜ |
+| 22 | **SSH quick-connect**: profiles from `~/.ssh/config`. | S | ✅ `ssh_profiles` (on); concrete Host names only |
 | 23 | **Inline images (sixel) and font ligatures** (xterm.js add-ons). | S–M | ✅ sixel/iTerm/Kitty images (on), ligatures (off; needs e.g. Cascadia Code) |
-| 24 | **Tab colours and icons**, per tab or per profile. | S | ⬜ |
+| 24 | **Tab colours and icons**, per tab or per profile. | S | ✅ right-click a tab; `tab_color` / `icon` in [[profiles]] |
 
 ### The console window
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ⬜ |
-| 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ⬜ |
+| 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ✅ `background_effect` = none / acrylic / mica |
 | 27 | **A second console on its own hotkey** (scratch console, or docked bottom/side). | M | ⬜ |
+| 32 | **A background colour per shell**: today every pane sits on the console's one background (the global theme at `opacity`), so a profile's `theme` changes text colours only. Needs the console to stop painting behind the panes (each pane paints its own, dividers and the tab bar keep the console's), because two translucent layers compound. See foundation.md §22. | M | ⬜ |
 | 28 | **Run a tab as administrator**. | L | ✅ through Windows' sudo set to Inline; otherwise an elevated window. Elevation itself untested here (sudo is off on the dev machine) |
 
 ### Robustness and release
