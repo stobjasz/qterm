@@ -1,7 +1,6 @@
 # qterm
 
 [![CI](https://github.com/stobjasz/qterm/actions/workflows/ci.yml/badge.svg)](https://github.com/stobjasz/qterm/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/stobjasz/qterm)](https://github.com/stobjasz/qterm/releases/latest)
 
 A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slides a
 translucent console down from the top of the screen.
@@ -10,7 +9,12 @@ How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
 
 ## Download
 
-From the [latest release](https://github.com/stobjasz/qterm/releases/latest), either:
+**Latest release: [qterm 0.2.0](https://github.com/stobjasz/qterm/releases/tag/v0.2.0)**:
+[installer](https://github.com/stobjasz/qterm/releases/download/v0.2.0/qterm_0.2.0_x64-setup.exe) ·
+[portable exe](https://github.com/stobjasz/qterm/releases/download/v0.2.0/qterm-0.2.0-portable-x64.exe) ·
+[all releases](https://github.com/stobjasz/qterm/releases)
+
+Two ways to run it:
 
 - **`qterm_<version>_x64-setup.exe`**: installs for your user only (no administrator
   rights) into `%LOCALAPPDATA%\Programs\qterm`, with a Start menu entry and an

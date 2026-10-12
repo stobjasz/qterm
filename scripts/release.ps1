@@ -26,6 +26,7 @@ try {
         if (-not $regex.IsMatch($text)) { throw "no version found in $path" }
         [IO.File]::WriteAllText((Join-Path $repo $path), $regex.Replace($text, $replacement, 1))
     }
+    $previous = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
     Set-Version 'package.json' '^(  "version": )"[^"]+"' "`${1}`"$Version`""
     Set-Version 'src-tauri/tauri.conf.json' '^(  "version": )"[^"]+"' "`${1}`"$Version`""
     Set-Version 'src-tauri/Cargo.toml' '^(version = )"[^"]+"' "`${1}`"$Version`""
@@ -33,7 +34,13 @@ try {
     cargo update --manifest-path src-tauri/Cargo.toml --package qterm --offline --quiet
     if ($LASTEXITCODE) { throw 'cargo update failed' }
 
-    git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+    # The README's download links name the version.
+    $readme = Join-Path $repo 'README.md'
+    $text = [IO.File]::ReadAllText($readme)
+    $text = [regex]::Replace($text, '(?m)^.*releases/(tag|download)/.*$', { param($m) $m.Value.Replace($previous, $Version) })
+    [IO.File]::WriteAllText($readme, $text)
+
+    git add package.json README.md src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
     git commit -m "release: v$Version"
     git tag -a "v$Version" -m "qterm $Version"
     Write-Host ""
