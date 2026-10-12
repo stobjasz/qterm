@@ -15,7 +15,7 @@ import { chromium, expect, test as base, type Browser, type Locator, type Page }
 export const IDENTIFIER = "dev.qterm.e2e";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const EXE = path.join(ROOT, "src-tauri", "target", "e2e", "debug", "qterm.exe");
-const CDP_PORT = 9333;
+export const CDP_PORT = 9333;
 /** The app's own output (stdout and stderr), kept with the test results. */
 const APP_LOG = path.join(ROOT, "test-results", "qterm-app.log");
 const CONFIG_DIR = path.join(process.env.APPDATA ?? "", IDENTIFIER);
@@ -83,7 +83,10 @@ export class Qterm {
     const deadline = Date.now() + 60_000;
     while (!(await cdpReady())) {
       if (child.exitCode !== null) throw new Error(`qterm quit during start-up (exit code ${child.exitCode}); its output is in ${APP_LOG}`);
-      if (Date.now() > deadline) throw new Error(`qterm's WebView2 debugging port didn't open within a minute; its output is in ${APP_LOG}`);
+      if (Date.now() > deadline) {
+        fs.appendFileSync(APP_LOG, webviewProcesses());
+        throw new Error(`qterm's WebView2 debugging port didn't open within a minute; its output is in ${APP_LOG}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     log("debugging port open");
@@ -204,6 +207,20 @@ function settingsFile({ values = {}, extra = "" }: Settings): string {
 function wipeState(): void {
   fs.rmSync(CONFIG_DIR, { recursive: true, force: true });
   for (const dir of ["scrollback", "alerts"]) fs.rmSync(path.join(LOCAL_DIR, dir), { recursive: true, force: true });
+}
+
+/** The WebView2 processes running now and their arguments: did the port flag reach them? */
+function webviewProcesses(): string {
+  try {
+    const list = execFileSync(
+      "powershell",
+      ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | ForEach-Object { $_.ProcessId.ToString() + ' ' + $_.CommandLine }"],
+      { encoding: "utf8" },
+    );
+    return `\n--- WebView2 processes when the port didn't open:\n${list || "(none)"}\n`;
+  } catch (e) {
+    return `\n--- could not list WebView2 processes: ${e}\n`;
+  }
 }
 
 /** Startup steps, with QTERM_E2E_DEBUG=1. */

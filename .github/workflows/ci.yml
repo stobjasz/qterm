@@ -61,6 +61,10 @@ jobs:
         shell: pwsh
         run: |
           [Environment]::OSVersion.VersionString
+          # Edge / WebView2 policies can turn the remote debugging port off.
+          foreach ($policy in 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2') {
+            if (Test-Path $policy) { "Policies in $policy"; Get-ItemProperty $policy | Format-List | Out-String }
+          }
           $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
           $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
           if ($version) { "WebView2 $version"; exit 0 }
