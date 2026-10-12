@@ -837,3 +837,18 @@ the typed text never shows up.
 **CI** (`.github/workflows/ci.yml`, windows-latest): TypeScript checks, Vitest, clippy
 `-D warnings`, `cargo test`, then `pnpm e2e`. The Playwright report and traces are
 uploaded on failure. Locally the five specs take ~17 s after the build.
+
+**Getting it green on the runner** (Windows Server 2025, WebView2 153 preinstalled, no
+Edge policies). It took four runs:
+- **The debugging port never opened.** `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` alone
+  doesn't reach WebView2 there, though it does on a desktop. The e2e build now carries
+  `--remote-debugging-port` in its window's own `additionalBrowserArgs`, through
+  `TAURI_CONFIG` in `global-setup.ts`.
+- **TEMP is an 8.3 short path** (`C:\Users\RUNNER~1\...`) while shells report full
+  ones; the restore test resolves its folder with `fs.realpathSync.native`.
+- **Diagnostics stay in:** the app's output goes to `test-results/qterm-app.log`; if the
+  port stays shut, the WebView2 processes and their command lines are added to it. The
+  Rust cache is kept on failure (`cache-on-failure`).
+
+The first run (cold cache) took 27 minutes; with the cache a run takes about 5½ minutes,
+1.1 minutes of it the E2E specs.
