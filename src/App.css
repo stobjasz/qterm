@@ -925,7 +925,7 @@ body,
 
 .settings-notice {
   margin: 0;
-  color: var(--muted);
+  color: var(--tab-fg);
   font-size: 12px;
 }
 
