@@ -370,7 +370,8 @@ Lessons:
   (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`). Input goes into
   the page only, never to the OS. Checked: new tab, profile menu, cmd output, Ctrl+Tab
   wrap, Ctrl+Alt+N, Ctrl+Shift+W, `exit`, and last-tab close → respawn + hide.
-- **Not yet verified:** the autostart toggle (needs a tray click) and a reboot test.
+- **Autostart:** the toggle and a reboot were confirmed by hand on 2026-10-12, after the
+  fix that keeps dev builds out of the Run key (§15).
 - **Testability gap for E2E:** the WebGL renderer draws to a canvas, so terminal text
   isn't in the DOM. Real E2E assertions on output need a test hook (e.g. reading
   `term.buffer`) or a screen-reader mode toggle.
@@ -687,7 +688,7 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
     leave. A drop on the right pane while the left had focus typed
     `'C:\My Files\it''s a.txt' C:\tools\x.exe` there and focused it, and the left pane
     stayed clean.
-  - Not yet checked: a real drag from Explorer.
+  - A real drag from Explorer was confirmed by hand on 2026-10-12.
 
 ### 20a. Restored output stays in view (2026-10-11)
 

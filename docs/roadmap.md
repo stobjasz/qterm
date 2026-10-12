@@ -3,9 +3,11 @@
 Feature ideas collected along the way. The original milestones (M0 to M6) and what each
 delivered are in [foundation.md](foundation.md). Status: ✅ done, 🚧 in progress, ⬜ open.
 
-Proposed on 2026-10-11, after the Claude session grouping was finished.
+Effort: S = small, M = medium, L = large.
 
-## Claude Code
+## Round 1 (proposed 2026-10-11)
+
+### Claude Code
 
 | # | Feature | Status |
 |---|---|---|
@@ -13,7 +15,7 @@ Proposed on 2026-10-11, after the Claude session grouping was finished.
 | 2 | **Browse every Claude session**, not only the ones qterm saw: read all of `~/.claude/projects`, grouped by folder, with git branch, message count and last prompt. Add a "New Claude session here" action per folder. | ✅ ✳ menu → "All on this PC"; + per folder |
 | 3 | **Claude status per tab**: show which panes run Claude Code and whether it is busy or waiting for you. | ✅ claude.exe in the pane's process tree; busy = recent output; waiting = alert |
 
-## Terminal
+### Terminal
 
 | # | Feature | Status |
 |---|---|---|
@@ -23,14 +25,57 @@ Proposed on 2026-10-11, after the Claude session grouping was finished.
 | 7 | **Named layouts / workspaces**, e.g. "dev" = 3 panes in a folder with start commands, opened from a menu. | ✅ `[[layouts]]`, ▾ menu, palette, "Save this tab as a layout" |
 | 8 | **Custom profiles in config**: SSH hosts, `npm run dev` in a folder, per-profile colours and font. | ✅ `[[profiles]]` |
 | 9 | **Pane tools**: zoom a pane temporarily, swap panes, type into all panes of a tab at once (broadcast input). | ✅ Alt+Shift+Z, Alt+Shift+B, swap via palette |
-| 10 | **Scrollback across restarts**: restored tabs show their previous output, as Windows Terminal can. | ✅ `[scrollback]`, switchable per shell |
+| 10 | **Scrollback across restarts**: restored tabs show their previous output, as Windows Terminal can. | ✅ `[scrollback]`, switchable per shell; restored output stays in view; prompt-only panes skipped; clearing per pane or all (foundation.md §19, §20a–c) |
 
-## Robustness and release
+### Robustness and release
 
 | # | Feature | Status |
 |---|---|---|
 | 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ⬜ |
 | 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ already guaranteed by ConPTY (verified); locked in by a regression test instead of a Job Object, see foundation.md §19 |
-| 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). | ⬜ |
+| 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). Designed: Tauri updater with signed `latest.json` for the installer; the portable exe either self-replaces or only announces updates. Waiting on two choices: where releases are hosted (a private repo's assets need a token, so a public releases-only repo, the user's `gh` login, or other hosting), and the portable exe's behaviour. | ⬜ |
 
-Suggested order: 11 (E2E in CI) before 13 (installer); the rest as wanted.
+Also done outside the list: file drag and drop from Explorer, with paths quoted per shell
+(foundation.md §20); autostart limited to release builds and re-pointed on launch (§15).
+
+## Round 2 (proposed 2026-10-12)
+
+### Claude Code
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 14 | **Alert when Claude finishes**: hook Claude Code's Stop event for an instant ✳ and notification when a reply ends and you're not looking at that pane. (Today's Notification hook fires only for permission prompts, rare in auto mode, and after 60 s idle.) | S | ⬜ |
+| 15 | **Bring Claude sessions back after a restart**: panes that were running Claude reopen with `claude --resume <id>` typed for you (opt-in). | M | ⬜ |
+| 16 | **"Ask Claude about this"**: select an error, then a palette action opens a pane in that folder with `claude "<selection>"`. | S | ⬜ |
+| 17 | **Context and cost per tab**: token use read from the session's transcript, shown in the tab tooltip and the ✳ menu. | M | 🚧 |
+
+### Terminal
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 18 | **Command marks** (OSC 133 from the shell integration): jump between commands, copy the last command's output, ✓/✗ per exit code. | M | 🚧 |
+| 19 | **"Long command finished" notifications** for commands over N seconds while you're not looking (needs #18). | S | 🚧 |
+| 20 | **Snippets**: named commands in config (`[[snippets]]`), run from the palette into the current pane. | S | 🚧 |
+| 21 | **Search across all panes**, restored output included. | M | 🚧 |
+| 22 | **SSH quick-connect**: profiles from `~/.ssh/config`. | S | ⬜ |
+| 23 | **Inline images (sixel) and font ligatures** (xterm.js add-ons). | S–M | 🚧 |
+| 24 | **Tab colours and icons**, per tab or per profile. | S | ⬜ |
+
+### The console window
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ⬜ |
+| 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ⬜ |
+| 27 | **A second console on its own hotkey** (scratch console, or docked bottom/side). | M | ⬜ |
+| 28 | **Run a tab as administrator**. | L | 🚧 |
+
+### Robustness and release
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 29 | **Log file** plus tray → "Open logs". | S | ⬜ |
+| 30 | **Publish to winget** (after #13). | S | ⬜ |
+| 31 | **Settings export/import** for moving to another PC. | S | 🚧 |
+
+Suggested next: #14 and #15 (Claude reliability across "is it done?" and restarts), #29.
