@@ -63,6 +63,10 @@ editor = "code --goto {file}:{line}:{col}"
 # Needs shell_integration (PowerShell, cmd, Git Bash).
 long_command_alert = 30
 
+# Show images that programs print as sixel, iTerm or Kitty graphics (e.g. chafa,
+# img2sixel, timg).
+inline_images = true
+
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
 # `profiles` switches it per shell, overriding `restore`, e.g.
@@ -75,6 +79,9 @@ profiles = {}
 [font]
 family = '"Cascadia Mono", "Cascadia Code", Consolas, monospace'
 size = 14   # 6 - 72
+# Programming ligatures (=> != ->). Needs a font that has them, e.g. "Cascadia
+# Code" or "Fira Code"; Cascadia Mono has none.
+ligatures = false
 
 # Override shortcuts as  action = "ctrl+shift+t"  ("" unbinds it).
 # Modifiers: ctrl, alt, shift. Keys: a-z, 0-9, f1-f24, tab, left, right, up,

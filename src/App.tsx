@@ -155,6 +155,8 @@ export default function App() {
       copyOnSelect: config.copyOnSelect,
       rightClickPaste: config.rightClickPaste,
       claudeSessions: config.claudeSessions,
+      inlineImages: config.inlineImages,
+      ligatures: config.font.ligatures,
     });
   }, [registry, config]);
 

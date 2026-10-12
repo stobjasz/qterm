@@ -51,7 +51,8 @@ export interface Config {
   editor: string;
   /** Seconds; 0 = off. */
   longCommandAlert: number;
-  font: { family: string; size: number };
+  inlineImages: boolean;
+  font: { family: string; size: number; ligatures: boolean };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
   layouts: LayoutDef[];

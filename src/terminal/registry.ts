@@ -9,6 +9,8 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { ImageAddon } from "@xterm/addon-image";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import "@xterm/xterm/css/xterm.css";
 
@@ -107,6 +109,10 @@ export interface Behavior {
   copyOnSelect: boolean;
   rightClickPaste: boolean;
   claudeSessions: boolean;
+  /** Sixel, iTerm (IIP) and Kitty images. */
+  inlineImages: boolean;
+  /** Needs a font with ligatures (Cascadia Code, Fira Code, ...). */
+  ligatures: boolean;
 }
 
 export interface FontSettings {
@@ -148,6 +154,9 @@ interface Entry {
   commands: number;
   /** Prompts and commands, oldest first (needs shell integration). */
   marks: CommandMark[];
+  webgl?: WebglAddon;
+  images?: ImageAddon;
+  ligatures?: LigaturesAddon;
   /** Settles once restored output is on screen (or right away without any). */
   ready: Promise<void>;
   markReady(): void;
@@ -165,7 +174,7 @@ export class TerminalRegistry {
   private keymap: Keymap = buildKeymap();
   private font: FontSettings = { family: terminalOptions.fontFamily!, size: terminalOptions.fontSize! };
   private theme: Theme = THEMES.qterm;
-  private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false };
+  private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false, inlineImages: true, ligatures: false };
   /** Pane → every pane its typing goes to (broadcasting tabs only). */
   private broadcast = new Map<PaneId, PaneId[]>();
 
@@ -288,7 +297,13 @@ export class TerminalRegistry {
 
   setBehavior(behavior: Behavior): void {
     const enablingClaude = behavior.claudeSessions && !this.behavior.claudeSessions;
+    const previous = this.behavior;
     this.behavior = behavior;
+    for (const entry of this.entries.values()) {
+      if (!entry.opened) continue;
+      if (behavior.ligatures !== previous.ligatures) this.applyLigatures(entry);
+      if (behavior.inlineImages !== previous.inlineImages) this.applyImages(entry);
+    }
     // Only output printed from now on counts, not whatever is already in the scrollback.
     if (enablingClaude) for (const entry of this.entries.values()) entry.linesSinceScan = 0;
   }
@@ -482,7 +497,10 @@ export class TerminalRegistry {
     term.loadAddon(new WebLinksAddon((event, uri) => event.ctrlKey && void openUrl(uri)));
     this.wireFileLinks(entry);
     term.open(entry.wrapper);
-    loadWebgl(term);
+    // Ligatures first: the WebGL renderer builds its glyph atlas with them in mind.
+    if (this.behavior.ligatures) entry.ligatures = loadAddon(term, () => new LigaturesAddon());
+    entry.webgl = loadWebgl(term);
+    if (this.behavior.inlineImages) entry.images = loadAddon(term, () => new ImageAddon());
     entry.opened = true;
     if (entry.wrapper.clientWidth > 0) fit.fit();
 
@@ -578,6 +596,19 @@ export class TerminalRegistry {
         for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
       })
       .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
+  }
+
+  /** Turns ligatures on or off for an open terminal; the renderer is reloaded after. */
+  private applyLigatures(entry: Entry): void {
+    entry.webgl?.dispose();
+    entry.ligatures?.dispose();
+    entry.ligatures = this.behavior.ligatures ? loadAddon(entry.term, () => new LigaturesAddon()) : undefined;
+    entry.webgl = loadWebgl(entry.term);
+  }
+
+  private applyImages(entry: Entry): void {
+    entry.images?.dispose();
+    entry.images = this.behavior.inlineImages ? loadAddon(entry.term, () => new ImageAddon()) : undefined;
   }
 
   /** OSC 133: A = prompt, B = typing starts, D = the command ended. */
@@ -711,13 +742,27 @@ export class TerminalRegistry {
 
 // WebGL is much faster for heavy output; the DOM renderer is the fallback when
 // WebGL2 is unavailable or the GPU context is lost.
-function loadWebgl(term: Terminal): void {
+function loadWebgl(term: Terminal): WebglAddon | undefined {
   try {
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => webgl.dispose());
     term.loadAddon(webgl);
+    return webgl;
   } catch (err) {
     console.warn("qterm: WebGL renderer unavailable, using DOM renderer", err);
+    return undefined;
+  }
+}
+
+/** Loads an optional addon; one that fails is left out rather than breaking the pane. */
+function loadAddon<T extends { dispose(): void }>(term: Terminal, make: () => T): T | undefined {
+  try {
+    const addon = make();
+    term.loadAddon(addon as never);
+    return addon;
+  } catch (err) {
+    console.warn("qterm: addon unavailable", err);
+    return undefined;
   }
 }
 

@@ -40,6 +40,8 @@ pub struct Config {
     pub editor: String,
     /// Notify when a command that ran this many seconds ends while you aren't looking; 0 = off.
     pub long_command_alert: u32,
+    /// Show sixel, iTerm and Kitty images in the terminal.
+    pub inline_images: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -169,6 +171,8 @@ pub enum MonitorChoice {
 pub struct Font {
     pub family: String,
     pub size: f64,
+    /// Draw programming ligatures (=>, !=, ...); needs a font that has them.
+    pub ligatures: bool,
 }
 
 impl Default for Config {
@@ -191,6 +195,7 @@ impl Default for Config {
             claude_alerts: true,
             editor: "code --goto {file}:{line}:{col}".into(),
             long_command_alert: 30,
+            inline_images: true,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),
@@ -203,7 +208,7 @@ impl Default for Config {
 
 impl Default for Font {
     fn default() -> Self {
-        Self { family: r#""Cascadia Mono", "Cascadia Code", Consolas, monospace"#.into(), size: 14.0 }
+        Self { family: r#""Cascadia Mono", "Cascadia Code", Consolas, monospace"#.into(), size: 14.0, ligatures: false }
     }
 }
 

@@ -159,6 +159,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
           <Field label="Font size">
             <input type="number" min={6} max={72} value={draft.fontSize} onChange={(e) => set("fontSize", Number(e.target.value))} />
           </Field>
+          <Toggle
+            label="Font ligatures (=> != ->)"
+            hint="Needs a font that has them, e.g. Cascadia Code or Fira Code; Cascadia Mono has none."
+            checked={draft.fontLigatures}
+            onChange={(v) => set("fontLigatures", v)}
+          />
         </Group>
 
         <Group title="Terminal">
@@ -177,6 +183,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: P
             label="Right-click copies, or pastes when nothing is selected"
             checked={draft.rightClickPaste}
             onChange={(v) => set("rightClickPaste", v)}
+          />
+          <Toggle
+            label="Show inline images"
+            hint="Pictures that programs print as sixel, iTerm or Kitty graphics (chafa, img2sixel, timg)."
+            checked={draft.inlineImages}
+            onChange={(v) => set("inlineImages", v)}
           />
           <Toggle label="Reopen tabs and layout on start" checked={draft.restoreSession} onChange={(v) => set("restoreSession", v)} />
           <Toggle

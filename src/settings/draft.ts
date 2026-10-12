@@ -21,8 +21,10 @@ export interface Draft {
   claudeAlerts: boolean;
   editor: string;
   longCommandAlert: number;
+  inlineImages: boolean;
   fontFamily: string;
   fontSize: number;
+  fontLigatures: boolean;
   scrollbackRestore: boolean;
   scrollbackLines: number;
   /** Per-shell switches that differ from scrollbackRestore. */
@@ -50,8 +52,10 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   claudeAlerts: "claude_alerts",
   editor: "editor",
   longCommandAlert: "long_command_alert",
+  inlineImages: "inline_images",
   fontFamily: "font.family",
   fontSize: "font.size",
+  fontLigatures: "font.ligatures",
   scrollbackRestore: "scrollback.restore",
   scrollbackLines: "scrollback.lines",
 };
@@ -75,8 +79,10 @@ export function toDraft(config: Config): Draft {
     claudeAlerts: config.claudeAlerts,
     editor: config.editor,
     longCommandAlert: config.longCommandAlert,
+    inlineImages: config.inlineImages,
     fontFamily: config.font.family,
     fontSize: config.font.size,
+    fontLigatures: config.font.ligatures,
     scrollbackRestore: config.scrollback.restore,
     scrollbackLines: config.scrollback.lines,
     scrollbackProfiles: { ...config.scrollback.profiles },
