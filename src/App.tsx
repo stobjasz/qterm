@@ -755,18 +755,25 @@ export default function App() {
 
   // The console always has a shell. At start: the saved layout (if enabled) or one
   // fresh tab. After the last tab closes: a fresh tab, and the console gets out of the way.
-  const started = useRef(false);
+  // While the start is still loading, an empty console just means "not yet": this
+  // effect runs again then (React runs it twice on mount in development, and any
+  // dependency may change meanwhile), and must not open a second tab or hide it.
+  const startup = useRef<"idle" | "loading" | "done">("idle");
   useEffect(() => {
-    if (workspace.tabs.length > 0 || !profiles || !config) return;
-    if (started.current) {
+    if (workspace.tabs.length > 0 || !profiles || !config || startup.current === "loading") return;
+    if (startup.current === "done") {
       newTab();
       void hideWindow();
       return;
     }
-    started.current = true;
+    startup.current = "loading";
     void (config.restoreSession ? loadSession() : Promise.resolve(null)).then(async (saved) => {
       const restored = saved ? restoreWorkspace(saved, profiles) : undefined;
-      if (!restored) return newTab();
+      if (!restored) {
+        newTab();
+        startup.current = "done";
+        return;
+      }
       // Earlier output first, so it is there before the panes' shells start.
       await Promise.all(
         Object.values(restored.panes)
@@ -784,6 +791,7 @@ export default function App() {
         }
       }
       setWorkspace(restored);
+      startup.current = "done";
     });
   }, [workspace.tabs.length, profiles, config, newTab]);
 
@@ -798,7 +806,7 @@ export default function App() {
   const lastScrollbackSave = useRef(new Map<PaneId, number>());
   const saveScrollbacks = useCallback(async () => {
     const cfg = configRef.current;
-    if (!cfg || !started.current) return;
+    if (!cfg || startup.current !== "done") return;
     const keep: PaneId[] = [];
     const saves: Promise<void>[] = [];
     for (const pane of Object.values(workspaceRef.current.panes)) {
@@ -826,23 +834,29 @@ export default function App() {
   useEffect(() => {
     if (!shown) void saveScrollbacks();
   }, [shown, saveScrollbacks]);
-  useEffect(() => {
-    const unlisten = onQuitRequested(() => void saveScrollbacks().finally(() => void quitNow()));
-    return () => void unlisten.then((fn) => fn());
-  }, [saveScrollbacks]);
-
   // Save the layout shortly after it changes (shell titles alone don't count).
   const lastSaved = useRef<string>(undefined);
-  useEffect(() => {
-    if (!started.current || workspace.tabs.length === 0) return;
-    const text = saveWorkspace(workspace, claudeByPane);
+  const claudeByPaneRef = useRef(claudeByPane);
+  claudeByPaneRef.current = claudeByPane;
+  /** Writes the tabs now if they changed since the last save. */
+  const flushSession = useCallback(async () => {
+    const ws = workspaceRef.current;
+    if (startup.current !== "done" || ws.tabs.length === 0) return;
+    const text = saveWorkspace(ws, claudeByPaneRef.current);
     if (text === lastSaved.current) return;
-    const timer = window.setTimeout(() => {
-      lastSaved.current = text;
-      void saveSession(text);
-    }, SAVE_DELAY_MS);
+    lastSaved.current = text;
+    await saveSession(text).catch(() => {});
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void flushSession(), SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [workspace, claudeByPane]);
+  }, [workspace, claudeByPane, flushSession]);
+
+  // Quitting right after a change (a cd, a new tab) must not lose it to the save delay.
+  useEffect(() => {
+    const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks()]).finally(() => void quitNow()));
+    return () => void unlisten.then((fn) => fn());
+  }, [saveScrollbacks, flushSession]);
 
   // Re-parenting a terminal (zoom, split, swap) drops its keyboard focus, so focus
   // again whenever the active tab's layout changes, not only the focused pane.
