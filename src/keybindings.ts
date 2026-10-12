@@ -18,7 +18,8 @@ export type Command =
   | { type: "zoomPane" }
   | { type: "toggleBroadcast" }
   | { type: "swapPane"; direction: Direction }
-  | { type: "commandPalette" };
+  | { type: "commandPalette" }
+  | { type: "clearHistory" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -48,6 +49,7 @@ const ACTIONS = {
   swap_right: { command: { type: "swapPane", direction: "right" }, chord: "" },
   swap_up: { command: { type: "swapPane", direction: "up" }, chord: "" },
   swap_down: { command: { type: "swapPane", direction: "down" }, chord: "" },
+  clear_history: { command: { type: "clearHistory" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -79,6 +81,7 @@ const LABELS: Record<Action, string> = {
   swap_right: "Swap pane right",
   swap_up: "Swap pane up",
   swap_down: "Swap pane down",
+  clear_history: "Clear pane history",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

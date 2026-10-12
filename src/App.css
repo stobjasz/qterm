@@ -233,6 +233,12 @@ body,
   border: 1px solid var(--line) !important;
 }
 
+/* A step that deletes something, after a confirming click. */
+.settings-actions button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent) !important;
+}
+
 /* Claude Code in the tab: spinning while it works, dim while idle at its prompt. */
 .tab-claude {
   display: inline-block;

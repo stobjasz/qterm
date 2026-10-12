@@ -3,6 +3,15 @@
 
 use std::path::PathBuf;
 
+use serde::Serialize;
+
+/// How much saved output there is, for the settings panel.
+#[derive(Debug, Default, PartialEq, Serialize)]
+pub struct Usage {
+    pub panes: usize,
+    pub bytes: u64,
+}
+
 pub struct ScrollbackStore {
     dir: PathBuf,
 }
@@ -31,6 +40,31 @@ impl ScrollbackStore {
                 let _ = std::fs::remove_file(&path);
             }
         }
+    }
+
+    /// Deletes the saved output of these panes, or of every pane.
+    pub fn delete(&self, pane_ids: Option<&[String]>) {
+        match pane_ids {
+            None => self.prune(&[]),
+            Some(ids) => {
+                for id in ids {
+                    if let Ok(file) = self.file(id) {
+                        let _ = std::fs::remove_file(file);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn usage(&self) -> Usage {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else { return Usage::default() };
+        entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "txt"))
+            .fold(Usage::default(), |usage, e| Usage {
+                panes: usage.panes + 1,
+                bytes: usage.bytes + e.metadata().map(|m| m.len()).unwrap_or(0),
+            })
     }
 
     /// Pane ids become file names, so only plain ids are accepted.
@@ -69,6 +103,22 @@ mod tests {
         s.prune(&["pane-ffff0000".to_string()]);
         assert_eq!(s.load("pane-1a2b3c4d"), None);
         assert_eq!(s.load("pane-ffff0000").as_deref(), Some("bye"));
+        let _ = std::fs::remove_dir_all(s.dir());
+    }
+
+    #[test]
+    fn reports_usage_and_deletes() {
+        let s = store("delete");
+        assert_eq!(s.usage(), Usage::default());
+        s.save("pane-a", "1234").unwrap();
+        s.save("pane-b", "12").unwrap();
+        s.save("pane-c", "1").unwrap();
+        assert_eq!(s.usage(), Usage { panes: 3, bytes: 7 });
+        s.delete(Some(&["pane-a".to_string(), "../x".to_string()]));
+        assert_eq!(s.load("pane-a"), None);
+        assert_eq!(s.usage(), Usage { panes: 2, bytes: 3 });
+        s.delete(None);
+        assert_eq!(s.usage(), Usage::default());
         let _ = std::fs::remove_dir_all(s.dir());
     }
 

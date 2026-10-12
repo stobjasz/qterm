@@ -6,11 +6,13 @@ import {
   installClaudeHook,
   openConfigFile,
   removeClaudeHook,
+  scrollbackUsage,
   saveConfig,
   setAutostart,
   type ConfigSnapshot,
   type HookStatus,
   type Profile,
+  type ScrollbackUsage,
 } from "../ipc";
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
@@ -28,15 +30,26 @@ interface Props {
   snapshot: ConfigSnapshot;
   profiles: Profile[];
   onClose(): void;
+  /** Deletes all saved output and clears the open panes' history. */
+  onClearHistory(): Promise<void>;
 }
 
 /** Edits config.toml without touching the file by hand. Esc closes without saving. */
-export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
+export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory }: Props) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(snapshot.config));
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [hook, setHook] = useState<HookStatus>();
+  const [usage, setUsage] = useState<ScrollbackUsage>();
+  const [confirmClear, setConfirmClear] = useState(false);
+  const refreshUsage = () => void scrollbackUsage().then(setUsage, (e) => setError(String(e)));
+  useEffect(refreshUsage, []);
+  const clearHistory = () =>
+    void onClearHistory().then(() => {
+      setConfirmClear(false);
+      refreshUsage();
+    }, (e) => setError(String(e)));
 
   useEffect(() => void getAutostart().then(setAutostartState), []);
   useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
@@ -202,6 +215,26 @@ export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
               />
             ))}
           </div>
+          <div className="settings-field">
+            <span className="settings-label">Saved output</span>
+            <span className="settings-hint">
+              Clearing deletes the saved files and the history of every open pane (like “Clear buffer”). To clear one
+              pane, use “Clear pane history” in the command palette.
+            </span>
+            <div className="settings-actions">
+              <span>{usage === undefined ? "Checking…" : usage.panes === 0 ? "Nothing saved" : `${usage.panes} ${usage.panes === 1 ? "pane" : "panes"}, ${formatBytes(usage.bytes)}`}</span>
+              {confirmClear ? (
+                <>
+                  <button className="danger" onClick={clearHistory}>
+                    Clear everything
+                  </button>
+                  <button onClick={() => setConfirmClear(false)}>Keep</button>
+                </>
+              ) : (
+                <button onClick={() => setConfirmClear(true)}>Clear all saved output…</button>
+              )}
+            </div>
+          </div>
         </Group>
 
         <Group title="Claude Code">
@@ -287,6 +320,12 @@ export function SettingsPanel({ snapshot, profiles, onClose }: Props) {
       </footer>
     </section>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Group({ title, children }: { title: string; children: ReactNode }) {

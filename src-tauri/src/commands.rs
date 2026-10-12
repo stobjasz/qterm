@@ -253,6 +253,17 @@ pub fn load_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pan
     store.load(&pane_id)
 }
 
+/// Deletes saved output: of these panes, or of all when `pane_ids` is None.
+#[tauri::command]
+pub fn delete_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, pane_ids: Option<Vec<String>>) {
+    store.delete(pane_ids.as_deref());
+}
+
+#[tauri::command]
+pub fn scrollback_usage(store: State<'_, crate::scrollback::ScrollbackStore>) -> crate::scrollback::Usage {
+    store.usage()
+}
+
 #[tauri::command]
 pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, keep: Vec<String>) {
     store.prune(&keep);

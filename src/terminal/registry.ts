@@ -258,6 +258,18 @@ export class TerminalRegistry {
     if (enablingClaude) for (const entry of this.entries.values()) entry.linesSinceScan = 0;
   }
 
+  /**
+   * Clears the pane's history like Windows Terminal's "Clear buffer": scrollback and
+   * screen, keeping the line with the cursor. Nothing is left worth saving.
+   */
+  clearHistory(paneId: PaneId): void {
+    const entry = this.entries.get(paneId);
+    if (!entry) return;
+    entry.term.clear();
+    entry.commands = 0;
+    entry.spec.restored = undefined;
+  }
+
   /** Copies the selection; returns false when nothing is selected. */
   copy(paneId: PaneId): boolean {
     const selection = this.entries.get(paneId)?.term.getSelection();

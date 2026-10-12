@@ -24,6 +24,7 @@ import {
   quitNow,
   loadScrollback,
   pruneScrollback,
+  deleteScrollback,
   saveScrollback,
   deleteLayout,
   saveLayout,
@@ -320,6 +321,10 @@ export default function App() {
         case "commandPalette":
           setPaletteOpen((open) => !open);
           break;
+        case "clearHistory":
+          registry.clearHistory(paneId);
+          void deleteScrollback([paneId]);
+          break;
       }
     },
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
@@ -589,6 +594,11 @@ export default function App() {
   }, [workspace.tabs.length, profiles, config, newTab]);
 
   // --- scrollback: each pane's output, kept across restarts (per shell) -------------
+  /** Settings → "Clear all saved output": the files, and the open panes' history (else the next save brings it back). */
+  const clearAllHistory = useCallback(async () => {
+    for (const paneId of Object.keys(workspaceRef.current.panes)) registry.clearHistory(paneId);
+    await deleteScrollback();
+  }, [registry]);
   const configRef = useRef(config);
   configRef.current = config;
   const lastScrollbackSave = useRef(new Map<PaneId, number>());
@@ -709,7 +719,7 @@ export default function App() {
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
         {settingsOpen && settings && profiles && (
-          <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} />
+          <SettingsPanel snapshot={settings} profiles={profiles} onClose={() => setSettingsOpen(false)} onClearHistory={clearAllHistory} />
         )}
       </div>
       {errors.length > 0 && (

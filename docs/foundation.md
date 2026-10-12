@@ -726,3 +726,22 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
 - **Verified live:** an untouched pane and an `echo` pane. Only the `echo` pane got a
   file, a planted prompt-only file was pruned, and after a reload only the `echo` pane
   came back (a re-planted prompt-only file was skipped).
+
+### 20c. Clearing saved output (2026-10-12)
+
+- **One pane:** "Clear pane history" (command palette; unbound, bindable in Settings)
+  works like Windows Terminal's "Clear buffer". It clears the pane's scrollback and
+  screen, keeping the cursor line, and deletes its saved file.
+- **Everything:** Settings → Scrollback → Saved output shows how many panes have saved
+  output and its size. "Clear all saved output…" then "Clear everything" deletes every
+  file and clears every open pane.
+- **Why open panes are cleared too:** otherwise the next save, at most 30 s later,
+  writes the same output back.
+- **Rust side:** `delete_scrollback(pane_ids?)` and `scrollback_usage()`, with a unit
+  test.
+- **Verified live:**
+  - two panes with `echo` were saved;
+  - the palette action cleared the second and deleted its file at once, and the next
+    save kept only the first;
+  - Settings showed "1 pane, 85 B", the two-step clear left no files, and the next save
+    wrote none.

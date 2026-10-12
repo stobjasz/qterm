@@ -130,6 +130,8 @@ pub fn run() {
             commands::save_scrollback,
             commands::load_scrollback,
             commands::prune_scrollback,
+            commands::delete_scrollback,
+            commands::scrollback_usage,
             commands::quit_now,
         ])
         .run(tauri::generate_context!())

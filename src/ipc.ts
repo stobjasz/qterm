@@ -293,6 +293,20 @@ export function loadScrollback(paneId: string): Promise<string | null> {
   return invoke("load_scrollback", { paneId });
 }
 
+/** Deletes the saved output of these panes, or of every pane. */
+export function deleteScrollback(paneIds?: string[]): Promise<void> {
+  return invoke("delete_scrollback", { paneIds: paneIds ?? null });
+}
+
+export interface ScrollbackUsage {
+  panes: number;
+  bytes: number;
+}
+
+export function scrollbackUsage(): Promise<ScrollbackUsage> {
+  return invoke("scrollback_usage");
+}
+
 /** Deletes saved output of every pane not in `keep`. */
 export function pruneScrollback(keep: string[]): Promise<void> {
   return invoke("prune_scrollback", { keep });
