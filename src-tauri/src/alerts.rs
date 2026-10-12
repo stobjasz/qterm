@@ -19,6 +19,10 @@ use tauri_winrt_notification::{Sound, Toast};
 pub const HOOK_ARG: &str = "--claude-notify";
 /// Set on every shell qterm starts, so the hook knows which pane it serves.
 pub const PANE_ENV: &str = "QTERM_PANE";
+/// Also set on every shell: the inbox of the qterm that started it, so the hook
+/// reaches that instance even when several run (a dev or test build has its own
+/// identifier, hence its own folder).
+pub const INBOX_ENV: &str = "QTERM_INBOX";
 /// Same as tauri.conf.json's identifier: the inbox lives in its local data folder,
 /// and Windows shows notifications under this app id.
 const APP_ID: &str = "dev.qterm.app";
@@ -82,7 +86,7 @@ pub fn run_hook() {
     });
     let Ok(Some(input)) = rx.recv_timeout(INPUT_TIMEOUT) else { return };
     let Some(message) = message_from_hook(&pane_id, &input) else { return };
-    if let Some(inbox) = inbox_dir() {
+    if let Some(inbox) = hook_inbox() {
         let _ = deliver(&inbox, &message);
     }
 }
@@ -105,8 +109,18 @@ fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
     }))
 }
 
-fn inbox_dir() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(APP_ID).join(INBOX))
+/// Where the hook delivers: the inbox its shell was given, else the installed
+/// qterm's (a shell started before QTERM_INBOX existed).
+fn hook_inbox() -> Option<PathBuf> {
+    std::env::var_os(INBOX_ENV)
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(APP_ID).join(INBOX)))
+}
+
+/// This instance's inbox, under its own local data folder.
+pub fn inbox_dir(app: &AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    Some(app.path().app_local_data_dir().ok()?.join(INBOX))
 }
 
 /// Written under a temporary name and renamed, so the watcher never reads half a file.
@@ -153,7 +167,7 @@ fn take_inbox(inbox: &Path) -> Vec<InboxMessage> {
 /// each session start as `claude-session-start`.
 /// Alerts left over from before this start are stale and dropped.
 pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
-    let inbox = inbox_dir().ok_or_else(|| notify::Error::generic("no LOCALAPPDATA"))?;
+    let inbox = inbox_dir(&app).ok_or_else(|| notify::Error::generic("no local data folder"))?;
     std::fs::create_dir_all(&inbox).map_err(notify::Error::io)?;
     take_inbox(&inbox);
 

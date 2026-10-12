@@ -45,10 +45,12 @@ pub async fn pty_spawn(
     request: SpawnRequest,
     on_output: Channel<Response>,
 ) -> Result<SessionId, String> {
+    let inbox = crate::alerts::inbox_dir(&app);
     sessions.spawn_profile(
         &request,
         &all_profiles(&sessions, &config),
         config.get().shell_integration,
+        inbox.as_deref(),
         // Raw bytes reach the UI as an ArrayBuffer, with no JSON/base64 encoding.
         move |bytes| on_output.send(Response::new(bytes)).is_ok(),
         move |id, code| {

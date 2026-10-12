@@ -79,6 +79,7 @@ impl SessionManager {
         request: &SpawnRequest,
         profiles: &[Profile],
         integrate: bool,
+        inbox: Option<&std::path::Path>,
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
@@ -89,6 +90,9 @@ impl SessionManager {
         let mut cmd = profile.command(request.cwd.as_deref(), integrate);
         if let Some(pane_id) = &request.pane_id {
             cmd.env(crate::alerts::PANE_ENV, pane_id);
+        }
+        if let Some(inbox) = inbox {
+            cmd.env(crate::alerts::INBOX_ENV, inbox);
         }
         if request.elevated {
             if crate::elevation::sudo_mode() != crate::elevation::SudoMode::Inline {
