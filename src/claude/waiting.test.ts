@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { nextWaiting } from "./waiting";
+import { isClaudeAlert, nextWaiting } from "./waiting";
+
+describe("which alerts are Claude's", () => {
+  it("counts Claude waiting or stopped, not long commands or triggers", () => {
+    expect(isClaudeAlert("permission_prompt")).toBe(true);
+    expect(isClaudeAlert(null)).toBe(true);
+    expect(isClaudeAlert("stop_failure:rate_limit")).toBe(true);
+    expect(isClaudeAlert("command_failed")).toBe(false);
+    expect(isClaudeAlert("trigger")).toBe(false);
+  });
+});
 
 describe("next pane where Claude waits", () => {
   const order = ["a", "b", "c", "d"];

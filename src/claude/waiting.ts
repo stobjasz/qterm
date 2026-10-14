@@ -11,3 +11,11 @@ export function nextWaiting(order: readonly string[], waiting: ReadonlySet<strin
   const at = current === undefined ? -1 : order.indexOf(current);
   return inOrder.find((id) => order.indexOf(id) > at) ?? inOrder[0];
 }
+
+/**
+ * Whether a tab alert is Claude Code's (waiting for you, or stopped on an error) rather
+ * than a long command's end or a trigger, which share the tab marker.
+ */
+export function isClaudeAlert(kind: string | null | undefined): boolean {
+  return !kind?.startsWith("command_") && kind !== "trigger";
+}

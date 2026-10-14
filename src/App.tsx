@@ -73,7 +73,7 @@ import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
-import { nextWaiting } from "./claude/waiting";
+import { isClaudeAlert, nextWaiting } from "./claude/waiting";
 import { crossedWarning, formatReset, mergeUsage, planSummary, type PlanUsage } from "./claude/plan";
 import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
@@ -587,7 +587,8 @@ export default function App() {
         case "nextWaiting": {
           const ws = workspaceRef.current;
           const order = ws.tabs.flatMap((tab) => paneIds(tab.root));
-          const next = nextWaiting(order, new Set(attentionRef.current.keys()), paneId);
+          const waiting = [...attentionRef.current].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([id]) => id);
+          const next = nextWaiting(order, new Set(waiting), paneId);
           if (next) setWorkspace((w) => focusPane(w, next));
           else setNotice("Claude isn't waiting for you in any pane.");
           break;
@@ -684,7 +685,9 @@ export default function App() {
     // Console up and focused, but on another tab or pane: the tab marker is enough.
     if (!consoleInFocus && notify) void showClaudeAlert(alert);
   }
-  useEffect(() => void setAttentionCount(attention.size), [attention.size]);
+  /** The tray says in how many panes Claude waits: its alerts only, not long commands or triggers. */
+  const claudeWaiting = useMemo(() => [...attention.values()].filter((a) => isClaudeAlert(a.kind)).length, [attention]);
+  useEffect(() => void setAttentionCount(claudeWaiting), [claudeWaiting]);
   // Looking at the pane again clears its marker.
   useEffect(() => {
     if (shown && focusedPane && attention.has(focusedPane)) setAttention((current) => without(current, focusedPane));
@@ -873,7 +876,7 @@ export default function App() {
           { id: `claude-here:${session.id}`, group: "Resume Claude here", label, run: () => resumeClaudeHere(session) },
         ];
       }),
-      ...[...attention].map(([paneId, alert]) => ({
+      ...[...attention].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([paneId, alert]) => ({
         id: `waiting:${paneId}`,
         group: "Claude waits",
         label: paneLabel(paneId),
@@ -1002,7 +1005,7 @@ export default function App() {
         .flatMap((tab) => paneIds(tab.root))
         .flatMap((paneId) => {
           const alert = attention.get(paneId);
-          return alert ? [{ paneId, label: paneLabel(paneId), message: alert.message }] : [];
+          return alert && isClaudeAlert(alert.kind) ? [{ paneId, label: paneLabel(paneId), message: alert.message }] : [];
         }),
     [workspace.tabs, attention, paneLabel],
   );
