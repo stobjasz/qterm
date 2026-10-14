@@ -417,45 +417,111 @@ pub struct Snapshot {
     pub config: Config,
     pub error: Option<String>,
     pub path: PathBuf,
+    /// The folder of your choice the settings live in (Settings → Settings file), if any.
+    pub folder: Option<PathBuf>,
 }
 
 pub struct ConfigState {
-    path: PathBuf,
+    /// The app's own settings folder: config.toml by default, and the pointer to a folder of your choice.
+    home: PathBuf,
+    path: RwLock<PathBuf>,
     inner: RwLock<(Config, Option<String>)>,
 }
 
+/// In the app's settings folder: the folder of your choice config.toml lives in.
+const FOLDER_POINTER: &str = "settings-folder";
+
+/// What happened when the settings moved to a folder.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Relocated {
+    /// The folder had no settings: these were copied there.
+    Moved,
+    /// The folder already had settings (another PC put them there): those are used now.
+    UsedExisting,
+    /// Back in the app's own folder, with the folder's settings.
+    Default,
+}
+
 impl ConfigState {
-    /// Loads `dir/config.toml`, writing the documented defaults there on first run.
+    /// Loads `dir/config.toml` (writing the documented defaults there on first run), or
+    /// the config.toml in the folder of your choice that `dir/settings-folder` names.
+    /// That folder out of reach (a sync folder not there yet): the local file, and why.
     pub fn load(dir: &Path) -> Self {
-        let path = dir.join(FILE_NAME);
-        if !path.exists() {
+        let local = dir.join(FILE_NAME);
+        if !local.exists() {
             let _ = std::fs::create_dir_all(dir);
-            let _ = std::fs::write(&path, DEFAULT_FILE);
+            let _ = std::fs::write(&local, DEFAULT_FILE);
         }
+        let mut problem = None;
+        let path = match read_pointer(dir) {
+            Some(folder) if folder.join(FILE_NAME).is_file() => folder.join(FILE_NAME),
+            Some(folder) => {
+                problem = Some(format!("the settings folder {} isn't reachable; using the settings in {}", folder.display(), dir.display()));
+                local
+            }
+            None => local,
+        };
         let (config, error) = match read(&path) {
-            Ok(config) => (config, None),
+            Ok(config) => (config, problem),
             Err(e) => (Config::default(), Some(e)),
         };
-        Self { path, inner: RwLock::new((config, error)) }
+        Self { home: dir.to_owned(), path: RwLock::new(path), inner: RwLock::new((config, error)) }
+    }
+
+    /// Keeps config.toml in `folder` (None: back in the app's own folder). The caller
+    /// then reloads and re-watches (lib.rs).
+    pub fn relocate(&self, folder: Option<&Path>) -> Result<Relocated, String> {
+        let current = self.path();
+        let local = self.home.join(FILE_NAME);
+        let pointer = self.home.join(FOLDER_POINTER);
+        let Some(folder) = folder else {
+            if current != local {
+                if local.exists() {
+                    let _ = std::fs::copy(&local, local.with_extension("toml.bak"));
+                }
+                std::fs::copy(&current, &local).map_err(|e| format!("could not copy the settings back: {e}"))?;
+            }
+            let _ = std::fs::remove_file(&pointer);
+            *self.path.write().unwrap() = local;
+            return Ok(Relocated::Default);
+        };
+        if !folder.is_dir() {
+            return Err(format!("{} isn't a folder", folder.display()));
+        }
+        let target = folder.join(FILE_NAME);
+        let outcome = if target.exists() {
+            let text = std::fs::read_to_string(&target).map_err(|e| format!("could not read {}: {e}", target.display()))?;
+            Config::parse(&text).map_err(|e| format!("{} isn't valid qterm settings: {e}", target.display()))?;
+            Relocated::UsedExisting
+        } else {
+            std::fs::copy(&current, &target).map_err(|e| format!("could not copy the settings to {}: {e}", folder.display()))?;
+            Relocated::Moved
+        };
+        std::fs::write(&pointer, folder.to_string_lossy().as_bytes()).map_err(|e| format!("could not remember the folder: {e}"))?;
+        *self.path.write().unwrap() = target;
+        Ok(outcome)
     }
 
     pub fn get(&self) -> Config {
         self.inner.read().unwrap().0.clone()
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn path(&self) -> PathBuf {
+        self.path.read().unwrap().clone()
     }
 
     pub fn snapshot(&self) -> Snapshot {
         let (config, error) = self.inner.read().unwrap().clone();
-        Snapshot { config, error, path: self.path.clone() }
+        let path = self.path();
+        let folder = (path != self.home.join(FILE_NAME)).then(|| path.parent().map(Path::to_path_buf)).flatten();
+        Snapshot { config, error, path, folder }
     }
 
     /// Re-reads the file. Returns the previous config when a new valid one took effect.
     pub fn reload(&self) -> Reload {
         let mut inner = self.inner.write().unwrap();
-        match read(&self.path) {
+        match read(&self.path()) {
             Ok(config) => {
                 let had_error = inner.1.take().is_some();
                 if config == inner.0 {
@@ -477,15 +543,15 @@ impl ConfigState {
     /// config.toml, keeping its comments and layout. The result must validate first;
     /// the file watcher then reloads it like any other edit.
     pub fn update(&self, changes: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
-        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let text = std::fs::read_to_string(self.path()).map_err(|e| format!("could not read settings: {e}"))?;
         let updated = apply_changes(&text, changes)?;
         Config::parse(&updated)?;
-        crate::claude::write_atomically(&self.path, &updated)
+        crate::claude::write_atomically(&self.path(), &updated)
     }
 
     /// Settings export: config.toml as it is on disk, comments included.
     pub fn export_to(&self, target: &Path) -> Result<(), String> {
-        std::fs::copy(&self.path, target).map(|_| ()).map_err(|e| format!("could not export settings: {e}"))
+        std::fs::copy(self.path(), target).map(|_| ()).map_err(|e| format!("could not export settings: {e}"))
     }
 
     /// Settings import: replaces config.toml with `source` once it validates. The
@@ -493,11 +559,11 @@ impl ConfigState {
     pub fn import_from(&self, source: &Path) -> Result<(), String> {
         let text = std::fs::read_to_string(source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
         Config::parse(&text).map_err(|e| format!("not valid qterm settings: {e}"))?;
-        if self.path.exists() {
-            std::fs::copy(&self.path, self.path.with_extension("toml.bak"))
+        if self.path().exists() {
+            std::fs::copy(self.path(), self.path().with_extension("toml.bak"))
                 .map_err(|e| format!("could not back up the current settings: {e}"))?;
         }
-        crate::claude::write_atomically(&self.path, &text)
+        crate::claude::write_atomically(&self.path(), &text)
     }
 }
 
@@ -593,7 +659,7 @@ impl ConfigState {
 
     /// Adds [[profiles]] entries (Settings → Import from Windows Terminal), keeping the file's comments.
     pub fn add_profiles(&self, profiles: &[crate::wt_import::WtProfile]) -> Result<(), String> {
-        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let text = std::fs::read_to_string(self.path()).map_err(|e| format!("could not read settings: {e}"))?;
         let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;
         let item = doc.entry("profiles").or_insert(toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
         let list = item.as_array_of_tables_mut().ok_or("`profiles` is not a list of [[profiles]] tables")?;
@@ -610,11 +676,11 @@ impl ConfigState {
         }
         let updated = doc.to_string();
         Config::parse(&updated)?;
-        crate::claude::write_atomically(&self.path, &updated)
+        crate::claude::write_atomically(&self.path(), &updated)
     }
 
     fn edit_layouts(&self, change: impl FnOnce(&mut toml_edit::ArrayOfTables) -> Result<(), String>) -> Result<(), String> {
-        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let text = std::fs::read_to_string(self.path()).map_err(|e| format!("could not read settings: {e}"))?;
         let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;
         let item = doc.entry("layouts").or_insert(toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
         let layouts = item.as_array_of_tables_mut().ok_or("`layouts` is not a list of [[layouts]] tables")?;
@@ -624,7 +690,7 @@ impl ConfigState {
         }
         let updated = doc.to_string();
         Config::parse(&updated)?;
-        crate::claude::write_atomically(&self.path, &updated)
+        crate::claude::write_atomically(&self.path(), &updated)
     }
 }
 
@@ -698,6 +764,12 @@ pub enum Reload {
     ErrorCleared,
     Invalid,
     Changed(Box<Config>),
+}
+
+fn read_pointer(dir: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(dir.join(FOLDER_POINTER)).ok()?;
+    let folder = text.trim();
+    (!folder.is_empty()).then(|| PathBuf::from(folder))
 }
 
 fn read(path: &Path) -> Result<Config, String> {
@@ -820,6 +892,58 @@ panes = [
         assert_eq!(std::fs::read_to_string(state.path()).unwrap(), "height = 0.4\n");
         assert_eq!(std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(), DEFAULT_FILE);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_move_to_a_folder_and_back() {
+        let base = std::env::temp_dir().join(format!("qterm-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (home, sync) = (base.join("home"), base.join("OneDrive").join("qterm"));
+        std::fs::create_dir_all(&sync).unwrap();
+        let state = ConfigState::load(&home);
+        std::fs::write(state.path(), "height = 0.4\n").unwrap();
+        state.reload();
+
+        // An empty folder: the settings are copied there and used from there.
+        assert_eq!(state.relocate(Some(&sync)).unwrap(), Relocated::Moved);
+        assert_eq!(state.path(), sync.join(FILE_NAME));
+        assert_eq!(std::fs::read_to_string(sync.join(FILE_NAME)).unwrap(), "height = 0.4\n");
+        assert_eq!(state.snapshot().folder.as_deref(), Some(sync.as_path()));
+        // A restart finds them there.
+        assert_eq!(ConfigState::load(&home).path(), sync.join(FILE_NAME));
+
+        // Another PC pointing at the same folder uses what's there.
+        let other = ConfigState::load(&base.join("other-pc"));
+        assert_eq!(other.relocate(Some(&sync)).unwrap(), Relocated::UsedExisting);
+        assert!(matches!(other.reload(), Reload::Changed(_)));
+        assert_eq!(other.get().height, 0.4);
+
+        // Back home: the folder's settings come along, the old local ones become .bak.
+        std::fs::write(sync.join(FILE_NAME), "height = 0.6\n").unwrap();
+        assert_eq!(state.relocate(None).unwrap(), Relocated::Default);
+        assert_eq!(state.path(), home.join(FILE_NAME));
+        assert_eq!(std::fs::read_to_string(home.join(FILE_NAME)).unwrap(), "height = 0.6\n");
+        assert!(home.join("config.toml.bak").exists());
+        assert!(state.snapshot().folder.is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn invalid_settings_in_the_folder_are_refused_and_an_unreachable_folder_falls_back() {
+        let base = std::env::temp_dir().join(format!("qterm-folder-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (home, sync) = (base.join("home"), base.join("sync"));
+        std::fs::create_dir_all(&sync).unwrap();
+        std::fs::write(sync.join(FILE_NAME), "height = 7\n").unwrap();
+        let state = ConfigState::load(&home);
+        assert!(state.relocate(Some(&sync)).unwrap_err().contains("isn't valid qterm settings"));
+        assert_eq!(state.path(), home.join(FILE_NAME), "still the local file");
+
+        std::fs::write(home.join(FOLDER_POINTER), base.join("gone").to_string_lossy().as_bytes()).unwrap();
+        let fallback = ConfigState::load(&home);
+        assert_eq!(fallback.path(), home.join(FILE_NAME));
+        assert!(fallback.snapshot().error.unwrap().contains("isn't reachable"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -41,8 +41,36 @@ pub fn run_claude_statusline(args: &[String]) {
 /// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
 
-/// Keeps the config and alert-inbox watchers alive for the app's lifetime.
+/// Keeps the alert-inbox watcher alive for the app's lifetime.
 struct Watchers(#[allow(dead_code)] Mutex<Vec<notify::RecommendedWatcher>>);
+
+/// The settings file's watcher; replaced when the settings move to another folder.
+struct ConfigWatcher(Mutex<Option<notify::RecommendedWatcher>>);
+
+/// Watches the settings file where it is now.
+fn watch_config(app: &AppHandle) {
+    let path = app.state::<ConfigState>().path();
+    let handle = app.clone();
+    let watcher = config::watch(path, move || on_config_file_changed(&handle))
+        .inspect_err(|e| qlog!("settings will not reload live: {e}"))
+        .ok();
+    match app.try_state::<ConfigWatcher>() {
+        Some(slot) => *slot.0.lock().unwrap() = watcher,
+        None => {
+            app.manage(ConfigWatcher(Mutex::new(watcher)));
+        }
+    }
+}
+
+/// Settings → Settings file: config.toml moves to `folder` (None: back home), the
+/// watcher follows, and the settings found there apply at once.
+pub(crate) fn set_settings_folder(app: &AppHandle, folder: Option<&std::path::Path>) -> Result<config::Relocated, String> {
+    let outcome = app.state::<ConfigState>().relocate(folder)?;
+    qlog!("settings now in {}", app.state::<ConfigState>().path().display());
+    watch_config(app);
+    on_config_file_changed(app);
+    Ok(outcome)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -92,7 +120,6 @@ pub fn run() {
             if let Some(error) = config.snapshot().error {
                 qlog!("{error}");
             }
-            let config_path = config.path().to_owned();
             app.manage(config);
             app.manage(claude::ClaudeStore::load(&config_dir, claude::claude_home()));
             app.manage(scrollback::ScrollbackStore::new(app.path().app_local_data_dir()?.join("scrollback")));
@@ -110,14 +137,11 @@ pub fn run() {
             window::apply_effect(app.handle());
             tray::repoint_autostart(app.handle());
 
-            let handle = app.handle().clone();
-            let config_watcher = config::watch(config_path, move || on_config_file_changed(&handle))
-                .inspect_err(|e| qlog!("settings will not reload live: {e}"))
-                .ok();
+            watch_config(app.handle());
             let alert_watcher = alerts::watch_inbox(app.handle().clone())
                 .inspect_err(|e| qlog!("Claude alerts unavailable: {e}"))
                 .ok();
-            app.manage(Watchers(Mutex::new(config_watcher.into_iter().chain(alert_watcher).collect())));
+            app.manage(Watchers(Mutex::new(alert_watcher.into_iter().collect())));
 
             if updater::just_updated(app.handle()) || !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
                 window::show_when_ready(app.handle());
@@ -154,6 +178,7 @@ pub fn run() {
             commands::save_config,
             commands::open_config_file,
             commands::export_settings,
+            commands::set_settings_folder,
             commands::import_settings,
             commands::get_autostart,
             commands::set_autostart,

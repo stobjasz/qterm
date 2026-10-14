@@ -8,6 +8,9 @@ import {
   openLogs,
   checkUpdate,
   claudeHookStatus,
+  chooseSettingsFolder,
+  setSettingsFolder,
+  type Relocated,
   windowsTerminalProfiles,
   importWindowsTerminalProfiles,
   type WtProfile,
@@ -130,6 +133,16 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
       setNotice(`Added ${chosen.length} shell${chosen.length === 1 ? "" : "s"} from Windows Terminal (▾ menu, palette).`);
     }, (e) => setError(String(e)));
   };
+  // Settings moved to (or from) a folder: start over from the settings found there.
+  // Only on a move: a plain settings change keeps what you were editing.
+  useEffect(() => setDraft(toDraft(snapshot.config)), [snapshot.path]);
+  const RELOCATED: Record<Relocated, string> = {
+    moved: "Your settings were copied to that folder and are kept there now.",
+    usedExisting: "That folder already had qterm settings (from another PC): those are used now.",
+    default: "Settings are back in the default place, with the folder's settings.",
+  };
+  const relocate = (folder: string | null) =>
+    void setSettingsFolder(folder).then((outcome) => setNotice(RELOCATED[outcome]), (e) => setError(String(e)));
   const [statusline, setStatusline] = useState<StatuslineStatus>();
   useEffect(() => void claudeStatuslineStatus().then(setStatusline, (e) => setError(String(e))), []);
   const changeStatusline = (action: () => Promise<StatuslineStatus>) => void action().then(setStatusline, (e) => setError(String(e)));
@@ -546,6 +559,23 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 <button onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
               )}
               {statusline?.installed && <button onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
+            </div>
+          </div>
+        </Group>
+
+        <Group title="Settings file">
+          <div className="settings-field">
+            <span className="settings-label">Where your settings are kept</span>
+            <span className="settings-hint">
+              {snapshot.path}. Keep them in a folder of your own, such as OneDrive or a dotfiles repository, to share
+              them between PCs: choose the same folder on each. A folder that already has qterm settings keeps them;
+              otherwise yours are copied there. Tabs, history and saved output stay on each PC.
+            </span>
+            <div className="settings-actions">
+              <button onClick={() => void chooseSettingsFolder().then((folder) => folder && relocate(folder))}>
+                {snapshot.folder ? "Another folder…" : "Keep settings in a folder…"}
+              </button>
+              {snapshot.folder && <button onClick={() => relocate(null)}>Back to the default place</button>}
             </div>
           </div>
         </Group>

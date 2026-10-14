@@ -95,6 +95,8 @@ export interface ConfigSnapshot {
   config: Config;
   error: string | null;
   path: string;
+  /** The folder of your choice the settings live in, if any (Settings → Settings file). */
+  folder: string | null;
 }
 
 export interface PtyExit {
@@ -573,6 +575,20 @@ export function windowsTerminalProfiles(): Promise<WtProfile[]> {
 /** Adds them as [[profiles]] in config.toml. */
 export function importWindowsTerminalProfiles(profiles: WtProfile[]): Promise<void> {
   return invoke("import_windows_terminal_profiles", { profiles });
+}
+
+/** How the settings moved: copied to the folder, the folder's own taken, or back home. */
+export type Relocated = "moved" | "usedExisting" | "default";
+
+/** Asks for a folder to keep the settings in (OneDrive, a dotfiles repo); null when cancelled. */
+export async function chooseSettingsFolder(): Promise<string | null> {
+  const folder = await openDialog({ title: "Keep qterm's settings in this folder", directory: true });
+  return typeof folder === "string" ? folder : null;
+}
+
+/** Moves config.toml to `folder` (null: back to the default place); applies at once. */
+export function setSettingsFolder(folder: string | null): Promise<Relocated> {
+  return invoke("set_settings_folder", { folder });
 }
 
 /** Writes a line to qterm's log file. */

@@ -321,6 +321,12 @@ pub fn show_plan_warning(app: AppHandle, title: String, message: String) -> Resu
     crate::alerts::show_plain_notification(&app, &title, &message)
 }
 
+/// Settings → Settings file: keep config.toml in `folder` (None: the default place).
+#[tauri::command]
+pub fn set_settings_folder(app: AppHandle, folder: Option<String>) -> Result<crate::config::Relocated, String> {
+    crate::set_settings_folder(&app, folder.as_deref().map(std::path::Path::new))
+}
+
 /// Shells Windows Terminal has that qterm doesn't (Settings → Import from Windows Terminal).
 #[tauri::command]
 pub async fn windows_terminal_profiles(
