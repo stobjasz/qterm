@@ -65,8 +65,10 @@ claude_alerts = true
 claude_restore = false
 
 # Ctrl+click a file reference like src/app.ts:42 to open it with this command.
-# {file}, {line} and {col} are filled in. Without the editor installed, the file
-# opens in its default app.
+# {file}, {line} and {col} are filled in; double quotes keep a program path with
+# spaces together, e.g.
+#   editor = '"C:\Program Files\Notepad++\notepad++.exe" -n{line} -c{col} {file}'
+# Without the editor installed, the file opens in its default app.
 editor = "code --goto {file}:{line}:{col}"
 
 # When a command that ran at least this many seconds finishes and you aren't

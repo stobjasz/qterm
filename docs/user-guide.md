@@ -503,9 +503,10 @@ default_profile = "wsl:Ubuntu-24.04"
 ```
 
 **Another editor.** `editor` is the command that opens a file at a line (Ctrl+click on
-`src/app.ts:42`, quick select, "Open pane output in editor"). The editor's program has to
-be on your PATH (or in a folder without spaces); file paths with spaces work. If the
-program isn't found, the file opens in its default app.
+`src/app.ts:42`, quick select, "Open pane output in editor"). Give the editor's program
+by name if it's on your PATH, or by its full path in double quotes (then put the whole
+setting in single quotes, as for Notepad++ below). File paths with spaces work either
+way. If the program isn't found, the file opens in its default app.
 
 ```toml
 editor = "code --goto {file}:{line}:{col}"            # VS Code (the default)
@@ -513,7 +514,7 @@ editor = "code --goto {file}:{line}:{col}"            # VS Code (the default)
 # editor = "subl {file}:{line}:{col}"                 # Sublime Text (subl on the PATH)
 # editor = "zed {file}:{line}:{col}"                  # Zed
 # editor = "webstorm --line {line} --column {col} {file}"   # JetBrains IDEs: idea, pycharm, rider, ... (Toolbox shell scripts)
-# editor = "notepad++ -n{line} -c{col} {file}"        # Notepad++ (its folder on the PATH)
+# editor = '"C:\Program Files\Notepad++\notepad++.exe" -n{line} -c{col} {file}'   # Notepad++
 ```
 
 **Saved output per shell.** `[scrollback]`: whether panes keep their output across

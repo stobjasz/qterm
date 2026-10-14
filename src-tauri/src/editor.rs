@@ -41,11 +41,12 @@ pub fn open(template: &str, file: &str, line: Option<u32>, col: Option<u32>) -> 
         .map_err(|e| format!("could not start the editor: {e}"))
 }
 
-/// Splits the template on whitespace and fills in the placeholders per argument,
-/// so a path with spaces stays one argument.
+/// Splits the template like a profile's command (double quotes keep words with spaces
+/// together, e.g. a program under "C:\Program Files"), then fills in the placeholders
+/// per argument, so a file path with spaces stays one argument too.
 fn expand(template: &str, file: &str, line: u32, col: u32) -> Vec<String> {
-    template
-        .split_whitespace()
+    crate::pty::split_command(template)
+        .into_iter()
         .map(|arg| {
             arg.replace("{file}", file)
                 .replace("{line}", &line.to_string())
@@ -114,6 +115,19 @@ mod tests {
             ["code", "--goto", r"C:\my repo\a.ts:42:7"]
         );
         assert_eq!(expand("notepad++ -n{line} {file}", "x.txt", 3, 1), ["notepad++", "-n3", "x.txt"]);
+    }
+
+    #[test]
+    fn a_quoted_program_path_with_spaces_stays_one_argument() {
+        assert_eq!(
+            expand(r#""C:\Program Files\Notepad++\notepad++.exe" -n{line} -c{col} {file}"#, r"C:\my repo\a b.txt", 3, 9),
+            [r"C:\Program Files\Notepad++\notepad++.exe", "-n3", "-c9", r"C:\my repo\a b.txt"]
+        );
+        // Written in the settings file as the user guide shows it.
+        let config = crate::config::Config::parse(r#"editor = '"C:\Program Files\Notepad++\notepad++.exe" -n{line} -c{col} {file}'"#).unwrap();
+        assert_eq!(expand(&config.editor, "x.txt", 1, 2)[0], r"C:\Program Files\Notepad++\notepad++.exe");
+        // A quoted argument around a placeholder is one argument, quotes removed.
+        assert_eq!(expand(r#"edit "{file}:{line}""#, r"C:\a b\c.rs", 1, 1), ["edit", r"C:\a b\c.rs:1"]);
     }
 
     #[test]
