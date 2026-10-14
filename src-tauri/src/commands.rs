@@ -321,6 +321,21 @@ pub fn show_plan_warning(app: AppHandle, title: String, message: String) -> Resu
     crate::alerts::show_plain_notification(&app, &title, &message)
 }
 
+/// Shells Windows Terminal has that qterm doesn't (Settings → Import from Windows Terminal).
+#[tauri::command]
+pub async fn windows_terminal_profiles(
+    sessions: State<'_, SessionManager>,
+    config: State<'_, ConfigState>,
+) -> Result<Vec<crate::wt_import::WtProfile>, String> {
+    Ok(crate::wt_import::candidates(&all_profiles(&sessions, &config)))
+}
+
+/// Adds the chosen ones as [[profiles]] in config.toml (the watcher applies them).
+#[tauri::command]
+pub fn import_windows_terminal_profiles(config: State<'_, ConfigState>, profiles: Vec<crate::wt_import::WtProfile>) -> Result<(), String> {
+    config.add_profiles(&profiles)
+}
+
 /// Saves (or replaces by name) a [[layouts]] entry in config.toml.
 #[tauri::command]
 pub fn save_layout(config: State<'_, ConfigState>, layout: serde_json::Value) -> Result<(), String> {

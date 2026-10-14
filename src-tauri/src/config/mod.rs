@@ -552,6 +552,28 @@ impl ConfigState {
         })
     }
 
+    /// Adds [[profiles]] entries (Settings → Import from Windows Terminal), keeping the file's comments.
+    pub fn add_profiles(&self, profiles: &[crate::wt_import::WtProfile]) -> Result<(), String> {
+        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
+        let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;
+        let item = doc.entry("profiles").or_insert(toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
+        let list = item.as_array_of_tables_mut().ok_or("`profiles` is not a list of [[profiles]] tables")?;
+        for profile in profiles {
+            let mut table = toml_edit::Table::new();
+            table.insert("name", toml_edit::value(profile.name.as_str()));
+            table.insert("command", toml_edit::value(profile.command.as_str()));
+            for (key, value) in [("cwd", &profile.cwd), ("background", &profile.background), ("tab_color", &profile.tab_color), ("icon", &profile.icon)] {
+                if let Some(value) = value {
+                    table.insert(key, toml_edit::value(value.as_str()));
+                }
+            }
+            list.push(table);
+        }
+        let updated = doc.to_string();
+        Config::parse(&updated)?;
+        crate::claude::write_atomically(&self.path, &updated)
+    }
+
     fn edit_layouts(&self, change: impl FnOnce(&mut toml_edit::ArrayOfTables) -> Result<(), String>) -> Result<(), String> {
         let text = std::fs::read_to_string(&self.path).map_err(|e| format!("could not read settings: {e}"))?;
         let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("settings file is not valid TOML: {e}"))?;

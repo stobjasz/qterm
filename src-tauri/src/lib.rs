@@ -20,6 +20,7 @@ mod tray;
 mod updater;
 mod whats_new;
 mod window;
+mod wt_import;
 
 use std::sync::Mutex;
 
@@ -172,6 +173,8 @@ pub fn run() {
             commands::show_plan_warning,
             commands::set_plan_summary,
             commands::save_layout,
+            commands::windows_terminal_profiles,
+            commands::import_windows_terminal_profiles,
             commands::delete_layout,
             commands::list_all_claude_sessions,
             commands::claude_running,

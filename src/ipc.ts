@@ -552,6 +552,27 @@ export function setPlanSummary(summary: string | null): Promise<void> {
   return invoke("set_plan_summary", { summary });
 }
 
+/** A Windows Terminal shell qterm doesn't have yet. */
+export interface WtProfile {
+  name: string;
+  command: string;
+  cwd: string | null;
+  background: string | null;
+  tabColor: string | null;
+  icon: string | null;
+  /** "Windows Terminal", "Visual Studio", ... */
+  origin: string;
+}
+
+export function windowsTerminalProfiles(): Promise<WtProfile[]> {
+  return invoke("windows_terminal_profiles");
+}
+
+/** Adds them as [[profiles]] in config.toml. */
+export function importWindowsTerminalProfiles(profiles: WtProfile[]): Promise<void> {
+  return invoke("import_windows_terminal_profiles", { profiles });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

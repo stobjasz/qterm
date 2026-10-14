@@ -165,11 +165,7 @@ impl Profile {
 
         if integrate {
             match self.kind {
-                Kind::PowerShell => {
-                    // Base64 of UTF-16LE: no command-line quoting can mangle the script.
-                    let utf16: Vec<u8> = POWERSHELL_INTEGRATION.encode_utf16().flat_map(u16::to_le_bytes).collect();
-                    args.extend(["-NoExit".into(), "-EncodedCommand".into(), BASE64.encode(utf16)]);
-                }
+                Kind::PowerShell => powershell_integration(&mut args),
                 Kind::Cmd => {
                     // $e = ESC, $P = current folder; the user's own PROMPT goes between
                     // the marks. cmd's prompt can't see the exit code, so D has none.
@@ -186,8 +182,45 @@ impl Profile {
     }
 }
 
+/// Adds the prompt integration to PowerShell's arguments. Base64 of UTF-16LE, so no
+/// command-line quoting can mangle the script. `-Command` takes the rest of the line
+/// as its script, so with one of the profile's own (e.g. a Visual Studio developer
+/// shell) the integration runs first inside that script instead of being appended
+/// after it, which would end up as the script's arguments. A `-File` profile can't
+/// take it.
+fn powershell_integration(args: &mut Vec<String>) {
+    let utf16: Vec<u8> = POWERSHELL_INTEGRATION.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = BASE64.encode(utf16);
+    let is = |arg: &str, name: &str, shortest: usize| {
+        let arg = arg.to_ascii_lowercase();
+        arg.len() >= shortest && name.starts_with(&arg)
+    };
+    if args.iter().any(|a| is(a, "-file", 2)) {
+        return;
+    }
+    let Some(at) = args.iter().position(|a| is(a, "-command", 2)) else {
+        args.extend(["-NoExit".into(), "-EncodedCommand".into(), encoded]);
+        return;
+    };
+    let script = args.split_off(at + 1).join(" ");
+    let integration = format!(". ([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded}'))))");
+    args.push(if script.trim().is_empty() { integration } else { format!("{integration}; {script}") });
+    if !args[..at].iter().any(|a| a.eq_ignore_ascii_case("-NoExit")) {
+        args.insert(at, "-NoExit".into());
+    }
+}
+
 /// Detected profiles plus the user's [[profiles]]. A custom profile with a detected
 /// id ("pwsh") replaces that one in place; the rest are added after.
+impl Profile {
+    /// Program file name and arguments, lower-cased (see wt_import::command_key).
+    pub fn command_key(&self) -> String {
+        let file = std::path::Path::new(&self.program).file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let file = file.strip_suffix(".exe").unwrap_or(&file).to_string();
+        std::iter::once(file).chain(self.args.iter().map(|a| a.to_lowercase())).collect::<Vec<_>>().join(" ")
+    }
+}
+
 pub fn merge(detected: &[Profile], custom: &[CustomProfile]) -> Vec<Profile> {
     let mut all: Vec<Profile> = detected.to_vec();
     for def in custom {
@@ -399,6 +432,37 @@ mod tests {
         assert_eq!(argv(&wsl.command(Some("/home/me/src"), true)), ["wsl.exe", "-d", "U", "--cd", "/home/me/src"]);
         // A Windows path means nothing inside the distro: stay in ~.
         assert_eq!(argv(&wsl.command(Some(r"C:\x"), true)).last().unwrap(), "~");
+    }
+
+    #[test]
+    fn powershell_integration_goes_in_front_of_a_profiles_own_command() {
+        let def = |command: &str| CustomProfile {
+            id: None,
+            name: "x".into(),
+            command: command.into(),
+            cwd: None,
+            env: Default::default(),
+            theme: None,
+            font_size: None,
+            tab_color: None,
+            icon: None,
+            background: None,
+        };
+        let vs = Profile::custom(&def(r#"powershell.exe -NoExit -Command "Import-Module 'C:\x y\DevShell.dll'; Enter-VsDevShell abc""#));
+        let args = argv(&vs.command(None, true));
+        assert_eq!(args[..3], ["powershell.exe", "-NoExit", "-Command"]);
+        assert_eq!(args.len(), 4, "nothing after the script: it would become its arguments");
+        assert!(args[3].starts_with(". ([scriptblock]::Create("));
+        assert!(args[3].ends_with(r"; Import-Module 'C:\x y\DevShell.dll'; Enter-VsDevShell abc"));
+        let encoded = args[3].split('\'').nth(1).unwrap();
+        let bytes = BASE64.decode(encoded).unwrap();
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|&p| u16::from_le_bytes(p)).collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), POWERSHELL_INTEGRATION);
+
+        // -NoExit is added when missing, so the shell stays after the script.
+        assert_eq!(argv(&Profile::custom(&def("pwsh -c \"npm run dev\"")).command(None, true))[1], "-NoExit");
+        // A script file can't take it.
+        assert_eq!(argv(&Profile::custom(&def("pwsh -File build.ps1")).command(None, true)), ["pwsh", "-File", "build.ps1"]);
     }
 
     #[test]

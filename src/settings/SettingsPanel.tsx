@@ -8,6 +8,9 @@ import {
   openLogs,
   checkUpdate,
   claudeHookStatus,
+  windowsTerminalProfiles,
+  importWindowsTerminalProfiles,
+  type WtProfile,
   claudeStatuslineStatus,
   installClaudeStatusline,
   removeClaudeStatusline,
@@ -111,6 +114,21 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
   useEffect(() => void getAutostart().then(setAutostartState), []);
   useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
   const changeHook = (action: () => Promise<HookStatus>) => void action().then(setHook, (e) => setError(String(e)));
+  /** Import from Windows Terminal: the shells offered, and which are ticked. */
+  const [wt, setWt] = useState<{ profiles: WtProfile[]; chosen: ReadonlySet<string> }>();
+  const findWt = () =>
+    void windowsTerminalProfiles().then(
+      (profiles) => (profiles.length ? setWt({ profiles, chosen: new Set(profiles.map((p) => p.name)) }) : setNotice("Windows Terminal has no shells qterm doesn't have already.")),
+      (e) => setError(String(e)),
+    );
+  const importWt = () => {
+    if (!wt) return;
+    const chosen = wt.profiles.filter((p) => wt.chosen.has(p.name));
+    void importWindowsTerminalProfiles(chosen).then(() => {
+      setWt(undefined);
+      setNotice(`Added ${chosen.length} shell${chosen.length === 1 ? "" : "s"} from Windows Terminal (▾ menu, palette).`);
+    }, (e) => setError(String(e)));
+  };
   const [statusline, setStatusline] = useState<StatuslineStatus>();
   useEffect(() => void claudeStatuslineStatus().then(setStatusline, (e) => setError(String(e))), []);
   const changeStatusline = (action: () => Promise<StatuslineStatus>) => void action().then(setStatusline, (e) => setError(String(e)));
@@ -286,6 +304,45 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
             checked={draft.sshProfiles}
             onChange={(v) => set("sshProfiles", v)}
           />
+          <div className="settings-field">
+            <span className="settings-label">Shells from Windows Terminal</span>
+            <span className="settings-hint">
+              Adds Windows Terminal's shells that qterm doesn't have (your own profiles, ones other apps added, Visual
+              Studio's developer shells) to the settings file as profiles.
+            </span>
+            {wt ? (
+              <div className="wt-import" role="group" aria-label="Shells to import">
+                {wt.profiles.map((p) => (
+                  <label key={p.name} className="settings-toggle" title={p.command}>
+                    <input
+                      type="checkbox"
+                      checked={wt.chosen.has(p.name)}
+                      onChange={(e) => {
+                        const chosen = new Set(wt.chosen);
+                        if (e.target.checked) chosen.add(p.name);
+                        else chosen.delete(p.name);
+                        setWt({ ...wt, chosen });
+                      }}
+                    />
+                    <span>
+                      {p.name}
+                      <span className="settings-hint">from {p.origin}</span>
+                    </span>
+                  </label>
+                ))}
+                <div className="settings-actions">
+                  <button className="primary" disabled={wt.chosen.size === 0} onClick={importWt}>
+                    Add {wt.chosen.size} shell{wt.chosen.size === 1 ? "" : "s"}
+                  </button>
+                  <button onClick={() => setWt(undefined)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="settings-actions">
+                <button onClick={findWt}>Import from Windows Terminal…</button>
+              </div>
+            )}
+          </div>
           <Toggle
             label="“Open in qterm” in Explorer's menu"
             hint="Right-click a folder, or inside one, for a new tab there. On Windows 11 it is under “Show more options”."
