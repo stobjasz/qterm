@@ -135,3 +135,21 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 Also done outside the list: the Settings panel's groups are as tall as their content
 (masonry layout, tall groups span more columns), so on a wide, short console every group
 fits without scrolling (2026-10-14, not released yet).
+
+## Usability review (2026-10-14)
+
+Found by driving the app on a 5120x720 console, outside the roadmap:
+
+- ✅ Esc didn't close menus and panels opened while the keyboard was in a terminal (tab
+  and pane menus, a command's menu, Settings, Shortcuts and tips, What's new), and went
+  to the shell instead; now they close and the shell never sees it. E2E R20.
+- ✅ The tab bar's tools sat at the far right edge, thousands of pixels from the tabs on
+  a wide console; they follow the tabs now.
+- ✅ Closing a tab or pane where a program still runs asks first. E2E R21.
+- ✅ "Shortcuts and tips" (Ctrl+Shift+/, the ? button) and a welcome on the first start.
+  E2E R22.
+- ✅ The palette with nothing typed: recent entries first, long lists only when typing.
+- ✅ Settings marks what applies right away (⚡).
+- ✅ "Claude is waiting" (tray, ✳ menu, palette, Alt+Shift+W) counts Claude only, not
+  long-command or trigger marks.
+- ✅ The tab's × has a tooltip.

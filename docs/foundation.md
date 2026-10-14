@@ -4,7 +4,7 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M6 and the feature rounds done (§11–30; v0.2.2 released 2026-10-14). What's
+Status: M0–M6 and the feature rounds done (§11–31; v0.2.2 released 2026-10-14). What's
 next: [roadmap.md](roadmap.md); what's done: [roadmap-archive.md](roadmap-archive.md).
 
 ---
@@ -1182,3 +1182,48 @@ filter, which now looks inside `.settings-group-body`) and on resize.
 (all 9 groups side by side, no scrolling; Appearance, Terminal and Claude Code at 2
 columns, the shortcuts at 4) and at 1508x1167 (4 columns, scrolls a little); the
 screenshots checked by eye. The E2E suite (Settings save, search) passes.
+
+## 31. Usability review (2026-10-14)
+
+Driven in the test app on the real 5120x720 console, with screenshots of the app's own
+page.
+
+**Esc and the terminal.** Right-clicking a tab, Shift+right-clicking a pane, clicking a
+command's bar or opening a panel with a shortcut leaves the keyboard focus in xterm's
+textarea, which handles Esc (sending it to the shell, where PowerShell clears the line)
+before a bubbling window listener sees it. Menus use `useDismiss` (Esc caught in the
+capture phase, `preventDefault` + `stopPropagation`, or a click outside); panels use
+`useEscape`, which catches Esc first only when its target is inside `.xterm`, so a
+panel's own fields still get it (Settings' search clears before the panel closes).
+
+**Tab bar.** The spacer that pushed the tools to the right edge is gone; `Popup` menus
+open to the right of their button and shift left only as far as needed to stay in the
+window (measured on open).
+
+**Closing with something running.** `running_programs(session ids)` walks the process
+tree under each pane's shell (`procs::programs_below`, without conhost, OpenConsole,
+wslhost and wslrelay); ×, middle click and Ctrl+Shift+W ask through `ConfirmClose` when
+the list isn't empty (Cancel focused). A shell exiting still closes its pane at once.
+
+**Shortcuts and tips, welcome.** `show_help` (`ctrl+shift+/`) and a ? button open
+`HelpSheet`: every action with its chord in effect (overrides applied), the fixed ones,
+the mouse gestures, a few tips. The welcome banner shows when this start created the
+settings file (`ConfigState::first_start`, false with a settings-folder pointer): a
+fresh install, never an update; tests write the file first, so they don't see it.
+
+**Palette.** With an empty query, `emptyQueryOrder`: up to 8 recently run entries (kept
+in the WebView's localStorage, a convenience) first, then the rest without New admin
+tab, Tab colour, Theme and Delete workspace.
+
+**Settings.** Controls that act without Save carry the `now` class (⚡ via CSS) and a
+tooltip; the footer explains it.
+
+**Claude counts.** `isClaudeAlert` (not `command_*`, not `trigger`) filters the attention
+map for the tray count, the ✳ menu's waiting list, the palette and `next_waiting`.
+
+**Verified:** E2E R20 (menus and Settings close on Esc from the terminal, a typed line
+survives), R21 (ping running → the dialog names it; Cancel keeps, Close closes; an idle
+pane closes at once), R22 (Ctrl+Shift+/ from the terminal; a rebound shortcut shows its
+new keys), each red under a deliberate break; unit tests for chord labels, the hotkey
+label, palette order and memory, Claude alerts, `programs_below`, `first_start`. The doc
+guard caught `show_help` missing from the user guide and default.toml.

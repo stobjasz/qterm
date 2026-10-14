@@ -32,7 +32,9 @@ it has extras for working with Claude Code.
 
    The files aren't code-signed yet, so SmartScreen may warn the first time: click
    **More info**, then **Run anyway**. The console appears at the top of the screen.
-2. Press **~** to hide it and **~** again to bring it back.
+2. Press **~** to hide it and **~** again to bring it back. On the first start a welcome
+   line says where things are; **Ctrl+Shift+/** (or the **?** in the tab bar) lists every
+   shortcut, the mouse gestures and a few tips at any time.
 3. To have it ready after every sign-in, open the tray icon menu and tick **Start with
    Windows**. It then starts hidden and waits for the hotkey.
 
@@ -110,6 +112,8 @@ daily checks. Nothing installs without your click.
   restarts), else the title the shell sets, else the shell's name.
 - **Reorder:** drag a tab.
 - **Close:** the × on the tab, a middle click on the tab, or Ctrl+Shift+W for the current pane.
+  If a program still runs there (Claude Code, a dev server, a build), qterm says which
+  and asks first; Cancel is the default. A shell you exit closes its pane right away.
 - **Colour and icon:** right-click a tab to give it one of eight colours and an icon
   (an emoji or a few letters). A shell can bring its own, see Profiles below.
 
@@ -221,7 +225,8 @@ Enter is not pressed, so you can finish the command first.
 
 **Command palette:** Ctrl+Shift+P lists everything qterm can do, plus your tabs,
 shells, themes, layouts, snippets and Claude sessions. Type a few letters of anything
-("spl r" finds Split right), then Enter.
+("spl r" finds Split right), then Enter. With nothing typed, what you used lately comes
+first; admin tabs, tab colours, themes and deleting workspaces show once you type.
 
 **Triggers** watch what your shells print. When a line matches, qterm highlights it,
 marks the tab (⚑ with the line), or also sends a Windows notification when you aren't
@@ -405,7 +410,9 @@ qterm never asks for administrator rights on its own.
 ## Settings
 
 Open the settings with the ⚙ button, Ctrl+, or the tray menu. Changes apply when you
-click **Save**; Esc or Cancel discards them. **Search settings** at the top shows only
+click **Save**; Esc or Cancel discards them. Controls marked **⚡** act right away
+instead (installing an update, setting up the Claude hooks, moving the settings folder,
+Start with Windows, ...). **Search settings** at the top shows only
 the settings that match what you type (Esc clears it). The groups arrange themselves to
 the console's size: on a wide console, long groups spread over several columns so
 everything fits without scrolling. At the bottom:
