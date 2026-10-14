@@ -190,7 +190,15 @@ export function TabBar(props: Props) {
                   aria-label={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : `Claude is waiting: ${waiting.message}`}
                   title={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : undefined}
                 >
-                  {waiting.kind === "command_done" ? "✓" : waiting.kind === "command_failed" ? "✗" : waiting.kind?.startsWith("stop_failure") ? "!" : "✳"}
+                  {waiting.kind === "command_done"
+                    ? "✓"
+                    : waiting.kind === "command_failed"
+                      ? "✗"
+                      : waiting.kind === "trigger"
+                        ? "⚑"
+                        : waiting.kind?.startsWith("stop_failure")
+                          ? "!"
+                          : "✳"}
                 </span>
               )}
               <button
@@ -292,9 +300,9 @@ export function TabBar(props: Props) {
   );
 }
 
-/** Alerts that say what happened in their title: a long command's end, Claude stopping on an error. */
+/** Alerts that say what happened in their title: a long command's end, Claude stopping on an error, a trigger. */
 function titled(kind: string | null | undefined): boolean {
-  return Boolean(kind?.startsWith("command_") || kind?.startsWith("stop_failure"));
+  return Boolean(kind?.startsWith("command_") || kind?.startsWith("stop_failure") || kind === "trigger");
 }
 
 function RenameField({ initial, onDone }: { initial: string; onDone(value?: string): void }) {

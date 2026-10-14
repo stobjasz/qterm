@@ -31,6 +31,7 @@ import type { PaneId } from "../workspace/workspace";
 import { hasContent, plainLines } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
 import { parseMark } from "./marks";
+import { matching, type Trigger } from "./triggers";
 import { findInLines, SEARCH_ALL_LIMIT, type SearchHit, type SearchOptions } from "./searchAll";
 import { findFileLinks } from "./links";
 import { terminalOptions } from "./theme";
@@ -67,7 +68,12 @@ export interface RegistryEvents {
   onCommandFinished(paneId: PaneId, finished: FinishedCommand): void;
   /** A click on a command's ✓/✗ bar, at page position (x, y). */
   onCommandBlock(paneId: PaneId, block: CommandBlock, x: number, y: number): void;
+  /** A line matched a mark / notify trigger (at most every TRIGGER_REPEAT_MS per trigger and pane). */
+  onTrigger(paneId: PaneId, trigger: Trigger, line: string): void;
 }
+
+/** One trigger in one pane fires at most this often: a chatty build can't flood you. */
+const TRIGGER_REPEAT_MS = 3000;
 
 /** A finished command, as its bar's menu sees it (see blockOutput, selectBlock). */
 export interface CommandBlock {
@@ -172,6 +178,8 @@ interface Entry {
   copyTimer?: number;
   /** Line feeds since the last scan for Claude session ids, and the ids already reported. */
   linesSinceScan: number;
+  /** Date.now() each trigger last fired here (by label). */
+  triggerTimes: Map<string, number>;
   scanTimer?: number;
   claudeSeen: Set<string>;
   /** In a background tab, and output has been reported since. */
@@ -206,6 +214,13 @@ export class TerminalRegistry {
   private keymap: Keymap = buildKeymap();
   private font: FontSettings = { family: terminalOptions.fontFamily!, size: terminalOptions.fontSize! };
   private theme: Theme = THEMES.qterm;
+  private triggers: readonly Trigger[] = [];
+
+  /** [[triggers]], compiled (triggers.ts). */
+  setTriggers(triggers: readonly Trigger[]): void {
+    this.triggers = triggers;
+  }
+
   private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false, inlineImages: true, ligatures: false };
   /** Pane → every pane its typing goes to (broadcasting tabs only). */
   private broadcast = new Map<PaneId, PaneId[]>();
@@ -565,6 +580,7 @@ export class TerminalRegistry {
       started: false,
       pendingAck: 0,
       linesSinceScan: 0,
+      triggerTimes: new Map(),
       claudeSeen: new Set(),
       background: false,
       activityReported: false,
@@ -646,6 +662,8 @@ export class TerminalRegistry {
       return true;
     });
     term.onLineFeed(() => {
+      // Only the shell's own output: not the restored lines written before it started.
+      if (this.triggers.length && entry.sessionId !== undefined) this.checkTriggers(paneId, entry);
       if (!this.behavior.claudeSessions) return;
       entry.linesSinceScan++;
       entry.scanTimer ??= window.setTimeout(() => this.scanForClaude(paneId, entry), CLAUDE_SCAN_DELAY_MS);
@@ -706,6 +724,35 @@ export class TerminalRegistry {
   private applyImages(entry: Entry): void {
     entry.images?.dispose();
     entry.images = this.behavior.inlineImages ? loadAddon(entry.term, () => new ImageAddon()) : undefined;
+  }
+
+  /**
+   * The line that just ended (wrapped rows joined) against the triggers: highlight it,
+   * or report it. Full-screen programs (the alternate screen) redraw all the time and
+   * don't count.
+   */
+  private checkTriggers(paneId: PaneId, entry: Entry): void {
+    const { term } = entry;
+    const buffer = term.buffer.active;
+    if (buffer.type !== "normal") return;
+    const cursor = buffer.baseY + buffer.cursorY;
+    const end = cursor - 1;
+    if (end < 0) return;
+    let start = end;
+    while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+    let text = "";
+    for (let y = start; y <= end; y++) text += buffer.getLine(y)?.translateToString(true) ?? "";
+    const now = Date.now();
+    for (const trigger of matching(this.triggers, text)) {
+      if (trigger.action === "highlight") {
+        const marker = term.registerMarker(start - cursor);
+        if (marker) term.registerDecoration({ marker, width: term.cols, height: end - start + 1, backgroundColor: trigger.color, layer: "bottom" });
+        continue;
+      }
+      if (now - (entry.triggerTimes.get(trigger.label) ?? 0) < TRIGGER_REPEAT_MS) continue;
+      entry.triggerTimes.set(trigger.label, now);
+      this.events.onTrigger(paneId, trigger, text.trim());
+    }
   }
 
   /** OSC 133: A = prompt, B = typing starts, D = the command ended. */

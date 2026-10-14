@@ -145,6 +145,22 @@ ligatures = false
 # name; `command` is typed into the shell once it starts. "Save this tab as a
 # layout" in the ▾ menu writes one of these for you.
 #
+# Triggers: when a line a shell prints matches `pattern` (text, ignoring case; or a
+# JavaScript regular expression with `regex = true`), qterm can:
+#   action = "highlight"  colour the line (`color = "#rrggbb"`, a dark amber by default)
+#   action = "mark"       put ⚑ on the tab (until you look at it)
+#   action = "notify"     mark the tab and, when you aren't looking, notify (the default)
+# Full-screen programs and output restored after a restart don't count.
+#
+# [[triggers]]
+# name = "Build done"
+# pattern = "Compiled successfully"
+#
+# [[triggers]]
+# pattern = 'error TS\d+'   # single quotes: the backslash stays as it is
+# regex = true
+# action = "highlight"
+
 # Snippets: named commands typed into the current pane from the palette
 # (Ctrl+Shift+P, then the name). `run = true` presses Enter too; without it the
 # command waits at the prompt for you to edit.

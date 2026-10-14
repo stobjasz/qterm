@@ -61,6 +61,8 @@ pub struct Config {
     pub layouts: Vec<LayoutDef>,
     /// Named commands typed into the current pane from the palette ([[snippets]]).
     pub snippets: Vec<Snippet>,
+    /// Output patterns that highlight a line, mark the tab or notify ([[triggers]]).
+    pub triggers: Vec<Trigger>,
     /// Keeping each pane's output across restarts ([scrollback]).
     pub scrollback: ScrollbackSettings,
 }
@@ -135,6 +137,34 @@ pub struct Snippet {
     /// Press Enter after typing it.
     #[serde(default)]
     pub run: bool,
+}
+
+/// Output to watch for: when a line printed in a pane matches, highlight it, mark
+/// the tab, or also notify (when you aren't looking at that pane).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
+pub struct Trigger {
+    /// Shown in the tab marker and the notification; defaults to the pattern.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Text to find (ignoring case), or a regular expression with `regex = true`.
+    pub pattern: String,
+    #[serde(default)]
+    pub regex: bool,
+    #[serde(default)]
+    pub action: TriggerAction,
+    /// Highlight colour ("#rrggbb").
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerAction {
+    #[default]
+    Notify,
+    Mark,
+    Highlight,
 }
 
 /// A named arrangement of panes for a new tab: a pane (or split) with a name.
@@ -244,6 +274,7 @@ impl Default for Config {
             profiles: Vec::new(),
             layouts: Vec::new(),
             snippets: Vec::new(),
+            triggers: Vec::new(),
             scrollback: ScrollbackSettings::default(),
         }
     }
@@ -275,6 +306,14 @@ impl Config {
         in_range("slide_ms", self.slide_ms as f64, 0.0, 1000.0)?;
         in_range("font.size", self.font.size, 6.0, 72.0)?;
         in_range("scrollback.lines", f64::from(self.scrollback.lines), 100.0, 10_000.0)?;
+        for trigger in &self.triggers {
+            if trigger.pattern.is_empty() {
+                return Err("[[triggers]] entries need a pattern".into());
+            }
+            if let Some(color) = trigger.color.as_deref().filter(|c| !is_hex_color(c)) {
+                return Err(format!("trigger \"{}\": color = \"{color}\" is not \"#rrggbb\"", trigger.name.as_deref().unwrap_or(&trigger.pattern)));
+            }
+        }
         let mut ids = std::collections::BTreeSet::new();
         for profile in &self.profiles {
             if profile.name.trim().is_empty() {
@@ -781,6 +820,22 @@ panes = [
         assert_eq!(std::fs::read_to_string(state.path()).unwrap(), "height = 0.4\n");
         assert_eq!(std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(), DEFAULT_FILE);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_triggers() {
+        let config = Config::parse(
+            "[[triggers]]\npattern = \"Compiled successfully\"\n[[triggers]]\nname = \"error\"\npattern = \"error TS\\\\d+\"\nregex = true\naction = \"highlight\"\ncolor = \"#5c1a1a\"",
+        )
+        .unwrap();
+        assert_eq!(config.triggers.len(), 2);
+        assert_eq!(config.triggers[0].action, TriggerAction::Notify, "notify by default");
+        assert!(!config.triggers[0].regex);
+        assert_eq!(config.triggers[1].pattern, "error TS\\d+");
+        assert_eq!(config.triggers[1].action, TriggerAction::Highlight);
+        assert!(Config::parse("[[triggers]]\npattern = \"\"").unwrap_err().contains("pattern"));
+        assert!(Config::parse("[[triggers]]\npattern = \"x\"\ncolor = \"red\"").unwrap_err().contains("#rrggbb"));
+        assert!(Config::parse("[[triggers]]\npattern = \"x\"\naction = \"shout\"").is_err());
     }
 
     #[test]

@@ -6,6 +6,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 
 import type { LayoutDef } from "./workspace/layouts";
 import type { TabColor } from "./workspace/workspace";
+import type { TriggerDef } from "./terminal/triggers";
 
 export type SessionId = number;
 
@@ -71,6 +72,7 @@ export interface Config {
   profiles: CustomProfile[];
   layouts: LayoutDef[];
   snippets: Snippet[];
+  triggers: TriggerDef[];
   scrollback: {
     /** For shells not listed in `profiles`. */
     restore: boolean;

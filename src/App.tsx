@@ -76,6 +76,7 @@ import { crossedWarning, formatReset, mergeUsage, planSummary, type PlanUsage } 
 import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
 import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
+import { compileTriggers } from "./terminal/triggers";
 import { QuickSelectOverlay, type QuickSelectItem } from "./terminal/QuickSelectOverlay";
 import { WhatsNew } from "./updates/WhatsNew";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -231,6 +232,7 @@ export default function App() {
         onCommandFinished: (...args) => handlers.current.onCommandFinished(...args),
         onPaneMenu: (...args) => handlers.current.onPaneMenu(...args),
         onCommandBlock: (...args) => handlers.current.onCommandBlock(...args),
+        onTrigger: (...args) => handlers.current.onTrigger(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -238,6 +240,8 @@ export default function App() {
 
   // --- settings applied to the terminals ---------------------------------------
   const keymap = useMemo(() => buildKeymap(config?.keybindings), [config?.keybindings]);
+  const triggers = useMemo(() => compileTriggers(config?.triggers ?? []), [config?.triggers]);
+  useEffect(() => registry.setTriggers(triggers.triggers), [registry, triggers]);
   const theme = themeOrDefault(config?.theme);
   useEffect(() => registry.setKeymap(keymap), [registry, keymap]);
   useEffect(() => registry.setTheme(theme), [registry, theme]);
@@ -257,6 +261,7 @@ export default function App() {
   const errors = [
     settings?.error,
     ...keymap.errors,
+    ...triggers.errors,
     config?.defaultProfile && profiles && !profiles.some((p) => p.id === config.defaultProfile)
       ? `default_profile = "${config.defaultProfile}" is not one of: ${profiles.map((p) => p.id).join(", ")}`
       : undefined,
@@ -585,6 +590,11 @@ export default function App() {
     },
     onPaneMenu: (paneId, x, y) => setPaneMenu({ paneId, x, y }),
     onCommandBlock: (paneId, block, x, y) => setBlockMenu({ paneId, block, x, y }),
+    onTrigger: (paneId, trigger, line) =>
+      raiseAlert(
+        { paneId, title: trigger.label, message: line.length > 200 ? `${line.slice(0, 199)}…` : line, kind: "trigger", sessionId: null },
+        trigger.action === "notify",
+      ),
     onCommandFinished: (paneId, finished) => {
       const cwd = workspaceRef.current.panes[paneId]?.cwd;
       setHistory((h) => rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now() }));
@@ -633,7 +643,7 @@ export default function App() {
     if (alertsOn.current) raiseAlert(alert);
   };
   /** Marks the pane's tab and, unless you are in the console, shows a Windows notification. */
-  function raiseAlert(alert: ClaudeAlert) {
+  function raiseAlert(alert: ClaudeAlert, notify = true) {
     const ws = workspaceRef.current;
     if (!ws.panes[alert.paneId]) return;
     const consoleInFocus = shownRef.current && document.hasFocus();
@@ -641,7 +651,7 @@ export default function App() {
     if (consoleInFocus && activeTab(ws)?.focusedPane === alert.paneId) return;
     setAttention((current) => new Map(current).set(alert.paneId, alert));
     // Console up and focused, but on another tab or pane: the tab marker is enough.
-    if (!consoleInFocus) void showClaudeAlert(alert);
+    if (!consoleInFocus && notify) void showClaudeAlert(alert);
   }
   useEffect(() => void setAttentionCount(attention.size), [attention.size]);
   // Looking at the pane again clears its marker.

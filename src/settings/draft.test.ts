@@ -32,6 +32,7 @@ const config: Config = {
   profiles: [],
   layouts: [],
   snippets: [],
+  triggers: [],
   scrollback: { restore: true, lines: 1000, profiles: {} },
 };
 
