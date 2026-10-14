@@ -272,6 +272,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
             checked={draft.sshProfiles}
             onChange={(v) => set("sshProfiles", v)}
           />
+          <Toggle
+            label="“Open in qterm” in Explorer's menu"
+            hint="Right-click a folder, or inside one, for a new tab there. On Windows 11 it is under “Show more options”."
+            checked={draft.explorerMenu}
+            onChange={(v) => set("explorerMenu", v)}
+          />
           <Toggle label="Copy selected text automatically" checked={draft.copyOnSelect} onChange={(v) => set("copyOnSelect", v)} />
           <Toggle
             label="Right-click copies, or pastes when nothing is selected"

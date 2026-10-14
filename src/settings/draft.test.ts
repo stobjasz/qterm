@@ -26,6 +26,7 @@ const config: Config = {
   inlineImages: true,
   sshProfiles: true,
   checkUpdates: true,
+  explorerMenu: false,
   font: { family: "Cascadia Mono", size: 14, ligatures: false },
   keybindings: {},
   profiles: [],

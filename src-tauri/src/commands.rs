@@ -358,6 +358,12 @@ pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, ke
 }
 
 /// The UI has saved what it needs after "quit-requested"; exit now.
+/// The folder qterm was started with (`--open-here`, from Explorer's menu), once.
+#[tauri::command]
+pub fn take_open_here(pending: State<'_, crate::explorer::PendingOpenHere>) -> Option<String> {
+    pending.0.lock().unwrap().take()
+}
+
 /// An error from the UI, for the log file.
 #[tauri::command]
 pub fn log_ui(message: String) {

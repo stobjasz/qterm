@@ -26,6 +26,8 @@ import {
   onConfigChanged,
   onOpenSettings,
   onCheckUpdates,
+  onOpenHere,
+  takeOpenHere,
   onUpdateAvailable,
   installUpdate,
   type UpdateInfo,
@@ -214,6 +216,8 @@ export default function App() {
     },
     [profiles, defaultProfile],
   );
+  const newTabRef = useRef(newTab);
+  newTabRef.current = newTab;
 
   /** A short message over the tab bar, e.g. why an admin tab opened as a window. */
   const [notice, setNotice] = useState<string>();
@@ -729,6 +733,7 @@ export default function App() {
       onClaudeAttention((alert) => onAlert.current(alert)),
       onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
+      onOpenHere((dir) => newTabRef.current(undefined, dir)),
       onQuakeVisibility(({ visible, slideMs }) => {
         setSlideMs(slideMs);
         setShown(visible);
@@ -796,9 +801,11 @@ export default function App() {
     }
     startup.current = "loading";
     void (config.restoreSession ? loadSession() : Promise.resolve(null)).then(async (saved) => {
+      // Started from Explorer's "Open in qterm": a tab in that folder too.
+      const openHere = await takeOpenHere().catch(() => null);
       const restored = saved ? restoreWorkspace(saved, profiles) : undefined;
       if (!restored) {
-        newTab();
+        newTab(undefined, openHere ?? undefined);
         startup.current = "done";
         return;
       }
@@ -819,6 +826,7 @@ export default function App() {
         }
       }
       setWorkspace(restored);
+      if (openHere) newTab(undefined, openHere);
       startup.current = "done";
     });
   }, [workspace.tabs.length, profiles, config, newTab]);

@@ -7,6 +7,7 @@ mod config;
 mod diagnostics;
 mod editor;
 mod elevation;
+mod explorer;
 mod hotkey;
 mod install;
 #[macro_use]
@@ -39,7 +40,10 @@ pub fn run() {
     log::log_panics();
     tauri::Builder::default()
         // Must be registered first: a second launch only toggles the running instance.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::toggle(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match explorer::open_here_arg(&args) {
+            Some(dir) => explorer::open_here(app, dir),
+            None => window::toggle(app),
+        }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -55,6 +59,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::UpdateState::default())
+        .manage(explorer::PendingOpenHere::default())
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
@@ -89,6 +94,9 @@ pub fn run() {
             }
             tray::create(app.handle())?;
             updater::remove_previous_exe();
+            explorer::apply(app.handle());
+            let args: Vec<String> = std::env::args().collect();
+            *app.state::<explorer::PendingOpenHere>().0.lock().unwrap() = explorer::open_here_arg(&args);
             updater::start_checking(app.handle().clone());
             window::apply_effect(app.handle());
             tray::repoint_autostart(app.handle());
@@ -161,6 +169,7 @@ pub fn run() {
             commands::app_info,
             commands::check_update,
             commands::install_update,
+            commands::take_open_here,
             commands::log_ui,
             commands::diagnostics,
             commands::open_logs,
@@ -189,6 +198,9 @@ fn on_config_file_changed(app: &AppHandle) {
             }
             if new.background_effect != old.background_effect {
                 window::apply_effect(app);
+            }
+            if new.explorer_menu != old.explorer_menu {
+                explorer::apply(app);
             }
         }
     }

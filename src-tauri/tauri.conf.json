@@ -48,7 +48,8 @@
     "copyright": "Copyright (c) 2026 Sebastian Tobjasz. MIT License.",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
       }
     }
   },

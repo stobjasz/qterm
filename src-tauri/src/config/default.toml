@@ -86,6 +86,10 @@ ssh_profiles = true
 # there is one, the tray and Settings → Updates offer it; nothing installs by itself.
 check_updates = true
 
+# "Open in qterm" in Explorer's menu for folders, folder backgrounds and drives: a
+# new tab in that folder. On Windows 11 it is under "Show more options".
+explorer_menu = false
+
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
 # `profiles` switches it per shell, overriding `restore`, e.g.

@@ -76,6 +76,16 @@ pub fn open_settings(app: &AppHandle) {
     let _ = app.emit_to(LABEL, "open-settings", ());
 }
 
+/// Brings the console up (or to the front), whatever its state.
+pub fn show_now(app: &AppHandle) {
+    let Some(win) = window(app) else { return };
+    if win.is_visible().unwrap_or(false) {
+        let _ = win.set_focus();
+    } else {
+        show(app, &win);
+    }
+}
+
 /// A notification was clicked: bring the console up and let the UI switch to the pane.
 pub fn focus_pane(app: &AppHandle, pane_id: &str) {
     if let Some(win) = window(app) {

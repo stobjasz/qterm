@@ -65,6 +65,7 @@ export interface Config {
   inlineImages: boolean;
   sshProfiles: boolean;
   checkUpdates: boolean;
+  explorerMenu: boolean;
   font: { family: string; size: number; ligatures: boolean };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
@@ -437,6 +438,16 @@ export function onCheckUpdates(handler: () => void): Promise<UnlistenFn> {
 /** The daily check found a newer version. */
 export function onUpdateAvailable(handler: (update: UpdateInfo) => void): Promise<UnlistenFn> {
   return listen<UpdateInfo>("update-available", (event) => handler(event.payload));
+}
+
+/** The folder qterm was started in from Explorer's menu, once. */
+export function takeOpenHere(): Promise<string | null> {
+  return invoke("take_open_here");
+}
+
+/** Explorer → "Open in qterm" while qterm runs: a new tab in that folder. */
+export function onOpenHere(handler: (dir: string) => void): Promise<UnlistenFn> {
+  return listen<string>("open-here", (event) => handler(event.payload));
 }
 
 /** Writes a line to qterm's log file. */

@@ -32,6 +32,7 @@ unit tests can't reproduce. One spec per risk.
 | R5 | A setting saved in the Settings panel reaches config.toml and applies to open terminals. | `settings.spec.ts` |
 | R6 | A shell with its own background shows it in its panes, at the console's opacity; others keep the theme's. | `pane-background.spec.ts` |
 | R7 | A background chosen for one pane colours that pane only and survives a restart. | `pane-background-picker.spec.ts` |
+| R8 | Explorer's "Open in qterm" (registered from the setting) opens a tab in that folder in the qterm already running. | `open-here.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

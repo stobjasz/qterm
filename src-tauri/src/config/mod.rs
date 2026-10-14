@@ -50,6 +50,8 @@ pub struct Config {
     pub ssh_profiles: bool,
     /// Look for a newer release on start and daily.
     pub check_updates: bool,
+    /// "Open in qterm" in Explorer's menu for folders.
+    pub explorer_menu: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -236,6 +238,7 @@ impl Default for Config {
             inline_images: true,
             ssh_profiles: true,
             check_updates: true,
+            explorer_menu: false,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),
