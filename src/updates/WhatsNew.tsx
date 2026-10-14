@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { useEscape } from "../tabs/useDismiss";
 import { fetchNotes, parseNotes, RELEASES_URL, type Inline } from "./notes";
 
 interface Props {
@@ -14,11 +15,7 @@ interface Props {
 export function WhatsNew({ version, from, onClose }: Props) {
   const [notes, setNotes] = useState<string | null>();
   useEffect(() => void fetchNotes(version).then((text) => setNotes(text ?? null)), [version]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscape(onClose);
   const page = `${RELEASES_URL}/tag/v${version}`;
 
   return (

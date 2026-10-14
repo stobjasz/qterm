@@ -582,6 +582,7 @@ toggle_broadcast = ""                                 # off
 | `open_output` | Open pane output in editor | (none) |
 | `quick_select` | Quick select (copy or open what's on screen) | `alt+shift+s` |
 | `toggle_pin` | Pin the console open / unpin | (none) |
+| `show_help` | Shortcuts and tips | `ctrl+shift+/` |
 
 **Your own shells** (`[[profiles]]`): the full set of options. `command` is the program and
 its arguments; double quotes keep words with spaces together, so put the whole command in
@@ -657,6 +658,7 @@ All of these can be changed in Settings → Keyboard shortcuts, or in the settin
 | Previous / next command | Ctrl+↑ / Ctrl+↓ |
 | Quick select (copy or open what's on screen) | Alt+Shift+S |
 | Next pane where Claude waits | Alt+Shift+W |
+| Shortcuts and tips (also the ? button) | Ctrl+Shift+/ |
 | Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
 | Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console | (palette; no shortcut by default) |
 

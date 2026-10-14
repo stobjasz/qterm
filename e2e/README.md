@@ -44,8 +44,9 @@ unit tests can't reproduce. One spec per risk.
 | R17 | A [[triggers]] pattern matching a line printed in a background tab marks that tab with the trigger and the line. | `output-trigger.spec.ts` |
 | R18 | Settings kept in a folder of your choice apply live and after a restart. | `settings-folder.spec.ts` |
 | R19 | Every setting stays inside its group's box in the Settings panel, and groups don't overlap. | `settings-layout.spec.ts` |
-| R20 | Esc closes a menu opened while the keyboard is in a terminal, and doesn't reach the shell. | `menu-escape.spec.ts` |
+| R20 | Esc closes a menu or panel (Settings) opened while the keyboard is in a terminal, and doesn't reach the shell. | `menu-escape.spec.ts` |
 | R21 | Closing a pane where a program still runs asks first and names it; an idle pane closes at once. | `close-confirm.spec.ts` |
+| R22 | Ctrl+Shift+/ opens "Shortcuts and tips", showing the shortcuts in effect (a rebound one by its new keys). | `help-sheet.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

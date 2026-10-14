@@ -468,6 +468,12 @@ pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, ke
 }
 
 /// The UI has saved what it needs after "quit-requested"; exit now.
+/// qterm's first start on this PC (it wrote the default settings): show the welcome hint.
+#[tauri::command]
+pub fn first_start(config: State<'_, ConfigState>) -> bool {
+    config.first_start()
+}
+
 /// The first start after an update (once): from which version to which.
 #[tauri::command]
 pub fn take_version_change(app: AppHandle) -> Option<crate::whats_new::VersionChange> {

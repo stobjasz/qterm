@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { useEscape } from "../tabs/useDismiss";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import {
@@ -147,12 +148,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
   const [statusline, setStatusline] = useState<StatuslineStatus>();
   useEffect(() => void claudeStatuslineStatus().then(setStatusline, (e) => setError(String(e))), []);
   const changeStatusline = (action: () => Promise<StatuslineStatus>) => void action().then(setStatusline, (e) => setError(String(e)));
-  useEffect(() => {
-    // Esc clears the search first, then closes.
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscape(onClose);
 
   const pending = useMemo(() => changes(snapshot.config, draft), [snapshot.config, draft]);
   const keymapErrors = useMemo(() => buildKeymap(overrides(draft)).errors, [draft]);

@@ -1463,3 +1463,50 @@ body,
 .confirm-close p {
   margin: 0;
 }
+
+/* "Shortcuts and tips". */
+.help-columns {
+  columns: 360px;
+  column-gap: 28px;
+}
+
+.help-columns section {
+  break-inside: avoid;
+  margin-bottom: 18px;
+}
+
+.help-columns h3 {
+  margin: 0 0 8px;
+  color: var(--console-edge);
+  font-size: 13px;
+}
+
+.help-columns dl {
+  margin: 0;
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) 1fr;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.help-row dt {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.help-row dd {
+  margin: 0;
+}
+
+.help-columns ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.help-columns li {
+  margin: 4px 0;
+}

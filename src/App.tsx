@@ -38,6 +38,7 @@ import {
   setPlanSummary,
   type StatuslineUsage,
   takeVersionChange,
+  firstStart,
   loadWorkspaces,
   saveWorkspaces,
   openInEditor,
@@ -80,6 +81,7 @@ import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
 import { compileTriggers } from "./terminal/triggers";
 import { QuickSelectOverlay, type QuickSelectItem } from "./terminal/QuickSelectOverlay";
 import { WhatsNew } from "./updates/WhatsNew";
+import { HelpSheet, hotkeyLabel } from "./help/HelpSheet";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
@@ -173,6 +175,11 @@ export default function App() {
   const planWarned = useRef(new Set<string>());
   const planText = planSummary(plan, new Date());
   useEffect(() => void setPlanSummary(planText ?? null).catch(() => {}), [planText]);
+  /** "Shortcuts and tips" (Ctrl+Shift+/, the ? button, the palette). */
+  const [helpOpen, setHelpOpen] = useState(false);
+  /** First start on this PC: a welcome with where to find things, until dismissed. */
+  const [welcome, setWelcome] = useState(false);
+  useEffect(() => void firstStart().then(setWelcome, () => {}), []);
   /** "What's new": once after an update, or from Settings → Updates. */
   const [whatsNew, setWhatsNew] = useState<{ version: string; from?: string }>();
   useEffect(() => void takeVersionChange().then((change) => change && setWhatsNew({ version: change.to, from: change.from }), () => {}), []);
@@ -549,6 +556,9 @@ export default function App() {
           break;
         case "togglePin":
           togglePin();
+          break;
+        case "showHelp":
+          setHelpOpen((open) => !open);
           break;
         case "quickSelect": {
           const screen = registry.screen(paneId);
@@ -1329,6 +1339,9 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+        {helpOpen && (
+          <HelpSheet overrides={config?.keybindings ?? {}} hotkey={hotkeyLabel(config?.hotkey ?? "Backquote")} onClose={() => setHelpOpen(false)} />
+        )}
         {whatsNew && <WhatsNew version={whatsNew.version} from={whatsNew.from} onClose={() => setWhatsNew(undefined)} />}
         {quickSelect && <QuickSelectOverlay items={quickSelect.items} typed={quickTyped} />}
         {savingWorkspace && (
@@ -1420,6 +1433,22 @@ export default function App() {
           </button>
         </div>
       )}
+      {welcome && (
+        <div className="app-notice" role="status" aria-label="Welcome">
+          Welcome to qterm. {hotkeyLabel(config?.hotkey ?? "Backquote")} shows and hides it, Ctrl+Shift+P finds anything.
+          <button
+            onClick={() => {
+              setWelcome(false);
+              setHelpOpen(true);
+            }}
+          >
+            Shortcuts and tips
+          </button>
+          <button className="icon-button" aria-label="Dismiss" onClick={() => setWelcome(false)}>
+            ×
+          </button>
+        </div>
+      )}
       {notice && (
         <div className="app-notice" role="status">
           {notice}
@@ -1466,6 +1495,7 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen((open) => !open)}
         pinned={pinned}
         onTogglePin={togglePin}
+        onHelp={() => setHelpOpen((open) => !open)}
         attention={attentionTabs}
         markers={tabMarkers}
         layouts={config?.layouts ?? []}

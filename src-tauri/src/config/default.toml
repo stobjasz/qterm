@@ -150,6 +150,7 @@ ligatures = false
 #   open_output      = ""   (none)
 #   quick_select     = "alt+shift+s"
 #   toggle_pin       = ""   (none)
+#   show_help        = "ctrl+shift+/"
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]
 

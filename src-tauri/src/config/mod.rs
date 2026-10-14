@@ -424,6 +424,8 @@ pub struct Snapshot {
 pub struct ConfigState {
     /// The app's own settings folder: config.toml by default, and the pointer to a folder of your choice.
     home: PathBuf,
+    /// This start wrote the default settings: qterm's first start on this PC.
+    created: bool,
     path: RwLock<PathBuf>,
     inner: RwLock<(Config, Option<String>)>,
 }
@@ -449,6 +451,7 @@ impl ConfigState {
     /// That folder out of reach (a sync folder not there yet): the local file, and why.
     pub fn load(dir: &Path) -> Self {
         let local = dir.join(FILE_NAME);
+        let created = !local.exists() && read_pointer(dir).is_none();
         if !local.exists() {
             let _ = std::fs::create_dir_all(dir);
             let _ = std::fs::write(&local, DEFAULT_FILE);
@@ -466,7 +469,7 @@ impl ConfigState {
             Ok(config) => (config, problem),
             Err(e) => (Config::default(), Some(e)),
         };
-        Self { home: dir.to_owned(), path: RwLock::new(path), inner: RwLock::new((config, error)) }
+        Self { home: dir.to_owned(), created, path: RwLock::new(path), inner: RwLock::new((config, error)) }
     }
 
     /// Keeps config.toml in `folder` (None: back in the app's own folder). The caller
@@ -501,6 +504,11 @@ impl ConfigState {
         std::fs::write(&pointer, folder.to_string_lossy().as_bytes()).map_err(|e| format!("could not remember the folder: {e}"))?;
         *self.path.write().unwrap() = target;
         Ok(outcome)
+    }
+
+    /// Whether this start created the settings file: a first start (the welcome hint).
+    pub fn first_start(&self) -> bool {
+        self.created
     }
 
     pub fn get(&self) -> Config {
@@ -891,6 +899,15 @@ panes = [
         state.import_from(&other).unwrap();
         assert_eq!(std::fs::read_to_string(state.path()).unwrap(), "height = 0.4\n");
         assert_eq!(std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(), DEFAULT_FILE);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn knows_a_first_start_by_the_settings_file_it_wrote() {
+        let dir = std::env::temp_dir().join(format!("qterm-first-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ConfigState::load(&dir).first_start());
+        assert!(!ConfigState::load(&dir).first_start(), "the second start isn't");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

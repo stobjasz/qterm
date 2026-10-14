@@ -27,6 +27,7 @@ interface Props {
   onOpenSettings(): void;
   /** Pinned open: clicking elsewhere and the hotkey don't hide the console. */
   pinned: boolean;
+  onHelp(): void;
   onTogglePin(): void;
   /** Tabs with a pane where Claude Code is waiting, and its latest message. */
   attention: ReadonlyMap<TabId, ClaudeAlert>;
@@ -292,6 +293,9 @@ export function TabBar(props: Props) {
         onClick={props.onTogglePin}
       >
         📌
+      </button>
+      <button className="tab-new" aria-label="Shortcuts and tips" title="Shortcuts and tips (Ctrl+Shift+/)" onClick={props.onHelp}>
+        ?
       </button>
       <button className="tab-new" aria-label="Settings" title="Settings (Ctrl+,)" onClick={props.onOpenSettings}>
         ⚙

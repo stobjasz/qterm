@@ -504,6 +504,11 @@ export interface VersionChange {
   to: string;
 }
 
+/** qterm's first start on this PC: show the welcome hint. */
+export function firstStart(): Promise<boolean> {
+  return invoke("first_start");
+}
+
 /** The first start after an update, once: the versions before and now. */
 export function takeVersionChange(): Promise<VersionChange | null> {
   return invoke("take_version_change");

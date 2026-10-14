@@ -1,5 +1,5 @@
-// Risk R20 (e2e/README.md): Esc closes a menu opened while the keyboard is in a terminal
-// (right-click on a tab, Shift+right-click on a pane) and doesn't reach the shell.
+// Risk R20 (e2e/README.md): Esc closes a menu or panel opened while the keyboard is in a terminal
+// (right-click on a tab, Shift+right-click on a pane, Ctrl+, for Settings) and doesn't reach the shell.
 import { expect, test } from "./qterm";
 
 test("Esc closes the tab and pane menus and leaves the shell's line alone", async ({ qterm }) => {
@@ -25,6 +25,13 @@ test("Esc closes the tab and pane menus and leaves the shell's line alone", asyn
   await expect(paneMenu).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(paneMenu).toBeHidden();
+
+  // Ctrl+, from the terminal: Settings, which closes on Esc the same way.
+  await page.keyboard.press("Control+Comma");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
 
   // The shell never saw the Esc: what was typed is still there, and runs.
   await page.keyboard.press("Enter");

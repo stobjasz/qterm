@@ -219,6 +219,7 @@ pub fn run() {
             commands::take_open_here,
             commands::set_pinned,
             commands::take_version_change,
+            commands::first_start,
             commands::log_ui,
             commands::diagnostics,
             commands::open_logs,

@@ -26,3 +26,28 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
     };
   }, [ref, onClose, active]);
 }
+
+/**
+ * Closes a panel on Escape. When the keyboard is still in a terminal (the panel was
+ * opened with a shortcut typed there), the terminal would take the key and send it to
+ * the shell, so it's caught first there and not passed on. Elsewhere the panel's own
+ * fields see Escape first (a search box clears itself) and the panel closes after,
+ * unless one of them handled it.
+ */
+export function useEscape(onClose: () => void): void {
+  useEffect(() => {
+    const fromTerminal = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !(e.target instanceof Element) || !e.target.closest(".xterm")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    const elsewhere = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
+    window.addEventListener("keydown", fromTerminal, true);
+    window.addEventListener("keydown", elsewhere);
+    return () => {
+      window.removeEventListener("keydown", fromTerminal, true);
+      window.removeEventListener("keydown", elsewhere);
+    };
+  }, [onClose]);
+}
