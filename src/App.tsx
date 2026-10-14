@@ -32,6 +32,7 @@ import {
   saveHistory,
   chooseOutputFile,
   setPinned as setPinnedInRust,
+  runningPrograms,
   onClaudeStatusline,
   showPlanWarning,
   setPlanSummary,
@@ -86,6 +87,7 @@ import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
 import { CommandBlockMenu } from "./terminal/CommandBlockMenu";
+import { ConfirmClose, programName } from "./tabs/ConfirmClose";
 import { SearchAllPanel } from "./terminal/SearchAllPanel";
 import { SearchBar } from "./terminal/SearchBar";
 import type { SearchHit, SearchOptions } from "./terminal/searchAll";
@@ -350,6 +352,25 @@ export default function App() {
     [closePaneById],
   );
 
+  /** Closing by hand: ask first when a program still runs there (a shell that exits closes as before). */
+  const [confirmClose, setConfirmClose] = useState<{ what: "tab" | "pane"; programs: string[]; close(): void }>();
+  const askToClose = useCallback(
+    (what: "tab" | "pane", panes: PaneId[], close: () => void) => {
+      const sessions = panes.map((id) => registry.sessionOf(id)).filter((s): s is number => s !== undefined);
+      void runningPrograms(sessions)
+        .catch(() => [] as string[])
+        .then((programs) => (programs.length ? setConfirmClose({ what, programs: programs.map(programName), close }) : close()));
+    },
+    [registry],
+  );
+  const requestCloseTab = useCallback(
+    (tabId: TabId) => {
+      const tab = workspaceRef.current.tabs.find((t) => t.id === tabId);
+      if (tab) askToClose("tab", paneIds(tab.root), () => closeTab(tabId));
+    },
+    [askToClose, closeTab],
+  );
+
   /** Opens a tab in the session's folder and types `claude --resume <id>` there. */
   const resumeClaude = useCallback(
     (session: ClaudeSession) => {
@@ -448,7 +469,7 @@ export default function App() {
           else if (profiles?.[command.profileIndex]) newTab(profiles[command.profileIndex].id);
           break;
         case "closePane":
-          closePaneById(paneId);
+          askToClose("pane", [paneId], () => closePaneById(paneId));
           break;
         case "cycleTab":
           setWorkspace((ws) => cycleTab(ws, command.delta));
@@ -1317,6 +1338,17 @@ export default function App() {
             onClose={() => setSavingWorkspace(false)}
           />
         )}
+      {confirmClose && (
+        <ConfirmClose
+          what={confirmClose.what}
+          programs={confirmClose.programs}
+          onClose={() => {
+            setConfirmClose(undefined);
+            confirmClose.close();
+          }}
+          onCancel={() => setConfirmClose(undefined)}
+        />
+      )}
       {blockMenu && workspace.panes[blockMenu.paneId] && (
         <CommandBlockMenu
           block={blockMenu.block}
@@ -1425,7 +1457,7 @@ export default function App() {
             : undefined
         }
         onActivate={(tabId) => setWorkspace((ws) => activateTab(ws, tabId))}
-        onClose={closeTab}
+        onClose={requestCloseTab}
         onNewTab={(profileId) => newTab(profileId)}
         onSplit={(dir) => focusedPane && split(focusedPane, dir)}
         onRename={(tabId, title) => setWorkspace((ws) => renameTab(ws, tabId, title))}

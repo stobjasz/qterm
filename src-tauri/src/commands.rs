@@ -361,6 +361,12 @@ pub async fn list_all_claude_sessions(index: State<'_, crate::claude::Transcript
 }
 
 /// Sessions with Claude Code running inside them (per-tab status).
+/// What still runs in these panes' shells, so closing them can ask first.
+#[tauri::command]
+pub async fn running_programs(sessions: State<'_, SessionManager>, ids: Vec<SessionId>) -> Result<Vec<String>, String> {
+    Ok(sessions.programs(&ids))
+}
+
 #[tauri::command]
 pub async fn claude_running(sessions: State<'_, SessionManager>) -> Result<Vec<SessionId>, String> {
     Ok(sessions.running("claude.exe"))

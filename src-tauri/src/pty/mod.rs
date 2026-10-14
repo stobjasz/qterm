@@ -163,6 +163,27 @@ impl SessionManager {
         session.master.resize(pty_size(cols, rows)).map_err(|e| e.to_string())
     }
 
+    /// What runs inside these sessions' shells (closing them would end it).
+    pub fn programs(&self, ids: &[SessionId]) -> Vec<String> {
+        let shells: Vec<u32> = {
+            let sessions = self.sessions.lock().unwrap();
+            ids.iter().filter_map(|id| sessions.get(id)?.pid).collect()
+        };
+        if shells.is_empty() {
+            return Vec::new();
+        }
+        let processes = crate::procs::snapshot();
+        let mut all: Vec<String> = Vec::new();
+        for shell in shells {
+            for name in crate::procs::programs_below(&processes, shell) {
+                if !all.contains(&name) {
+                    all.push(name);
+                }
+            }
+        }
+        all
+    }
+
     /// Sessions with `program` (e.g. "claude.exe") running inside their shell.
     pub fn running(&self, program: &str) -> Vec<SessionId> {
         let shells: Vec<(SessionId, u32)> = self

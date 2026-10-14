@@ -377,6 +377,11 @@ export function openElevatedWindow(profileId: string, cwd: string | undefined): 
   return invoke("open_elevated_window", { profileId, cwd: cwd ?? null });
 }
 
+/** Programs running in these sessions' shells ("node.exe"), each once. */
+export function runningPrograms(ids: SessionId[]): Promise<string[]> {
+  return invoke("running_programs", { ids });
+}
+
 /** Sessions with Claude Code running inside their shell. */
 export function claudeRunning(): Promise<SessionId[]> {
   return invoke("claude_running");

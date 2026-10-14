@@ -65,12 +65,55 @@ pub fn runs_below(processes: &[Process], root: u32, name: &str) -> bool {
     false
 }
 
+/// Console plumbing that runs under a shell without being anything the user started.
+const HELPERS: [&str; 4] = ["conhost.exe", "openconsole.exe", "wslhost.exe", "wslrelay.exe"];
+
+/// The programs running below `root` (not `root` itself), each once, in the order found,
+/// leaving out console helpers.
+pub fn programs_below(processes: &[Process], root: u32) -> Vec<String> {
+    let mut children: HashMap<u32, Vec<&Process>> = HashMap::new();
+    for p in processes {
+        if p.pid != p.parent {
+            children.entry(p.parent).or_default().push(p);
+        }
+    }
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        for child in children.get(&pid).into_iter().flatten() {
+            if !HELPERS.contains(&child.name.as_str()) && !found.contains(&child.name) {
+                found.push(child.name.clone());
+            }
+            stack.push(child.pid);
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn p(pid: u32, parent: u32, name: &str) -> Process {
         Process { pid, parent, name: name.into() }
+    }
+
+    #[test]
+    fn lists_what_runs_below_the_shell_without_console_helpers() {
+        let processes = [
+            p(10, 1, "pwsh.exe"),
+            p(11, 10, "conhost.exe"),
+            p(12, 10, "node.exe"),
+            p(13, 12, "node.exe"),
+            p(14, 12, "esbuild.exe"),
+            p(20, 1, "cmd.exe"),
+        ];
+        assert_eq!(programs_below(&processes, 10), ["node.exe", "esbuild.exe"]);
+        assert!(programs_below(&processes, 20).is_empty(), "an idle shell runs nothing");
     }
 
     #[test]

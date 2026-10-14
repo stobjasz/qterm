@@ -203,6 +203,7 @@ pub fn run() {
             commands::delete_layout,
             commands::list_all_claude_sessions,
             commands::claude_running,
+            commands::running_programs,
             commands::save_scrollback,
             commands::load_scrollback,
             commands::prune_scrollback,
