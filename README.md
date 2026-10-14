@@ -45,7 +45,7 @@ checks off.
   screen by typing its label
 - Recent commands and folders across panes in the palette; named workspaces (every tab
   saved under a name); save a pane's output as text or HTML
-- "Open in qterm" in Explorer's folder menu (optional)
+- "Open in qterm" in Explorer's folder menu (optional); pin the console open (📌)
 - Search the output of every pane at once (Alt+Shift+F); snippets in the palette;
   inline images (sixel, iTerm, Kitty) and optional font ligatures
 - Administrator tabs through Windows' sudo (Inline); settings export and import
@@ -126,6 +126,11 @@ updater (the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 secrets; the public key is in `tauri.conf.json`), writes `latest.json` (the updater's
 feed, `scripts/release-manifest.mjs`) and `SHA256SUMS`, and publishes the GitHub release.
 Losing the private key means existing copies can't verify later updates; keep a backup.
+
+With the `WINGET_TOKEN` secret set (a classic token with `public_repo`), the workflow
+also submits the release to winget (`stobjasz.qterm`) as a pull request to
+microsoft/winget-pkgs. The first version's manifests came from
+`node scripts/winget-manifests.mjs <version>` (in `winget/`).
 
 Inside qterm, `scripts/bench.ps1` measures output throughput.
 

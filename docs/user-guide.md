@@ -64,7 +64,9 @@ a day. When there is one:
 - Settings → Updates shows **Update to *version* and restart**.
 
 Updating saves your tabs and every pane's output first, as quitting does, so they come
-back after the restart. The installed qterm runs the new installer (a small progress
+back after the restart. After the restart, **What's new in qterm *version*** shows that
+release's notes once (from GitHub; offline, a link to the release page). Settings →
+Updates → **What's new in *version*** shows them again. The installed qterm runs the new installer (a small progress
 window) and restarts; the portable exe downloads the new exe, puts it in its own place
 and restarts. Before anything runs, the download is checked against qterm's signing
 key; a file that doesn't match is refused and qterm stays as it is.
@@ -108,6 +110,11 @@ daily checks. Nothing installs without your click.
 - **Close:** the × on the tab, a middle click on the tab, or Ctrl+Shift+W for the current pane.
 - **Colour and icon:** right-click a tab to give it one of eight colours and an icon
   (an emoji or a few letters). A shell can bring its own, see Profiles below.
+
+**Pin the console open:** the 📌 button in the tab bar (or "Pin the console open" in
+the palette). While pinned, clicking another window doesn't hide the console and the
+hotkey only brings it to the front; click 📌 again to unpin. Tray → Show / Hide still
+hides it. A restart unpins it.
 
 **Split panes**
 
@@ -425,7 +432,7 @@ All of these can be changed in Settings → Keyboard shortcuts.
 | Quick select (copy or open what's on screen) | Alt+Shift+S |
 | Next pane where Claude waits | Alt+Shift+W |
 | Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
-| Swap panes, clear pane history, copy last command's output, save / open pane output | (palette; no shortcut by default) |
+| Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console | (palette; no shortcut by default) |
 
 Ctrl+Shift+1…9 and Ctrl+Alt+1…9 are fixed. On keyboards where Ctrl+Alt (AltGr) types
 characters, qterm leaves AltGr combinations to the shell.

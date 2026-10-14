@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+
+PackageIdentifier: stobjasz.qterm
+PackageVersion: 0.2.1
+InstallerLocale: en-US
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+ReleaseDate: 2026-10-14
+AppsAndFeaturesEntries:
+- DisplayName: qterm
+  Publisher: Sebastian Tobjasz
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/stobjasz/qterm/releases/download/v0.2.1/qterm_0.2.1_x64-setup.exe
+  InstallerSha256: 0E95D12EBCDE0173FE469E5EA4BB11A69FEC8438D158B760C4949ECC84A25239
+ManifestType: installer
+ManifestVersion: 1.10.0

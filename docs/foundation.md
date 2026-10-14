@@ -1018,3 +1018,40 @@ first tab.
   300-column line comes out whole) and the temp file; the log file's contents.
 - `tauri build` with the hook: the installer includes `hooks.nsh` and its
   POSTUNINSTALL macro.
+
+## 27. Pin, What's new, winget (#25, #35, #30; 2026-10-14)
+
+**Pin (#25).** `QuakeState.pinned`, set from the UI's 📌 (`set_pinned`). The blur
+handler skips `dismiss` while pinned, and the hotkey's decision is a pure function
+(`hotkey_action(visible, focused, pinned)`, unit-tested): pinned, "hide" becomes
+"focus". Tray → Show / Hide (`flip`) still hides. Not saved.
+
+**What's new (#35, `whats_new.rs`, `updates/`).** `last-version` in the config folder
+holds the version that ran last; `take_version_change` rewrites it and returns
+from/to only when the new one is newer (numeric comparison), so an older copy running
+next to a newer one stays quiet. The UI fetches
+`api.github.com/repos/stobjasz/qterm/releases/tags/v<version>` (public, no token) and
+renders the body with a small Markdown subset (headings, list items, paragraphs,
+bold, code, https links) as React elements, never as HTML. Offline: a link to the
+release page.
+
+**winget (#30).** Package `stobjasz.qterm`: the per-user NSIS installer (nullsoft,
+scope user, silent `/S`). `scripts/winget-manifests.mjs` writes the version,
+installer and default-locale manifests (schema 1.10.0) from the release's
+`SHA256SUMS`; `winget validate` accepts them. Later releases: a `winget` job after
+the release job runs `vedantmgoyal9/winget-releaser@v2` (Komac), which copies the
+previous manifests with the new URL and checksum and opens the pull request, if the
+`WINGET_TOKEN` secret exists. It has to be a job in release.yml, not a workflow on
+`release: published`: a release published with `GITHUB_TOKEN` triggers no workflows.
+
+**Verified:**
+- Unit: hotkey decision when pinned; version comparison; release-notes parser
+  (lists with continuation lines, links only for https); winget manifests. 179
+  vitest, 86 cargo tests.
+- E2E R12 (`whats-new.spec.ts`): with `last-version` = 0.1.0 the panel shows this
+  version and "Updated from 0.1.0."; the next start shows nothing. Deliberate break
+  (the version never recorded): red. The harness gained `settings.files` for files in
+  the config folder. Two buttons named "Close" in the panel were made distinct.
+- Live: with `last-version` = 0.2.0, the real 0.2.1 notes load from GitHub and render
+  (heading, list items, link).
+- `winget validate` on the 0.2.1 manifests: succeeded.

@@ -65,7 +65,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ⬜ |
+| 25 | **Pin the console open**: ignore hide-on-blur and stray hotkey presses for a while. | S | ✅ 📌 in the tab bar / palette; until unpinned or a restart |
 | 26 | **Acrylic / Mica background blur** (Windows 11) instead of plain transparency. | S–M | ✅ `background_effect` = none / acrylic / mica |
 | 27 | **A second console on its own hotkey** (scratch console, or docked bottom/side). | M | ⬜ |
 | 32 | **A background colour per shell**: today every pane sits on the console's one background (the global theme at `opacity`), so a profile's `theme` changes text colours only. Needs the console to stop painting behind the panes (each pane paints its own, dividers and the tab bar keep the console's), because two translucent layers compound. See foundation.md §22. | M | ✅ `[[profiles]] background` (or a profile `theme`); the console paints around the terminal area, panes paint their own; foundation.md §24 |
@@ -76,7 +76,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 29 | **Log file** plus tray → "Open logs". | S | ✅ with #37: `logs\qterm.log`, tray and Settings → Open logs |
-| 30 | **Publish to winget** (after #13). | S | ⬜ |
+| 30 | **Publish to winget** (after #13). | S | 🚧 manifests for 0.2.1 validated (`winget/`, `stobjasz.qterm`); later releases submitted by `release.yml` once `WINGET_TOKEN` is set; first submission pending |
 | 31 | **Settings export/import** for moving to another PC. | S | ✅ Settings footer: Export… / Import… |
 
 ## Round 3 (proposed 2026-10-12)
@@ -87,7 +87,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 |---|---|---|---|
 | 33 | **The installed copy owns "Start with Windows"**: both builds share one autostart entry ("qterm") and each re-points it to itself on start, so a portable copy left running keeps it after an install (the installer's "Run qterm" only toggles the running portable copy). Installed copies always take the entry; a portable copy takes it only when it doesn't point at an installed qterm. | S | ✅ `install.rs`, also for the Explorer item (#36) |
 | 34 | **Code signing** (e.g. Azure Trusted Signing) in `release.yml`, so SmartScreen stops warning on first run. | S + cost | ⬜ |
-| 35 | **"What's new" after an update**: the release notes (already in the update feed) shown once after the restart. | S | ⬜ |
+| 35 | **"What's new" after an update**: the release notes (already in the update feed) shown once after the restart. | S | ✅ once per update, from GitHub; Settings → Updates shows it again; E2E R12 |
 | 36 | **"Open in qterm" in Explorer's context menu**: a new tab in that folder, console shown. Registered by the installer; a setting for the portable exe. | S–M | ✅ one setting for both, `explorer_menu` (off); the uninstaller removes it; E2E R8 |
 | 37 | **Diagnostics**: panics and errors into the log file (#29), plus "Copy diagnostics" (version, build, Windows, ConPTY, settings errors) for bug reports. | S | ✅ Settings → Copy diagnostics; panics and UI errors logged too |
 | 38 | **ARM64 build** next to x64 (Windows on Snapdragon). | S–M | ⬜ |
@@ -119,4 +119,4 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 49 | **Size toggle**: a key that switches the console between its height and full screen. | S | ⬜ |
 | 50 | **Named workspaces**: save and reopen a whole set of tabs (layouts cover one tab). | M | ✅ opened next to the open tabs; `workspaces.json`; E2E R10 |
 
-Suggested next: #30 (winget) and #35 ("What's new" after an update), then #16 and #25.
+Suggested next: #16 ("Ask Claude about this") and #49 (size toggle), both small.

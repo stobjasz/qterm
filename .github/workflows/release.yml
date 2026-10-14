@@ -95,3 +95,24 @@ jobs:
           gh release create $env:GITHUB_REF_NAME --draft --verify-tag --generate-notes --title "qterm ${{ steps.version.outputs.version }}" (Get-ChildItem release).FullName
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
+
+  # Updates qterm in winget (microsoft/winget-pkgs) with a pull request from the
+  # owner's fork. Needs the WINGET_TOKEN secret: a classic token with public_repo.
+  # The first version was submitted by hand (scripts/winget-manifests.mjs).
+  winget:
+    name: Submit to winget
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Without a token, skip
+        if: env.WINGET_TOKEN == ''
+        run: echo "The WINGET_TOKEN secret isn't set, so this release isn't submitted to winget."
+      - uses: vedantmgoyal9/winget-releaser@v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: stobjasz.qterm
+          installers-regex: '_x64-setup\.exe$'
+          release-notes-url: https://github.com/stobjasz/qterm/releases/tag/${{ github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
