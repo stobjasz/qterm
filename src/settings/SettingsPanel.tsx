@@ -40,6 +40,7 @@ import {
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
 import { applyFilter } from "./filter";
+import { layoutGroups } from "./masonry";
 import { changes, keepsScrollback, overrides, toDraft, withShellScrollback, type Draft } from "./draft";
 
 const HOTKEYS: [string, string][] = [
@@ -177,11 +178,26 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState<number>();
   const body = useRef<HTMLDivElement>(null);
+  const columns = useRef<HTMLDivElement>(null);
+  /** Groups placed to use the panel's width and height (masonry.ts). */
+  const layout = () => {
+    if (!body.current || !columns.current) return;
+    const style = getComputedStyle(body.current);
+    const available = body.current.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    layoutGroups(columns.current, available);
+  };
   useLayoutEffect(() => {
     if (!body.current) return;
     const count = applyFilter(body.current, query);
     setShown((current) => (current === count ? current : count));
+    layout();
   });
+  useEffect(() => {
+    if (!body.current) return;
+    const observer = new ResizeObserver(() => layout());
+    observer.observe(body.current);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section className="settings-panel" role="dialog" aria-label="Settings" aria-modal="true">
@@ -208,404 +224,406 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
 
       <div className="settings-body" ref={body}>
         {query && shown === 0 && <p className="settings-hint">No setting matches “{query}”.</p>}
-        <Group title="Updates">
-          <div className="settings-field">
-            <span>
-              {app ? `qterm ${app.version}, ${app.portable ? "portable exe" : "installed"}` : "qterm"}
-              <span className="settings-hint">
-                New versions come from GitHub Releases and are checked against qterm's signing key before they install.
-                {app?.portable
-                  ? " The portable exe replaces itself and restarts."
-                  : " The installer updates qterm in place and restarts it."}{" "}
-                Tabs and their output are saved first.
+        <div className="settings-columns" ref={columns}>
+          <Group title="Updates">
+            <div className="settings-field">
+              <span>
+                {app ? `qterm ${app.version}, ${app.portable ? "portable exe" : "installed"}` : "qterm"}
+                <span className="settings-hint">
+                  New versions come from GitHub Releases and are checked against qterm's signing key before they install.
+                  {app?.portable
+                    ? " The portable exe replaces itself and restarts."
+                    : " The installer updates qterm in place and restarts it."}{" "}
+                  Tabs and their output are saved first.
+                </span>
               </span>
-            </span>
-            <div className="settings-actions">
-              {update ? (
-                <button className="primary" disabled={updateStatus === "installing"} onClick={installNow}>
-                  {updateStatus === "installing" ? "Updating…" : `Update to ${update.version} and restart`}
-                </button>
-              ) : (
-                <button disabled={updateStatus === "checking"} onClick={checkNow}>
-                  {updateStatus === "checking" ? "Checking…" : "Check now"}
-                </button>
-              )}
-              {updateStatus === "current" && <span>✓ qterm is up to date</span>}
-              {app && (
-                <button className="link-button" onClick={() => onWhatsNew(app.version)}>
-                  What's new in {app.version}
-                </button>
-              )}
-            </div>
-          </div>
-          <Toggle
-            label="Check for updates automatically"
-            hint="Shortly after start and then daily. A newer version is offered here and in the tray; nothing installs by itself."
-            checked={draft.checkUpdates}
-            onChange={(v) => set("checkUpdates", v)}
-          />
-        </Group>
-
-        <Group title="Console">
-          <Field label="Hotkey" hint="One key that shows and hides qterm. The tray can switch it off.">
-            <select value={draft.hotkey} onChange={(e) => set("hotkey", e.target.value)}>
-              {hotkeyOptions.map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={`Height ${Math.round(draft.height * 100)}%`}>
-            <input type="range" min={10} max={100} value={Math.round(draft.height * 100)} onChange={(e) => set("height", Number(e.target.value) / 100)} />
-          </Field>
-          <Field label={`Width ${Math.round(draft.width * 100)}%`}>
-            <input type="range" min={20} max={100} value={Math.round(draft.width * 100)} onChange={(e) => set("width", Number(e.target.value) / 100)} />
-          </Field>
-          <Field label="Monitor">
-            <select value={draft.monitor} onChange={(e) => set("monitor", e.target.value as Draft["monitor"])}>
-              <option value="cursor">Where the mouse is</option>
-              <option value="primary">Primary monitor</option>
-            </select>
-          </Field>
-          <Field label={`Slide animation ${draft.slideMs} ms`}>
-            <input type="range" min={0} max={500} step={10} value={draft.slideMs} onChange={(e) => set("slideMs", Number(e.target.value))} />
-          </Field>
-          <Toggle label="Hide when another window is clicked" checked={draft.hideOnBlur} onChange={(v) => set("hideOnBlur", v)} />
-          <Toggle
-            label="Start with Windows"
-            hint="Applies right away."
-            checked={autostart ?? false}
-            disabled={autostart === undefined}
-            onChange={(v) => void setAutostart(v).then(() => setAutostartState(v), (e) => setError(String(e)))}
-          />
-        </Group>
-
-        <Group title="Appearance">
-          <Field label="Theme">
-            <div className="theme-grid" role="radiogroup" aria-label="Theme">
-              {Object.entries(THEMES).map(([name, theme]) => (
-                <button
-                  key={name}
-                  role="radio"
-                  aria-checked={draft.theme === name}
-                  className="theme-swatch"
-                  style={{ background: theme.background, color: theme.foreground, borderColor: theme.accent }}
-                  onClick={() => set("theme", name)}
-                >
-                  <span className="theme-dots" aria-hidden="true">
-                    {theme.ansi.slice(1, 7).map((c) => (
-                      <i key={c} style={{ background: c }} />
-                    ))}
-                  </span>
-                  {theme.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-          <Field label={`Background opacity ${Math.round(draft.opacity * 100)}%`}>
-            <input type="range" min={0} max={100} value={Math.round(draft.opacity * 100)} onChange={(e) => set("opacity", Number(e.target.value) / 100)} />
-          </Field>
-          <Field label="Background effect" hint="What shows through the translucent background. Lower the opacity to see more of it.">
-            <select value={draft.backgroundEffect} onChange={(e) => set("backgroundEffect", e.target.value as Draft["backgroundEffect"])}>
-              <option value="none">None: the windows behind, sharp</option>
-              <option value="acrylic">Acrylic: frosted glass</option>
-              <option value="mica">Mica: the wallpaper's tint</option>
-            </select>
-          </Field>
-          <Field label="Font">
-            <input type="text" value={draft.fontFamily} onChange={(e) => set("fontFamily", e.target.value)} spellCheck={false} />
-          </Field>
-          <Field label="Font size">
-            <input type="number" min={6} max={72} value={draft.fontSize} onChange={(e) => set("fontSize", Number(e.target.value))} />
-          </Field>
-          <Toggle
-            label="Font ligatures (=> != ->)"
-            hint="Needs a font that has them, e.g. Cascadia Code or Fira Code; Cascadia Mono has none."
-            checked={draft.fontLigatures}
-            onChange={(v) => set("fontLigatures", v)}
-          />
-        </Group>
-
-        <Group title="Terminal">
-          <Field label="Shell for new tabs">
-            <select value={draft.defaultProfile} onChange={(e) => set("defaultProfile", e.target.value)}>
-              <option value="">First found ({profiles[0]?.name ?? "none"})</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Toggle
-            label="SSH hosts as shells"
-            hint="Each Host in your ~/.ssh/config appears as “SSH <host>” in the ▾ menu and the palette."
-            checked={draft.sshProfiles}
-            onChange={(v) => set("sshProfiles", v)}
-          />
-          <div className="settings-field">
-            <span className="settings-label">Shells from Windows Terminal</span>
-            <span className="settings-hint">
-              Adds Windows Terminal's shells that qterm doesn't have (your own profiles, ones other apps added, Visual
-              Studio's developer shells) to the settings file as profiles.
-            </span>
-            {wt ? (
-              <div className="wt-import" role="group" aria-label="Shells to import">
-                {wt.profiles.map((p) => (
-                  <label key={p.name} className="settings-toggle" title={p.command}>
-                    <input
-                      type="checkbox"
-                      checked={wt.chosen.has(p.name)}
-                      onChange={(e) => {
-                        const chosen = new Set(wt.chosen);
-                        if (e.target.checked) chosen.add(p.name);
-                        else chosen.delete(p.name);
-                        setWt({ ...wt, chosen });
-                      }}
-                    />
-                    <span>
-                      {p.name}
-                      <span className="settings-hint">from {p.origin}</span>
-                    </span>
-                  </label>
-                ))}
-                <div className="settings-actions">
-                  <button className="primary" disabled={wt.chosen.size === 0} onClick={importWt}>
-                    Add {wt.chosen.size} shell{wt.chosen.size === 1 ? "" : "s"}
-                  </button>
-                  <button onClick={() => setWt(undefined)}>Cancel</button>
-                </div>
-              </div>
-            ) : (
               <div className="settings-actions">
-                <button onClick={findWt}>Import from Windows Terminal…</button>
-              </div>
-            )}
-          </div>
-          <Toggle
-            label="“Open in qterm” in Explorer's menu"
-            hint="Right-click a folder, or inside one, for a new tab there. On Windows 11 it is under “Show more options”."
-            checked={draft.explorerMenu}
-            onChange={(v) => set("explorerMenu", v)}
-          />
-          <Toggle label="Copy selected text automatically" checked={draft.copyOnSelect} onChange={(v) => set("copyOnSelect", v)} />
-          <Toggle
-            label="Right-click copies, or pastes when nothing is selected"
-            checked={draft.rightClickPaste}
-            onChange={(v) => set("rightClickPaste", v)}
-          />
-          <Toggle
-            label="Show inline images"
-            hint="Pictures that programs print as sixel, iTerm or Kitty graphics (chafa, img2sixel, timg)."
-            checked={draft.inlineImages}
-            onChange={(v) => set("inlineImages", v)}
-          />
-          <Toggle label="Reopen tabs and layout on start" checked={draft.restoreSession} onChange={(v) => set("restoreSession", v)} />
-          <Toggle
-            label="Shell integration"
-            hint="Shells report their folder, so restored and split panes open where you were. New panes only."
-            checked={draft.shellIntegration}
-            onChange={(v) => set("shellIntegration", v)}
-          />
-          <Field
-            label="Notify when a long command finishes"
-            hint="Seconds a command must run before its end gets a ✓/✗ on the tab and a Windows notification (when you aren't looking at it). 0 = off. Needs shell integration."
-          >
-            <input
-              type="number"
-              min={0}
-              max={86400}
-              step={5}
-              value={draft.longCommandAlert}
-              onChange={(e) => set("longCommandAlert", Math.max(0, Math.round(Number(e.target.value))))}
-            />
-          </Field>
-          <Field label="Open files with" hint="Ctrl+click a file reference like src/app.ts:42. {file}, {line} and {col} are filled in.">
-            <input type="text" value={draft.editor} onChange={(e) => set("editor", e.target.value)} spellCheck={false} />
-          </Field>
-        </Group>
-
-        <Group title="Scrollback">
-          <Toggle
-            label="Keep each pane's output across restarts"
-            hint="Restored tabs show their earlier output above a “restored” line (needs “Reopen tabs and layout on start”)."
-            checked={draft.scrollbackRestore}
-            onChange={(v) => set("scrollbackRestore", v)}
-          />
-          <Field label="Lines kept per pane">
-            <input
-              type="number"
-              min={100}
-              max={10000}
-              step={100}
-              value={draft.scrollbackLines}
-              onChange={(e) => set("scrollbackLines", Number(e.target.value))}
-            />
-          </Field>
-          <div className="settings-field">
-            <span className="settings-label">Per shell</span>
-            {profiles.map((profile) => (
-              <Toggle
-                key={profile.id}
-                label={profile.name}
-                checked={keepsScrollback(draft, profile.id)}
-                onChange={(on) => set("scrollbackProfiles", withShellScrollback(draft, profile.id, on))}
-              />
-            ))}
-          </div>
-          <div className="settings-field">
-            <span className="settings-label">Saved output</span>
-            <span className="settings-hint">
-              Clearing deletes the saved files and the history of every open pane (like “Clear buffer”). To clear one
-              pane, use “Clear pane history” in the command palette.
-            </span>
-            <div className="settings-actions">
-              <span>{usage === undefined ? "Checking…" : usage.panes === 0 ? "Nothing saved" : `${usage.panes} ${usage.panes === 1 ? "pane" : "panes"}, ${formatBytes(usage.bytes)}`}</span>
-              {confirmClear ? (
-                <>
-                  <button className="danger" onClick={clearHistory}>
-                    Clear everything
+                {update ? (
+                  <button className="primary" disabled={updateStatus === "installing"} onClick={installNow}>
+                    {updateStatus === "installing" ? "Updating…" : `Update to ${update.version} and restart`}
                   </button>
-                  <button onClick={() => setConfirmClear(false)}>Keep</button>
-                </>
+                ) : (
+                  <button disabled={updateStatus === "checking"} onClick={checkNow}>
+                    {updateStatus === "checking" ? "Checking…" : "Check now"}
+                  </button>
+                )}
+                {updateStatus === "current" && <span>✓ qterm is up to date</span>}
+                {app && (
+                  <button className="link-button" onClick={() => onWhatsNew(app.version)}>
+                    What's new in {app.version}
+                  </button>
+                )}
+              </div>
+            </div>
+            <Toggle
+              label="Check for updates automatically"
+              hint="Shortly after start and then daily. A newer version is offered here and in the tray; nothing installs by itself."
+              checked={draft.checkUpdates}
+              onChange={(v) => set("checkUpdates", v)}
+            />
+          </Group>
+
+          <Group title="Console">
+            <Field label="Hotkey" hint="One key that shows and hides qterm. The tray can switch it off.">
+              <select value={draft.hotkey} onChange={(e) => set("hotkey", e.target.value)}>
+                {hotkeyOptions.map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={`Height ${Math.round(draft.height * 100)}%`}>
+              <input type="range" min={10} max={100} value={Math.round(draft.height * 100)} onChange={(e) => set("height", Number(e.target.value) / 100)} />
+            </Field>
+            <Field label={`Width ${Math.round(draft.width * 100)}%`}>
+              <input type="range" min={20} max={100} value={Math.round(draft.width * 100)} onChange={(e) => set("width", Number(e.target.value) / 100)} />
+            </Field>
+            <Field label="Monitor">
+              <select value={draft.monitor} onChange={(e) => set("monitor", e.target.value as Draft["monitor"])}>
+                <option value="cursor">Where the mouse is</option>
+                <option value="primary">Primary monitor</option>
+              </select>
+            </Field>
+            <Field label={`Slide animation ${draft.slideMs} ms`}>
+              <input type="range" min={0} max={500} step={10} value={draft.slideMs} onChange={(e) => set("slideMs", Number(e.target.value))} />
+            </Field>
+            <Toggle label="Hide when another window is clicked" checked={draft.hideOnBlur} onChange={(v) => set("hideOnBlur", v)} />
+            <Toggle
+              label="Start with Windows"
+              hint="Applies right away."
+              checked={autostart ?? false}
+              disabled={autostart === undefined}
+              onChange={(v) => void setAutostart(v).then(() => setAutostartState(v), (e) => setError(String(e)))}
+            />
+          </Group>
+
+          <Group title="Appearance">
+            <Field label="Theme">
+              <div className="theme-grid" role="radiogroup" aria-label="Theme">
+                {Object.entries(THEMES).map(([name, theme]) => (
+                  <button
+                    key={name}
+                    role="radio"
+                    aria-checked={draft.theme === name}
+                    className="theme-swatch"
+                    style={{ background: theme.background, color: theme.foreground, borderColor: theme.accent }}
+                    onClick={() => set("theme", name)}
+                  >
+                    <span className="theme-dots" aria-hidden="true">
+                      {theme.ansi.slice(1, 7).map((c) => (
+                        <i key={c} style={{ background: c }} />
+                      ))}
+                    </span>
+                    {theme.label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Field label={`Background opacity ${Math.round(draft.opacity * 100)}%`}>
+              <input type="range" min={0} max={100} value={Math.round(draft.opacity * 100)} onChange={(e) => set("opacity", Number(e.target.value) / 100)} />
+            </Field>
+            <Field label="Background effect" hint="What shows through the translucent background. Lower the opacity to see more of it.">
+              <select value={draft.backgroundEffect} onChange={(e) => set("backgroundEffect", e.target.value as Draft["backgroundEffect"])}>
+                <option value="none">None: the windows behind, sharp</option>
+                <option value="acrylic">Acrylic: frosted glass</option>
+                <option value="mica">Mica: the wallpaper's tint</option>
+              </select>
+            </Field>
+            <Field label="Font">
+              <input type="text" value={draft.fontFamily} onChange={(e) => set("fontFamily", e.target.value)} spellCheck={false} />
+            </Field>
+            <Field label="Font size">
+              <input type="number" min={6} max={72} value={draft.fontSize} onChange={(e) => set("fontSize", Number(e.target.value))} />
+            </Field>
+            <Toggle
+              label="Font ligatures (=> != ->)"
+              hint="Needs a font that has them, e.g. Cascadia Code or Fira Code; Cascadia Mono has none."
+              checked={draft.fontLigatures}
+              onChange={(v) => set("fontLigatures", v)}
+            />
+          </Group>
+
+          <Group title="Terminal">
+            <Field label="Shell for new tabs">
+              <select value={draft.defaultProfile} onChange={(e) => set("defaultProfile", e.target.value)}>
+                <option value="">First found ({profiles[0]?.name ?? "none"})</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Toggle
+              label="SSH hosts as shells"
+              hint="Each Host in your ~/.ssh/config appears as “SSH <host>” in the ▾ menu and the palette."
+              checked={draft.sshProfiles}
+              onChange={(v) => set("sshProfiles", v)}
+            />
+            <div className="settings-field">
+              <span className="settings-label">Shells from Windows Terminal</span>
+              <span className="settings-hint">
+                Adds Windows Terminal's shells that qterm doesn't have (your own profiles, ones other apps added, Visual
+                Studio's developer shells) to the settings file as profiles.
+              </span>
+              {wt ? (
+                <div className="wt-import" role="group" aria-label="Shells to import">
+                  {wt.profiles.map((p) => (
+                    <label key={p.name} className="settings-toggle" title={p.command}>
+                      <input
+                        type="checkbox"
+                        checked={wt.chosen.has(p.name)}
+                        onChange={(e) => {
+                          const chosen = new Set(wt.chosen);
+                          if (e.target.checked) chosen.add(p.name);
+                          else chosen.delete(p.name);
+                          setWt({ ...wt, chosen });
+                        }}
+                      />
+                      <span>
+                        {p.name}
+                        <span className="settings-hint">from {p.origin}</span>
+                      </span>
+                    </label>
+                  ))}
+                  <div className="settings-actions">
+                    <button className="primary" disabled={wt.chosen.size === 0} onClick={importWt}>
+                      Add {wt.chosen.size} shell{wt.chosen.size === 1 ? "" : "s"}
+                    </button>
+                    <button onClick={() => setWt(undefined)}>Cancel</button>
+                  </div>
+                </div>
               ) : (
-                <button onClick={() => setConfirmClear(true)}>Clear all saved output…</button>
+                <div className="settings-actions">
+                  <button onClick={findWt}>Import from Windows Terminal…</button>
+                </div>
               )}
             </div>
-          </div>
-        </Group>
+            <Toggle
+              label="“Open in qterm” in Explorer's menu"
+              hint="Right-click a folder, or inside one, for a new tab there. On Windows 11 it is under “Show more options”."
+              checked={draft.explorerMenu}
+              onChange={(v) => set("explorerMenu", v)}
+            />
+            <Toggle label="Copy selected text automatically" checked={draft.copyOnSelect} onChange={(v) => set("copyOnSelect", v)} />
+            <Toggle
+              label="Right-click copies, or pastes when nothing is selected"
+              checked={draft.rightClickPaste}
+              onChange={(v) => set("rightClickPaste", v)}
+            />
+            <Toggle
+              label="Show inline images"
+              hint="Pictures that programs print as sixel, iTerm or Kitty graphics (chafa, img2sixel, timg)."
+              checked={draft.inlineImages}
+              onChange={(v) => set("inlineImages", v)}
+            />
+            <Toggle label="Reopen tabs and layout on start" checked={draft.restoreSession} onChange={(v) => set("restoreSession", v)} />
+            <Toggle
+              label="Shell integration"
+              hint="Shells report their folder, so restored and split panes open where you were. New panes only."
+              checked={draft.shellIntegration}
+              onChange={(v) => set("shellIntegration", v)}
+            />
+            <Field
+              label="Notify when a long command finishes"
+              hint="Seconds a command must run before its end gets a ✓/✗ on the tab and a Windows notification (when you aren't looking at it). 0 = off. Needs shell integration."
+            >
+              <input
+                type="number"
+                min={0}
+                max={86400}
+                step={5}
+                value={draft.longCommandAlert}
+                onChange={(e) => set("longCommandAlert", Math.max(0, Math.round(Number(e.target.value))))}
+              />
+            </Field>
+            <Field label="Open files with" hint="Ctrl+click a file reference like src/app.ts:42. {file}, {line} and {col} are filled in.">
+              <input type="text" value={draft.editor} onChange={(e) => set("editor", e.target.value)} spellCheck={false} />
+            </Field>
+          </Group>
 
-        <Group title="Administrator tabs">
-          <div className="settings-field">
-            <span className="settings-hint">
-              “New admin tab” in the command palette runs a shell as administrator through Windows' own sudo, after the
-              UAC prompt. It needs sudo set to <em>Inline</em>; otherwise the shell opens as administrator in its own
-              window. Microsoft's warning applies: in Inline mode, other programs running as you can type into an
-              administrator tab.
-            </span>
-            <div className="settings-actions">
-              <span>{sudo === undefined ? "Checking…" : SUDO_LABELS[sudo]}</span>
-              {sudo !== undefined && sudo !== "missing" && sudo !== "inline" && (
-                <button onClick={() => void openSudoSettings().catch((e) => setError(String(e)))}>Open Windows sudo settings</button>
-              )}
-            </div>
-          </div>
-        </Group>
-
-        <Group title="Claude Code">
-          <Toggle
-            label="Remember Claude Code sessions"
-            hint='When a terminal prints "claude --resume <id>", keep it for resuming in its folder (✳ in the tab bar).'
-            checked={draft.claudeSessions}
-            onChange={(v) => set("claudeSessions", v)}
-          />
-          <Toggle
-            label="Alert me when Claude is waiting"
-            hint="A Windows notification and a ✳ on the tab when Claude Code in a qterm pane needs you (a permission or your next message)."
-            checked={draft.claudeAlerts}
-            onChange={(v) => set("claudeAlerts", v)}
-          />
-          <Toggle
-            label="Resume Claude Code sessions on start"
-            hint="When tabs reopen, panes that were running Claude Code get “claude --resume <id>” typed for them. Needs “Reopen tabs and layout on start”; most reliable with the hook below set up."
-            checked={draft.claudeRestore}
-            onChange={(v) => set("claudeRestore", v)}
-          />
-          <div className="settings-field">
-            <span className="settings-label">Notification hook</span>
-            <span className="settings-hint">
-              Claude Code tells qterm through hooks in {hook?.settingsPath ?? "its settings.json"}: when it waits for you, and
-              which session each pane runs (for the context and cost shown on its tab). They only act inside qterm; other
-              terminals are unaffected. Applies to Claude sessions started afterwards.
-            </span>
-            <div className="settings-actions">
-              <span>
-                {hook === undefined
-                  ? "Checking…"
-                  : hook.current
-                    ? "✓ Set up"
-                    : hook.installed
-                      ? "Set up for another qterm location"
-                      : "Not set up"}
-              </span>
-              {hook && !hook.current && (
-                <button onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
-              )}
-              {hook?.installed && <button onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
-            </div>
-          </div>
-          <div className="settings-field">
-            <span className="settings-label">Plan limits and exact usage</span>
-            <span className="settings-hint">
-              Claude Code's status line passes qterm your plan's 5-hour and 7-day usage (shown in the ✳ menu and the tray,
-              with a warning at 80% and 95%) and its own context and cost figures. qterm's status line shows the model,
-              context and plan usage under Claude's prompt; with one of your own, yours stays and qterm only listens.
-              A custom status line hides Claude Code's keyboard hints in its footer.
-            </span>
-            <div className="settings-actions">
-              <span>
-                {statusline === undefined
-                  ? "Checking…"
-                  : statusline.current
-                    ? statusline.ownCommand
-                      ? "✓ Set up, in front of your status line"
-                      : "✓ Set up"
-                    : statusline.installed
-                      ? "Set up for another qterm location"
-                      : "Not set up"}
-              </span>
-              {statusline && !statusline.current && (
-                <button onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
-              )}
-              {statusline?.installed && <button onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
-            </div>
-          </div>
-        </Group>
-
-        <Group title="Settings file">
-          <div className="settings-field">
-            <span className="settings-label">Where your settings are kept</span>
-            <span className="settings-hint">
-              {snapshot.path}. Keep them in a folder of your own, such as OneDrive or a dotfiles repository, to share
-              them between PCs: choose the same folder on each. A folder that already has qterm settings keeps them;
-              otherwise yours are copied there. Tabs, history and saved output stay on each PC.
-            </span>
-            <div className="settings-actions">
-              <button onClick={() => void chooseSettingsFolder().then((folder) => folder && relocate(folder))}>
-                {snapshot.folder ? "Another folder…" : "Keep settings in a folder…"}
-              </button>
-              {snapshot.folder && <button onClick={() => relocate(null)}>Back to the default place</button>}
-            </div>
-          </div>
-        </Group>
-
-        <Group title="Keyboard shortcuts">
-          <p className="settings-hint">Like "ctrl+shift+t" or "alt+left". Leave empty to switch a shortcut off.</p>
-          <div className="shortcut-grid">
-            {ACTION_LIST.map((action) => (
-              <label key={action.name} className="shortcut">
-                <span>{action.label}</span>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  value={draft.chords[action.name] ?? ""}
-                  placeholder="off"
-                  onChange={(e) => set("chords", { ...draft.chords, [action.name]: e.target.value })}
+          <Group title="Scrollback">
+            <Toggle
+              label="Keep each pane's output across restarts"
+              hint="Restored tabs show their earlier output above a “restored” line (needs “Reopen tabs and layout on start”)."
+              checked={draft.scrollbackRestore}
+              onChange={(v) => set("scrollbackRestore", v)}
+            />
+            <Field label="Lines kept per pane">
+              <input
+                type="number"
+                min={100}
+                max={10000}
+                step={100}
+                value={draft.scrollbackLines}
+                onChange={(e) => set("scrollbackLines", Number(e.target.value))}
+              />
+            </Field>
+            <div className="settings-field">
+              <span className="settings-label">Per shell</span>
+              {profiles.map((profile) => (
+                <Toggle
+                  key={profile.id}
+                  label={profile.name}
+                  checked={keepsScrollback(draft, profile.id)}
+                  onChange={(on) => set("scrollbackProfiles", withShellScrollback(draft, profile.id, on))}
                 />
-                <button
-                  className="icon-button"
-                  title={`Reset to ${action.defaultChord}`}
-                  aria-label={`Reset ${action.label}`}
-                  disabled={draft.chords[action.name] === action.defaultChord}
-                  onClick={() => set("chords", { ...draft.chords, [action.name]: action.defaultChord })}
-                >
-                  ↺
+              ))}
+            </div>
+            <div className="settings-field">
+              <span className="settings-label">Saved output</span>
+              <span className="settings-hint">
+                Clearing deletes the saved files and the history of every open pane (like “Clear buffer”). To clear one
+                pane, use “Clear pane history” in the command palette.
+              </span>
+              <div className="settings-actions">
+                <span>{usage === undefined ? "Checking…" : usage.panes === 0 ? "Nothing saved" : `${usage.panes} ${usage.panes === 1 ? "pane" : "panes"}, ${formatBytes(usage.bytes)}`}</span>
+                {confirmClear ? (
+                  <>
+                    <button className="danger" onClick={clearHistory}>
+                      Clear everything
+                    </button>
+                    <button onClick={() => setConfirmClear(false)}>Keep</button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmClear(true)}>Clear all saved output…</button>
+                )}
+              </div>
+            </div>
+          </Group>
+
+          <Group title="Administrator tabs">
+            <div className="settings-field">
+              <span className="settings-hint">
+                “New admin tab” in the command palette runs a shell as administrator through Windows' own sudo, after the
+                UAC prompt. It needs sudo set to <em>Inline</em>; otherwise the shell opens as administrator in its own
+                window. Microsoft's warning applies: in Inline mode, other programs running as you can type into an
+                administrator tab.
+              </span>
+              <div className="settings-actions">
+                <span>{sudo === undefined ? "Checking…" : SUDO_LABELS[sudo]}</span>
+                {sudo !== undefined && sudo !== "missing" && sudo !== "inline" && (
+                  <button onClick={() => void openSudoSettings().catch((e) => setError(String(e)))}>Open Windows sudo settings</button>
+                )}
+              </div>
+            </div>
+          </Group>
+
+          <Group title="Claude Code">
+            <Toggle
+              label="Remember Claude Code sessions"
+              hint='When a terminal prints "claude --resume <id>", keep it for resuming in its folder (✳ in the tab bar).'
+              checked={draft.claudeSessions}
+              onChange={(v) => set("claudeSessions", v)}
+            />
+            <Toggle
+              label="Alert me when Claude is waiting"
+              hint="A Windows notification and a ✳ on the tab when Claude Code in a qterm pane needs you (a permission or your next message)."
+              checked={draft.claudeAlerts}
+              onChange={(v) => set("claudeAlerts", v)}
+            />
+            <Toggle
+              label="Resume Claude Code sessions on start"
+              hint="When tabs reopen, panes that were running Claude Code get “claude --resume <id>” typed for them. Needs “Reopen tabs and layout on start”; most reliable with the hook below set up."
+              checked={draft.claudeRestore}
+              onChange={(v) => set("claudeRestore", v)}
+            />
+            <div className="settings-field">
+              <span className="settings-label">Notification hook</span>
+              <span className="settings-hint">
+                Claude Code tells qterm through hooks in {hook?.settingsPath ?? "its settings.json"}: when it waits for you, and
+                which session each pane runs (for the context and cost shown on its tab). They only act inside qterm; other
+                terminals are unaffected. Applies to Claude sessions started afterwards.
+              </span>
+              <div className="settings-actions">
+                <span>
+                  {hook === undefined
+                    ? "Checking…"
+                    : hook.current
+                      ? "✓ Set up"
+                      : hook.installed
+                        ? "Set up for another qterm location"
+                        : "Not set up"}
+                </span>
+                {hook && !hook.current && (
+                  <button onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
+                )}
+                {hook?.installed && <button onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
+              </div>
+            </div>
+            <div className="settings-field">
+              <span className="settings-label">Plan limits and exact usage</span>
+              <span className="settings-hint">
+                Claude Code's status line passes qterm your plan's 5-hour and 7-day usage (shown in the ✳ menu and the tray,
+                with a warning at 80% and 95%) and its own context and cost figures. qterm's status line shows the model,
+                context and plan usage under Claude's prompt; with one of your own, yours stays and qterm only listens.
+                A custom status line hides Claude Code's keyboard hints in its footer.
+              </span>
+              <div className="settings-actions">
+                <span>
+                  {statusline === undefined
+                    ? "Checking…"
+                    : statusline.current
+                      ? statusline.ownCommand
+                        ? "✓ Set up, in front of your status line"
+                        : "✓ Set up"
+                      : statusline.installed
+                        ? "Set up for another qterm location"
+                        : "Not set up"}
+                </span>
+                {statusline && !statusline.current && (
+                  <button onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
+                )}
+                {statusline?.installed && <button onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
+              </div>
+            </div>
+          </Group>
+
+          <Group title="Settings file">
+            <div className="settings-field">
+              <span className="settings-label">Where your settings are kept</span>
+              <span className="settings-hint">
+                {snapshot.path}. Keep them in a folder of your own, such as OneDrive or a dotfiles repository, to share
+                them between PCs: choose the same folder on each. A folder that already has qterm settings keeps them;
+                otherwise yours are copied there. Tabs, history and saved output stay on each PC.
+              </span>
+              <div className="settings-actions">
+                <button onClick={() => void chooseSettingsFolder().then((folder) => folder && relocate(folder))}>
+                  {snapshot.folder ? "Another folder…" : "Keep settings in a folder…"}
                 </button>
-              </label>
-            ))}
-          </div>
-        </Group>
+                {snapshot.folder && <button onClick={() => relocate(null)}>Back to the default place</button>}
+              </div>
+            </div>
+          </Group>
+
+          <Group title="Keyboard shortcuts" layout="grid">
+            <p className="settings-hint">Like "ctrl+shift+t" or "alt+left". Leave empty to switch a shortcut off.</p>
+            <div className="shortcut-grid">
+              {ACTION_LIST.map((action) => (
+                <label key={action.name} className="shortcut">
+                  <span>{action.label}</span>
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    value={draft.chords[action.name] ?? ""}
+                    placeholder="off"
+                    onChange={(e) => set("chords", { ...draft.chords, [action.name]: e.target.value })}
+                  />
+                  <button
+                    className="icon-button"
+                    title={`Reset to ${action.defaultChord}`}
+                    aria-label={`Reset ${action.label}`}
+                    disabled={draft.chords[action.name] === action.defaultChord}
+                    onClick={() => set("chords", { ...draft.chords, [action.name]: action.defaultChord })}
+                  >
+                    ↺
+                  </button>
+                </label>
+              ))}
+            </div>
+          </Group>
+        </div>
       </div>
 
       <footer>
@@ -671,11 +689,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * A box of settings, placed by masonry.ts. Its settings flow in as many inner columns
+ * as the box spans; `grid` for one that arranges itself by width (the shortcuts).
+ */
+function Group({ title, layout, children }: { title: string; layout?: "grid"; children: ReactNode }) {
   return (
-    <fieldset className="settings-group">
+    <fieldset className="settings-group" data-layout={layout}>
       <legend>{title}</legend>
-      {children}
+      <div className="settings-group-body">{children}</div>
     </fieldset>
   );
 }

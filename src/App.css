@@ -1117,15 +1117,20 @@ body,
 
 .settings-body {
   flex: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  align-content: start;
-  gap: 14px;
   padding: 14px;
   overflow-y: auto;
 }
 
+/*
+ * Groups are placed by masonry.ts (absolute positions): as many columns as fit, each
+ * group as tall as its content, a tall one spanning more columns.
+ */
+.settings-columns {
+  position: relative;
+}
+
 .settings-group {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1134,6 +1139,20 @@ body,
   padding: 10px 12px 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
+}
+
+/* A group's settings, in as many columns as the group spans. */
+.settings-group-body {
+  column-gap: 24px;
+}
+
+.settings-group-body > * {
+  margin: 0 0 10px;
+  break-inside: avoid;
+}
+
+.settings-group-body > :last-child {
+  margin-bottom: 0;
 }
 
 .settings-group legend {

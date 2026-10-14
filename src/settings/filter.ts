@@ -28,7 +28,8 @@ export function applyFilter(root: HTMLElement, query: string): number {
   let shown = 0;
   for (const group of root.querySelectorAll<HTMLElement>(".settings-group")) {
     const title = group.querySelector("legend")?.textContent ?? "";
-    const items = [...group.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el.tagName !== "LEGEND");
+    const container = group.querySelector(".settings-group-body") ?? group;
+    const items = [...container.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el.tagName !== "LEGEND");
     let visible = 0;
     for (const item of items) {
       // The shortcuts table: one row per shortcut.
