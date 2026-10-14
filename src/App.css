@@ -1412,3 +1412,14 @@ body,
 .command-block-menu button:disabled {
   opacity: 0.45;
 }
+
+/* Settings → search. */
+.settings-search {
+  flex: 1;
+  max-width: 280px;
+  margin-left: auto;
+}
+
+.settings-panel [hidden] {
+  display: none !important;
+}

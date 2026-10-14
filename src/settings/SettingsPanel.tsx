@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
@@ -36,6 +36,7 @@ import {
 } from "../ipc";
 import { ACTION_LIST, buildKeymap } from "../keybindings";
 import { THEMES } from "../terminal/themes";
+import { applyFilter } from "./filter";
 import { changes, keepsScrollback, overrides, toDraft, withShellScrollback, type Draft } from "./draft";
 
 const HOTKEYS: [string, string][] = [
@@ -133,7 +134,8 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
   useEffect(() => void claudeStatuslineStatus().then(setStatusline, (e) => setError(String(e))), []);
   const changeStatusline = (action: () => Promise<StatuslineStatus>) => void action().then(setStatusline, (e) => setError(String(e)));
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Esc clears the search first, then closes.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -158,16 +160,41 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
 
   const hotkeyOptions = HOTKEYS.some(([key]) => key === draft.hotkey) ? HOTKEYS : [...HOTKEYS, [draft.hotkey, draft.hotkey] as [string, string]];
 
+  /** Search: settings that don't match are hidden (filter.ts); after every render, as fields come and go. */
+  const [query, setQuery] = useState("");
+  const [shown, setShown] = useState<number>();
+  const body = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!body.current) return;
+    const count = applyFilter(body.current, query);
+    setShown((current) => (current === count ? current : count));
+  });
+
   return (
     <section className="settings-panel" role="dialog" aria-label="Settings" aria-modal="true">
       <header>
         <h2>Settings</h2>
+        <input
+          className="settings-search"
+          type="search"
+          aria-label="Search settings"
+          placeholder="Search settings"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && query) {
+              e.preventDefault();
+              setQuery("");
+            }
+          }}
+        />
         <button className="icon-button" aria-label="Close settings" title="Close (Esc)" onClick={onClose}>
           ×
         </button>
       </header>
 
-      <div className="settings-body">
+      <div className="settings-body" ref={body}>
+        {query && shown === 0 && <p className="settings-hint">No setting matches “{query}”.</p>}
         <Group title="Updates">
           <div className="settings-field">
             <span>
