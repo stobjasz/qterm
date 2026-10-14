@@ -1273,3 +1273,13 @@ body,
   padding-left: 18px;
   font-family: "Cascadia Mono", Consolas, monospace;
 }
+
+/* ✳ menu → Waiting for you: Claude's message after the tab. */
+.claude-waiting-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tab-fg);
+}

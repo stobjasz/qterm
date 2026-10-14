@@ -57,6 +57,7 @@ import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
+import { nextWaiting } from "./claude/waiting";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
@@ -136,6 +137,8 @@ export default function App() {
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
   const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
+  const attentionRef = useRef(attention);
+  attentionRef.current = attention;
   /** Background panes that printed something, or rang the bell, since last seen. */
   const [activity, setActivity] = useState<ReadonlySet<PaneId>>(new Set());
   const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
@@ -439,6 +442,14 @@ export default function App() {
         case "searchAll":
           setSearchAllOpen((open) => !open);
           break;
+        case "nextWaiting": {
+          const ws = workspaceRef.current;
+          const order = ws.tabs.flatMap((tab) => paneIds(tab.root));
+          const next = nextWaiting(order, new Set(attentionRef.current.keys()), paneId);
+          if (next) setWorkspace((w) => focusPane(w, next));
+          else setNotice("Claude isn't waiting for you in any pane.");
+          break;
+        }
         case "paneBackground": {
           // From the keyboard or the palette: open it over the middle of the pane.
           const box = document.querySelector(`[data-pane-id="${paneId}"]`)?.getBoundingClientRect();
@@ -615,9 +626,16 @@ export default function App() {
           { id: `claude-here:${session.id}`, group: "Resume Claude here", label, run: () => resumeClaudeHere(session) },
         ];
       }),
+      ...[...attention].map(([paneId, alert]) => ({
+        id: `waiting:${paneId}`,
+        group: "Claude waits",
+        label: paneLabel(paneId),
+        hint: alert.message.length > 40 ? `${alert.message.slice(0, 39)}…` : alert.message,
+        run: () => setWorkspace((ws) => focusPane(ws, paneId)),
+      })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -695,6 +713,17 @@ export default function App() {
   const claudeByPane = useMemo(
     () => new Map([...claudeUsages].filter(([paneId]) => claudeStatus.has(paneId)).map(([paneId, usage]) => [paneId, usage.sessionId])),
     [claudeUsages, claudeStatus],
+  );
+  /** Panes where Claude waits for you, in tab order, for the ✳ menu and the palette. */
+  const waitingClaude = useMemo(
+    () =>
+      workspace.tabs
+        .flatMap((tab) => paneIds(tab.root))
+        .flatMap((paneId) => {
+          const alert = attention.get(paneId);
+          return alert ? [{ paneId, label: paneLabel(paneId), message: alert.message }] : [];
+        }),
+    [workspace.tabs, attention, paneLabel],
   );
   /** Claude sessions running now, for the ✳ menu. */
   const runningClaude = useMemo(
@@ -1084,6 +1113,7 @@ export default function App() {
                 onForget: (ids) => void forgetClaudeSessions(ids),
                 onNewSession: newClaudeSession,
                 running: runningClaude,
+                waiting: waitingClaude,
                 onFocusPane: (paneId: PaneId) => setWorkspace((ws) => focusPane(ws, paneId)),
               }
             : undefined

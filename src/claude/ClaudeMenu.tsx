@@ -16,6 +16,14 @@ export interface RunningClaude {
   usage: ClaudeUsage;
 }
 
+/** A pane where Claude Code waits for you. */
+export interface WaitingClaude {
+  paneId: string;
+  /** Where the pane is, e.g. "2 · PowerShell". */
+  label: string;
+  message: string;
+}
+
 export interface ClaudeMenuProps {
   sessions: ClaudeSession[];
   onResume(session: ClaudeSession): void;
@@ -25,6 +33,8 @@ export interface ClaudeMenuProps {
   /** Starts a fresh Claude Code session in this folder. */
   onNewSession(cwd: string): void;
   running: RunningClaude[];
+  /** Panes where Claude waits for you, in tab order. */
+  waiting: WaitingClaude[];
   onFocusPane(paneId: string): void;
 }
 
@@ -39,7 +49,7 @@ interface Row extends GroupableSession {
 }
 
 /** The ✳ tab-bar button: remembered Claude Code sessions, grouped by folder. */
-export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSession, running, onFocusPane }: Props) {
+export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSession, running, waiting, onFocusPane }: Props) {
   return (
     <Popup
       label="Claude sessions"
@@ -50,6 +60,25 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
     >
       {(close) => (
         <>
+          {waiting.length > 0 && (
+            <section className="claude-running" aria-label="Claude is waiting for you">
+              <div className="claude-running-title">Waiting for you · Alt+Shift+W goes to the next</div>
+              {waiting.map(({ paneId, label, message }) => (
+                <button
+                  key={paneId}
+                  className="claude-running-row claude-waiting-row"
+                  title={message}
+                  onClick={() => {
+                    close();
+                    onFocusPane(paneId);
+                  }}
+                >
+                  <span className="claude-running-tab">{label}</span>
+                  <span className="claude-waiting-message">{message}</span>
+                </button>
+              ))}
+            </section>
+          )}
           {running.length > 0 && (
             <section className="claude-running" aria-label="Claude running now">
               <div className="claude-running-title">Running now</div>
