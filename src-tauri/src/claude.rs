@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 const FILE_NAME: &str = "claude-sessions.json";
 /// Oldest entries drop off beyond this.
 const MAX_SESSIONS: usize = 200;
-const TITLE_MAX_CHARS: usize = 80;
+pub(crate) const TITLE_MAX_CHARS: usize = 80;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,7 +228,7 @@ impl TranscriptIndex {
     }
 }
 
-fn shorten(text: &str, max: usize) -> String {
+pub(crate) fn shorten(text: &str, max: usize) -> String {
     let line = text.lines().next().unwrap_or_default();
     match line.char_indices().nth(max) {
         Some((cut, _)) => format!("{}…", &line[..cut]),

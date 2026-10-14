@@ -26,6 +26,7 @@ import {
   tabTitle,
   toggleBroadcast,
   toggleZoom,
+  withClaudeTitles,
   type Workspace,
 } from "./workspace";
 
@@ -123,6 +124,29 @@ describe("titles", () => {
   it("falls back to the profile name when the shell clears its title", () => {
     const ws = setPaneTitle(withTabs(1), "p1", "  ");
     expect(tabTitle(ws, ws.tabs[0])).toBe("PowerShell");
+  });
+
+  it("names a tab after the Claude session in its focused pane, until renamed", () => {
+    let ws = setPaneTitle(withTabs(1), "p1", "C:\work");
+    ws = withClaudeTitles(ws, new Map([["p1", "Fix the login redirect"]]));
+    expect(tabTitle(ws, ws.tabs[0])).toBe("Fix the login redirect");
+    // Claude has exited and the shell titles itself again: the name stays.
+    ws = setPaneTitle(ws, "p1", "C:\work\app");
+    expect(tabTitle(ws, ws.tabs[0])).toBe("Fix the login redirect");
+    // A name given by hand wins.
+    ws = renameTab(ws, "t1", "mine");
+    expect(tabTitle(ws, ws.tabs[0])).toBe("mine");
+  });
+
+  it("keeps the workspace as it is when no Claude title changed", () => {
+    const ws = withClaudeTitles(withTabs(1), new Map([["p1", "A"]]));
+    expect(withClaudeTitles(ws, new Map([["p1", "A"], ["gone", "B"]]))).toBe(ws);
+  });
+
+  it("keeps the Claude title across a restart", () => {
+    const ws = withClaudeTitles(withTabs(1), new Map([["p1", "Fix the login redirect"]]));
+    const restored = restoreWorkspace(saveWorkspace(ws), [pwsh])!;
+    expect(tabTitle(restored, restored.tabs[0])).toBe("Fix the login redirect");
   });
 });
 

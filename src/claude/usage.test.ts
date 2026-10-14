@@ -12,6 +12,7 @@ const usage: ClaudeUsage = {
   costComplete: true,
   outputTokens: 1000,
   requests: 312,
+  title: null,
 };
 
 describe("Claude usage in the tab bar", () => {

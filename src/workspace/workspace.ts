@@ -33,6 +33,8 @@ export interface Pane {
   claudeSession?: string;
   /** Chosen for this pane ("#rrggbb"); wins over its shell's background. */
   background?: string;
+  /** Title of the last Claude Code session here; names the tab, also after Claude exits. */
+  claudeTitle?: string;
 }
 
 /** A pane background colour as stored: "#rrggbb". */
@@ -43,6 +45,9 @@ export function isPaneColor(value: unknown): value is string {
 /** Colours a tab can be marked with (right-click a tab). */
 export const TAB_COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"] as const;
 export type TabColor = (typeof TAB_COLORS)[number];
+
+/** Longest Claude session title kept with the tabs (Rust shortens them to 80 characters). */
+const MAX_CLAUDE_TITLE = 200;
 
 /** Longest tab icon: an emoji or a few letters. */
 const MAX_ICON = 4;
@@ -287,13 +292,28 @@ export function activeTab(ws: Workspace): Tab | undefined {
 // Shells without prompt integration title themselves with their own exe path.
 const EXE_PATH = /^[a-z]:\\.*\.exe$/i;
 
-/** The custom title, else the focused pane's shell title, else its profile name. */
+/**
+ * The custom title, else the title of the Claude session in the focused pane, else
+ * its shell title, else its profile name.
+ */
 export function tabTitle(ws: Workspace, tab: Tab): string {
   if (tab.title) return tab.title;
   const pane = ws.panes[tab.focusedPane];
   if (!pane) return "";
+  if (pane.claudeTitle) return pane.claudeTitle;
   const title = pane.title.trim();
   return title && !EXE_PATH.test(title) ? title : pane.profileName;
+}
+
+/** Records the titles of the Claude sessions running in panes; the same workspace if none changed. */
+export function withClaudeTitles(ws: Workspace, titles: ReadonlyMap<PaneId, string>): Workspace {
+  let panes = ws.panes;
+  for (const [paneId, title] of titles) {
+    const pane = panes[paneId];
+    if (!pane || pane.claudeTitle === title) continue;
+    panes = { ...panes, [paneId]: { ...pane, claudeTitle: title } };
+  }
+  return panes === ws.panes ? ws : { ...ws, panes };
 }
 
 function tabOf(ws: Workspace, paneId: PaneId): Tab | undefined {
@@ -314,7 +334,7 @@ interface SavedSession {
   version: 1;
   activeTab?: TabId;
   tabs: { id: TabId; title?: string; color?: TabColor; icon?: string; root: LayoutNode; focusedPane: PaneId }[];
-  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; background?: string }>;
+  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; background?: string; claudeTitle?: string }>;
 }
 
 /**
@@ -328,7 +348,10 @@ export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string>
     activeTab: ws.activeTab,
     tabs: ws.tabs.map(({ id, title, color, icon, root, focusedPane }) => ({ id, title, color, icon, root, focusedPane })),
     panes: Object.fromEntries(
-      Object.values(ws.panes).map((p) => [p.id, { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), background: p.background }]),
+      Object.values(ws.panes).map((p) => [
+        p.id,
+        { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), background: p.background, claudeTitle: p.claudeTitle },
+      ]),
     ),
   };
   return JSON.stringify(saved);
@@ -369,6 +392,9 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
         cwd,
         ...(claudeSession ? { claudeSession } : {}),
         ...(isPaneColor(savedPane.background) ? { background: savedPane.background } : {}),
+        ...(typeof savedPane.claudeTitle === "string" && savedPane.claudeTitle.trim() && savedPane.claudeTitle.length <= MAX_CLAUDE_TITLE
+          ? { claudeTitle: savedPane.claudeTitle }
+          : {}),
       };
     }
     const focusedPane = ids.includes(raw.focusedPane) ? raw.focusedPane : ids[0];

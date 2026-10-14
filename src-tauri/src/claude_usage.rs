@@ -71,6 +71,8 @@ pub struct ClaudeUsage {
     pub cost_complete: bool,
     pub output_tokens: u64,
     pub requests: usize,
+    /// The session's title: Claude Code's own (`aiTitle`), else its first prompt.
+    pub title: Option<String>,
 }
 
 /// One API request's share of the totals. A request appears on several lines
@@ -88,6 +90,8 @@ struct Tally {
     shares: HashMap<String, Share>,
     model: Option<String>,
     context: u64,
+    ai_title: Option<String>,
+    first_prompt: Option<String>,
 }
 
 #[derive(Default)]
@@ -120,6 +124,19 @@ impl UsageIndex {
 
 impl Tally {
     fn add_line(&mut self, line: &[u8]) {
+        if contains(line, b"\"aiTitle\"") {
+            let title = serde_json::from_slice::<Value>(line).ok().and_then(|e| e.get("aiTitle")?.as_str().map(str::to_string));
+            self.ai_title = title.or(self.ai_title.take());
+            return;
+        }
+        // The first prompt typed (a string, not tool output; not Claude Code's own meta lines).
+        if self.first_prompt.is_none() && contains(line, b"\"type\":\"user\"") {
+            let Ok(entry) = serde_json::from_slice::<Value>(line) else { return };
+            if entry.get("isMeta").and_then(Value::as_bool) != Some(true) {
+                self.first_prompt = entry.pointer("/message/content").and_then(Value::as_str).map(str::to_string);
+            }
+            return;
+        }
         // Most lines are user turns and tool output; skip them unparsed.
         if !contains(line, b"\"assistant\"") || !contains(line, b"\"usage\"") {
             return;
@@ -176,6 +193,12 @@ impl Tally {
             cost_complete: priced.len() == self.shares.len(),
             output_tokens: self.shares.values().map(|s| s.output).sum(),
             requests: self.shares.len(),
+            title: self
+                .ai_title
+                .as_deref()
+                .or(self.first_prompt.as_deref())
+                .map(|t| crate::claude::shorten(t.trim(), crate::claude::TITLE_MAX_CHARS))
+                .filter(|t| !t.is_empty()),
         }
     }
 }
@@ -254,6 +277,17 @@ mod tests {
         assert!(!usage.cost_complete, "an unknown model makes the estimate partial");
         assert_eq!(usage.context_limit, None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn titles_the_session_by_claudes_title_else_the_first_prompt() {
+        let mut tally = Tally::default();
+        tally.add_line(br#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#);
+        tally.add_line(br#"{"type":"user","message":{"role":"user","content":"  fix the login redirect  "}}"#);
+        tally.add_line(br#"{"type":"user","message":{"role":"user","content":"and add a test"}}"#);
+        assert_eq!(tally.summary(Path::new("s.jsonl")).title.as_deref(), Some("fix the login redirect"));
+        tally.add_line(br#"{"type":"ai-title","aiTitle":"Login redirect fix"}"#);
+        assert_eq!(tally.summary(Path::new("s.jsonl")).title.as_deref(), Some("Login redirect fix"));
     }
 
     #[test]

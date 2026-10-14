@@ -337,6 +337,8 @@ export interface ClaudeUsage {
   costComplete: boolean;
   outputTokens: number;
   requests: number;
+  /** Claude Code's title for the session, else its first prompt. */
+  title: string | null;
 }
 
 /** From the session's transcript if known, else the newest transcript of `cwd`. */

@@ -91,6 +91,7 @@ import {
   setPaneTitle,
   splitPane,
   tabTitle,
+  withClaudeTitles,
   swapPane,
   toggleBroadcast,
   toggleZoom,
@@ -658,6 +659,9 @@ export default function App() {
         if (usage) next.set(paneId, usage);
       }
       setClaudeUsages(next);
+      // Tabs are named after their Claude session, and stay so after it ends.
+      const titles = new Map([...next].flatMap(([paneId, usage]) => (usage.title ? [[paneId, usage.title] as const] : [])));
+      if (titles.size) setWorkspace((ws) => withClaudeTitles(ws, titles));
     };
     void poll();
     const timer = window.setInterval(() => void poll(), CLAUDE_USAGE_POLL_MS);
