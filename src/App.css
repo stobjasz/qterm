@@ -741,9 +741,7 @@ body,
 
 /* Header stays put; only the grouped list scrolls. */
 .claude-menu .menu {
-  right: 0;
-  left: auto;
-  width: min(640px, 80vw);
+  width: min(640px, calc(100vw - 16px));
   overflow: hidden;
 }
 

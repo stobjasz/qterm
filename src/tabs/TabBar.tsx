@@ -204,6 +204,7 @@ export function TabBar(props: Props) {
               <button
                 className="tab-close"
                 aria-label={`Close ${title}`}
+                title="Close the tab (or middle-click it)"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -265,7 +266,6 @@ export function TabBar(props: Props) {
           </>
         )}
       </Popup>
-      <div className="tabbar-spacer" />
       {claude && <ClaudeMenu {...claude} />}
       {styling && (
         <TabStyleMenu

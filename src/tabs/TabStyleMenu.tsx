@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 
 import { TAB_COLORS, type TabColor } from "../workspace/workspace";
+import { useDismiss } from "./useDismiss";
 import { useFitInViewport } from "./useFitInViewport";
 
 /** The palette tab colours map to (One Dark's, readable on every theme). */
@@ -33,16 +34,7 @@ export function TabStyleMenu({ x, y, color, icon, onChange, onClose }: Props) {
   const [text, setText] = useState(icon ?? "");
   const position = useFitInViewport(ref, x, y);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-  }, [onClose]);
+  useDismiss(ref, onClose);
 
   return (
     <div ref={ref} className="tab-style-menu" role="dialog" aria-label="Tab colour and icon" style={position}>

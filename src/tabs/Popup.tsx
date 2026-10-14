@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+import { useDismiss } from "./useDismiss";
 
 interface Props {
   /** The button that opens it. */
@@ -15,19 +17,15 @@ export function Popup({ label, title, icon, menuLabel, className, children }: Pr
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
-      if (e instanceof MouseEvent && ref.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    window.addEventListener("mousedown", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", close);
-    };
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(ref, close, open);
+  // Opens to the right of its button; moved left as far as needed to stay in the window.
+  const menu = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open || !menu.current) return setShift(0);
+    const overflow = menu.current.getBoundingClientRect().right - shift - (window.innerWidth - 8);
+    setShift(overflow > 0 ? overflow : 0);
   }, [open]);
 
   return (
@@ -43,7 +41,7 @@ export function Popup({ label, title, icon, menuLabel, className, children }: Pr
         {icon}
       </button>
       {open && (
-        <div className="menu" role="menu" aria-label={menuLabel}>
+        <div className="menu" role="menu" aria-label={menuLabel} ref={menu} style={shift ? { left: -shift } : undefined}>
           {children(() => setOpen(false))}
         </div>
       )}

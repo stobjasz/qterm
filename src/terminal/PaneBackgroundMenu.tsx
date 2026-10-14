@@ -1,5 +1,6 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 
+import { useDismiss } from "../tabs/useDismiss";
 import { useFitInViewport } from "../tabs/useFitInViewport";
 
 /** Dark tints that keep any theme's text readable; any other colour via "Custom". */
@@ -30,16 +31,7 @@ export function PaneBackgroundMenu({ x, y, color, onChange, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const position = useFitInViewport(ref, x, y);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-  }, [onClose]);
+  useDismiss(ref, onClose);
 
   return (
     <div ref={ref} className="tab-style-menu" role="dialog" aria-label="Pane background" style={position}>

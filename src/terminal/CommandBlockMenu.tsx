@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 
+import { useDismiss } from "../tabs/useDismiss";
 import { useFitInViewport } from "../tabs/useFitInViewport";
 import type { CommandBlock } from "./registry";
 
@@ -20,16 +21,7 @@ export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onS
   const ref = useRef<HTMLDivElement>(null);
   const position = useFitInViewport(ref, x, y);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-  }, [onClose]);
+  useDismiss(ref, onClose);
 
   const act = (action: () => void) => () => {
     onClose();
