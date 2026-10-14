@@ -452,6 +452,15 @@ export function onOpenHere(handler: (dir: string) => void): Promise<UnlistenFn> 
   return listen<string>("open-here", (event) => handler(event.payload));
 }
 
+/** Recent commands and folders (history.json), as saved by the UI. */
+export function loadHistory(): Promise<string | null> {
+  return invoke("load_history");
+}
+
+export function saveHistory(history: string): Promise<void> {
+  return invoke("save_history", { history });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

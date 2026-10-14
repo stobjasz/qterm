@@ -28,6 +28,8 @@ import {
   onCheckUpdates,
   onOpenHere,
   takeOpenHere,
+  loadHistory,
+  saveHistory,
   onUpdateAvailable,
   installUpdate,
   type UpdateInfo,
@@ -58,6 +60,7 @@ import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
 import { nextWaiting } from "./claude/waiting";
+import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
@@ -136,6 +139,9 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** Recent commands and folders across panes, for the palette (history.json). */
+  const [history, setHistory] = useState<History>(emptyHistory);
+  const historyLoaded = useRef(false);
   const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
   const attentionRef = useRef(attention);
   attentionRef.current = attention;
@@ -462,7 +468,10 @@ export default function App() {
     // Like Windows Terminal's "graceful" close: a clean exit closes the pane,
     // a failure stays on screen so the error can be read.
     onExit: (paneId, code) => code === 0 && closePaneById(paneId),
-    onCwd: (paneId, cwd) => setWorkspace((ws) => setPaneCwd(ws, paneId, cwd)),
+    onCwd: (paneId, cwd) => {
+      setWorkspace((ws) => setPaneCwd(ws, paneId, cwd));
+      setHistory((h) => rememberFolder(h, cwd));
+    },
     onClaudeSession: (paneId, id) => {
       const pane = workspaceRef.current.panes[paneId];
       if (pane) void claudeSessionSeen(id, pane.profileId, pane.cwd);
@@ -476,6 +485,8 @@ export default function App() {
     },
     onPaneMenu: (paneId, x, y) => setPaneMenu({ paneId, x, y }),
     onCommandFinished: (paneId, finished) => {
+      const cwd = workspaceRef.current.panes[paneId]?.cwd;
+      setHistory((h) => rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now() }));
       const seconds = configRef.current?.longCommandAlert ?? 0;
       if (!seconds || finished.durationMs < seconds * 1000) return;
       const failed = finished.exitCode !== undefined && finished.exitCode !== 0;
@@ -633,9 +644,29 @@ export default function App() {
         hint: alert.message.length > 40 ? `${alert.message.slice(0, 39)}…` : alert.message,
         run: () => setWorkspace((ws) => focusPane(ws, paneId)),
       })),
+      ...history.commands.slice(0, 50).map((recent, i) => ({
+        id: `recent-command:${i}`,
+        group: "Recent command",
+        label: recent.command,
+        hint: [recent.exitCode !== undefined && recent.exitCode !== 0 ? `✗ ${recent.exitCode}` : "", recent.cwd ?? ""].filter(Boolean).join(" · ") || undefined,
+        // Typed at the prompt, not run: Enter is yours to press.
+        run: () => {
+          const pane = target();
+          if (pane) registry.typeSnippet(pane, recent.command, false);
+        },
+      })),
+      ...history.folders.map((folder, i) => ({
+        id: `recent-folder:${i}`,
+        group: "Recent folder",
+        label: folder,
+        run: () => void newTab(undefined, folder),
+      })),
+      ...(history.commands.length || history.folders.length
+        ? [{ id: "recent:forget", group: "Recent", label: "Forget recent commands and folders", run: () => setHistory(emptyHistory()) }]
+        : []),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -921,18 +952,37 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [workspace, claudeByPane, flushSession]);
 
+
+  // Recent commands and folders: loaded once, saved shortly after they change.
+  useEffect(() => {
+    void loadHistory()
+      .then((text) => setHistory((current) => mergeLoaded(parseHistory(text), current)))
+      .catch(() => {})
+      .finally(() => (historyLoaded.current = true));
+  }, []);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const flushHistory = useCallback(async () => {
+    if (historyLoaded.current) await saveHistory(JSON.stringify(historyRef.current)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!historyLoaded.current) return;
+    const timer = window.setTimeout(() => void flushHistory(), SAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [history, flushHistory]);
+
   /** Saves tabs and output like quitting does, then installs; qterm exits and restarts. */
   const updateNow = useCallback(async () => {
-    await Promise.all([flushSession(), saveScrollbacks()]);
+    await Promise.all([flushSession(), saveScrollbacks(), flushHistory()]);
     await installUpdate();
-  }, [flushSession, saveScrollbacks]);
+  }, [flushSession, saveScrollbacks, flushHistory]);
   const [updateError, setUpdateError] = useState<string>();
 
   // Quitting right after a change (a cd, a new tab) must not lose it to the save delay.
   useEffect(() => {
-    const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks()]).finally(() => void quitNow()));
+    const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks(), flushHistory()]).finally(() => void quitNow()));
     return () => void unlisten.then((fn) => fn());
-  }, [saveScrollbacks, flushSession]);
+  }, [saveScrollbacks, flushSession, flushHistory]);
 
   // Re-parenting a terminal (zoom, split, swap) drops its keyboard focus, so focus
   // again whenever the active tab's layout changes, not only the focused pane.
@@ -1136,6 +1186,14 @@ export default function App() {
       <HeightHandle />
     </div>
   );
+}
+
+/** What was saved, with anything remembered while it loaded on top. */
+function mergeLoaded(saved: History, current: History): History {
+  let merged = saved;
+  for (const command of [...current.commands].reverse()) merged = rememberCommand(merged, command);
+  for (const folder of [...current.folders].reverse()) merged = rememberFolder(merged, folder);
+  return merged;
 }
 
 function without<K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> {

@@ -110,6 +110,21 @@ fn session_path(app: &AppHandle) -> Option<std::path::PathBuf> {
     Some(app.path().app_config_dir().ok()?.join("session.json"))
 }
 
+/// Recent commands and folders (see history.ts), if any.
+#[tauri::command]
+pub fn load_history(app: AppHandle) -> Option<String> {
+    std::fs::read_to_string(history_path(&app)?).ok()
+}
+
+#[tauri::command]
+pub fn save_history(app: AppHandle, history: String) -> Result<(), String> {
+    write_atomically(&history_path(&app).ok_or("no config folder")?, &history)
+}
+
+fn history_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    Some(app.path().app_config_dir().ok()?.join("history.json"))
+}
+
 #[tauri::command]
 pub fn list_claude_sessions(store: State<'_, ClaudeStore>) -> Vec<ClaudeSession> {
     store.list()
