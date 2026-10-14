@@ -26,6 +26,8 @@ const DEFAULT_SETTINGS = fs.readFileSync(path.join(ROOT, "src-tauri", "src", "co
 export interface Settings {
   values?: Record<string, string>;
   extra?: string;
+  /** Other files to put in the app's config folder before it starts (name → contents). */
+  files?: Record<string, string>;
 }
 
 /** The app's dev-only test hook (src/App.tsx): the live workspace and terminals. */
@@ -63,6 +65,7 @@ export class Qterm {
     wipeState();
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(path.join(CONFIG_DIR, "config.toml"), settingsFile(settings));
+    for (const [name, contents] of Object.entries(settings.files ?? {})) fs.writeFileSync(path.join(CONFIG_DIR, name), contents);
     const qterm = new Qterm();
     await qterm.start();
     return qterm;

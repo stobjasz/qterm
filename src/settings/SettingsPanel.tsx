@@ -52,10 +52,12 @@ interface Props {
   onInstallUpdate(): Promise<void>;
   /** Goes up on each tray → Check for updates…; the panel checks then. */
   checkRequest: number;
+  /** Shows this version's release notes. */
+  onWhatsNew(version: string): void;
 }
 
 /** Edits config.toml without touching the file by hand. Esc closes without saving. */
-export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, update, onUpdateFound, onInstallUpdate, checkRequest }: Props) {
+export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, update, onUpdateFound, onInstallUpdate, checkRequest, onWhatsNew }: Props) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(snapshot.config));
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
@@ -164,6 +166,11 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 </button>
               )}
               {updateStatus === "current" && <span>✓ qterm is up to date</span>}
+              {app && (
+                <button className="link-button" onClick={() => onWhatsNew(app.version)}>
+                  What's new in {app.version}
+                </button>
+              )}
             </div>
           </div>
           <Toggle

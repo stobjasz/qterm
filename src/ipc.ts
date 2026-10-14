@@ -490,6 +490,16 @@ export function setPinned(pinned: boolean): Promise<void> {
   return invoke("set_pinned", { pinned });
 }
 
+export interface VersionChange {
+  from: string;
+  to: string;
+}
+
+/** The first start after an update, once: the versions before and now. */
+export function takeVersionChange(): Promise<VersionChange | null> {
+  return invoke("take_version_change");
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

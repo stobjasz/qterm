@@ -17,6 +17,7 @@ mod pty;
 mod scrollback;
 mod tray;
 mod updater;
+mod whats_new;
 mod window;
 
 use std::sync::Mutex;
@@ -176,6 +177,7 @@ pub fn run() {
             commands::install_update,
             commands::take_open_here,
             commands::set_pinned,
+            commands::take_version_change,
             commands::log_ui,
             commands::diagnostics,
             commands::open_logs,

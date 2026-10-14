@@ -36,6 +36,7 @@ unit tests can't reproduce. One spec per risk.
 | R9 | A command run in one shell can be typed again from the palette after a restart. | `recent-command.spec.ts` |
 | R10 | Tabs saved as a named workspace open again after a restart, each shell in its folder. | `named-workspace.spec.ts` |
 | R11 | Quick select labels what's on screen, and typing a label picks exactly that target (keys never reach the shell). | `quick-select.spec.ts` |
+| R12 | The first start after an update shows what's new in that version, once. | `whats-new.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

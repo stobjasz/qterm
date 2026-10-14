@@ -1340,3 +1340,29 @@ body,
   opacity: 1;
   background: var(--tab-active-bg, rgba(255, 255, 255, 0.12));
 }
+
+/* "What's new": release notes after an update. */
+.whats-new-notes h3 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+
+.whats-new-notes ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.whats-new-notes li {
+  margin: 3px 0;
+}
+
+.whats-new-notes code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--tab-active-bg);
+}
+
+.whats-new-notes a {
+  color: inherit;
+  text-decoration: underline;
+}

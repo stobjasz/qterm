@@ -403,6 +403,12 @@ pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, ke
 }
 
 /// The UI has saved what it needs after "quit-requested"; exit now.
+/// The first start after an update (once): from which version to which.
+#[tauri::command]
+pub fn take_version_change(app: AppHandle) -> Option<crate::whats_new::VersionChange> {
+    crate::whats_new::take_change(&app)
+}
+
 /// The 📌 button: pinned open, the console ignores hide-on-blur and the hotkey's hide.
 #[tauri::command]
 pub fn set_pinned(app: AppHandle, pinned: bool) {

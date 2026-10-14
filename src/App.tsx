@@ -32,6 +32,7 @@ import {
   saveHistory,
   chooseOutputFile,
   setPinned as setPinnedInRust,
+  takeVersionChange,
   loadWorkspaces,
   saveWorkspaces,
   openInEditor,
@@ -71,6 +72,7 @@ import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspa
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
 import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
 import { QuickSelectOverlay, type QuickSelectItem } from "./terminal/QuickSelectOverlay";
+import { WhatsNew } from "./updates/WhatsNew";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
@@ -153,6 +155,9 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** "What's new": once after an update, or from Settings → Updates. */
+  const [whatsNew, setWhatsNew] = useState<{ version: string; from?: string }>();
+  useEffect(() => void takeVersionChange().then((change) => change && setWhatsNew({ version: change.to, from: change.from }), () => {}), []);
   /** Pinned open (📌): Rust ignores hide-on-blur and the hotkey's hide meanwhile. Not kept across restarts. */
   const [pinned, setPinned] = useState(false);
   const pinnedRef = useRef(pinned);
@@ -1244,6 +1249,7 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+        {whatsNew && <WhatsNew version={whatsNew.version} from={whatsNew.from} onClose={() => setWhatsNew(undefined)} />}
         {quickSelect && <QuickSelectOverlay items={quickSelect.items} typed={quickTyped} />}
         {savingWorkspace && (
           <SaveWorkspaceDialog
@@ -1278,6 +1284,10 @@ export default function App() {
             onUpdateFound={setUpdate}
             onInstallUpdate={updateNow}
             checkRequest={checkRequest}
+            onWhatsNew={(version) => {
+              setSettingsOpen(false);
+              setWhatsNew({ version });
+            }}
           />
         )}
       </div>
