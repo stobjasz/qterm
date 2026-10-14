@@ -583,8 +583,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
           <Group title="Settings file">
             <div className="settings-field">
               <span className="settings-label">Where your settings are kept</span>
+              <code className="settings-path">{snapshot.path}</code>
               <span className="settings-hint">
-                {snapshot.path}. Keep them in a folder of your own, such as OneDrive or a dotfiles repository, to share
+                Keep them in a folder of your own, such as OneDrive or a dotfiles repository, to share
                 them between PCs: choose the same folder on each. A folder that already has qterm settings keeps them;
                 otherwise yours are copied there. Tabs, history and saved output stay on each PC.
               </span>

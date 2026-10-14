@@ -43,6 +43,7 @@ unit tests can't reproduce. One spec per risk.
 | R16 | Searching Settings shows the matching settings and hides the rest; Esc clears the search before closing. | `settings-search.spec.ts` |
 | R17 | A [[triggers]] pattern matching a line printed in a background tab marks that tab with the trigger and the line. | `output-trigger.spec.ts` |
 | R18 | Settings kept in a folder of your choice apply live and after a restart. | `settings-folder.spec.ts` |
+| R19 | Every setting stays inside its group's box in the Settings panel, and groups don't overlap. | `settings-layout.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

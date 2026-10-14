@@ -2,7 +2,7 @@
 // content, placed masonry-style; a group taller than the panel spans more columns
 // (its settings flowing in that many inner columns) until it fits.
 
-export const MIN_COLUMN = 300;
+export const MIN_COLUMN = 340;
 export const GAP = 14;
 
 export interface Placement {
@@ -39,12 +39,26 @@ export function pack(items: readonly { span: number; height: number }[], columns
   return { placements, height: Math.max(0, ...bottoms) - (items.length ? gap : 0) };
 }
 
-/** The narrowest span (1…columns) whose measured height fits; the widest if none does. */
-export function spanThatFits(heightAt: (span: number) => number, columns: number, available: number): number {
+/** A group measured at some width: its height, and whether anything sticks out sideways. */
+export interface Measure {
+  height: number;
+  overflows: boolean;
+}
+
+/**
+ * The narrowest span (1…columns) at which the group fits: within the height and with
+ * nothing sticking out sideways. When it's too tall at every width, the widest span
+ * without overflow (the shortest it gets); the widest of all if every span overflows.
+ */
+export function spanThatFits(measure: (span: number) => Measure, columns: number, available: number): number {
+  let widestClean: number | undefined;
   for (let span = 1; span <= columns; span++) {
-    if (heightAt(span) <= available) return span;
+    const { height, overflows } = measure(span);
+    if (overflows) continue;
+    if (height <= available) return span;
+    widestClean = span;
   }
-  return columns;
+  return widestClean ?? columns;
 }
 
 /**
@@ -63,13 +77,14 @@ export function layoutGroups(container: HTMLElement, available: number): void {
     // A group that lays itself out by width (the shortcuts grid) gets no inner columns.
     const inner = group.dataset.layout !== "grid";
     group.style.position = "absolute";
-    const heightAt = (span: number) => {
+    const measure = (span: number): Measure => {
       group.style.width = `${spanWidth(span)}px`;
       if (body && inner) body.style.columnCount = String(span);
-      return group.offsetHeight;
+      const box = body ?? group;
+      return { height: group.offsetHeight, overflows: box.scrollWidth > box.clientWidth + 1 };
     };
-    const span = columns === 1 ? 1 : spanThatFits(heightAt, columns, available);
-    const height = heightAt(span);
+    const span = columns === 1 ? 1 : spanThatFits(measure, columns, available);
+    const height = measure(span).height;
     return { group, span, height };
   });
   const { placements, height } = pack(items, columns);

@@ -1177,6 +1177,17 @@ body,
   font-size: 11.5px;
 }
 
+/* Long paths and commands wrap inside their group instead of sticking out of it. */
+.settings-group {
+  overflow-wrap: anywhere;
+}
+
+/* A file's path on its own line (Settings file). */
+.settings-path {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+}
+
 .settings-panel select,
 .settings-panel input[type="text"],
 .settings-panel input[type="number"] {
