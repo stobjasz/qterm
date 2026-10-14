@@ -127,7 +127,7 @@ pub fn apply_effect(app: &AppHandle) {
         None => Ok(()),
     };
     if let Err(e) = result {
-        eprintln!("qterm: could not set the background effect: {e}");
+        crate::qlog!("could not set the background effect: {e}");
     }
 }
 

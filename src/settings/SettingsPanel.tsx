@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+
 import {
   appInfo,
+  diagnostics,
+  openLogs,
   checkUpdate,
   claudeHookStatus,
   exportSettings,
@@ -469,6 +473,20 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
           onClick={() => void importSettings().then((done) => done && onClose(), (e) => setError(String(e)))}
         >
           Import…
+        </button>
+        <button
+          className="link-button"
+          title="Copy the version, Windows, settings and recent log lines, to paste into a bug report"
+          onClick={() =>
+            void diagnostics()
+              .then(writeText)
+              .then(() => setNotice("Diagnostics copied."), (e) => setError(String(e)))
+          }
+        >
+          Copy diagnostics
+        </button>
+        <button className="link-button" title="Open the folder with qterm's log file" onClick={() => void openLogs().catch((e) => setError(String(e)))}>
+          Open logs
         </button>
         <button onClick={onClose}>Cancel</button>
         <button className="primary" disabled={!dirty || saving || keymapErrors.length > 0} onClick={() => void save()}>

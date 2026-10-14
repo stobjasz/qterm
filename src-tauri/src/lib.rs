@@ -4,10 +4,13 @@ mod claude_hook;
 mod claude_usage;
 mod commands;
 mod config;
+mod diagnostics;
 mod editor;
 mod elevation;
 mod hotkey;
 mod install;
+#[macro_use]
+mod log;
 mod procs;
 mod pty;
 mod scrollback;
@@ -33,6 +36,7 @@ struct Watchers(#[allow(dead_code)] Mutex<Vec<notify::RecommendedWatcher>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    log::log_panics();
     tauri::Builder::default()
         // Must be registered first: a second launch only toggles the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::toggle(app)))
@@ -57,18 +61,22 @@ pub fn run() {
         .manage(claude::TranscriptIndex::default())
         .manage(claude_usage::UsageIndex::default())
         .setup(|app| {
+            log::init(&app.path().app_local_data_dir()?.join("logs"));
+            let kind = if install::this_is_installed() { "installed" } else { "portable" };
+            qlog!("qterm {} ({kind}) starting: {}", app.package_info().version, std::env::args().collect::<Vec<_>>().join(" "));
+
             // Before anything can open a PTY: the first one fixes which ConPTY is used.
-            match pty::conpty::install(&app.path().app_local_data_dir()?) {
-                pty::conpty::Host::Bundled { version, dir } => {
-                    eprintln!("qterm: ConPTY {version} from {}", dir.display())
-                }
-                pty::conpty::Host::Inbox { reason } => eprintln!("qterm: using Windows' built-in ConPTY: {reason}"),
-            }
+            let host = match pty::conpty::install(&app.path().app_local_data_dir()?) {
+                pty::conpty::Host::Bundled { version, dir } => format!("ConPTY {version} from {}", dir.display()),
+                pty::conpty::Host::Inbox { reason } => format!("Windows' built-in ConPTY: {reason}"),
+            };
+            qlog!("console host: {host}");
+            app.manage(diagnostics::ConsoleHost(host));
 
             let config_dir = app.path().app_config_dir()?;
             let config = ConfigState::load(&config_dir);
             if let Some(error) = config.snapshot().error {
-                eprintln!("qterm: {error}");
+                qlog!("{error}");
             }
             let config_path = config.path().to_owned();
             app.manage(config);
@@ -77,7 +85,7 @@ pub fn run() {
 
             // Another app may already own the key; the tray says so and still toggles.
             if let Err(e) = hotkey::apply(app.handle()) {
-                eprintln!("qterm: could not register the hotkey: {e}");
+                qlog!("could not register the hotkey: {e}");
             }
             tray::create(app.handle())?;
             updater::remove_previous_exe();
@@ -87,10 +95,10 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let config_watcher = config::watch(config_path, move || on_config_file_changed(&handle))
-                .inspect_err(|e| eprintln!("qterm: settings will not reload live: {e}"))
+                .inspect_err(|e| qlog!("settings will not reload live: {e}"))
                 .ok();
             let alert_watcher = alerts::watch_inbox(app.handle().clone())
-                .inspect_err(|e| eprintln!("qterm: Claude alerts unavailable: {e}"))
+                .inspect_err(|e| qlog!("Claude alerts unavailable: {e}"))
                 .ok();
             app.manage(Watchers(Mutex::new(config_watcher.into_iter().chain(alert_watcher).collect())));
 
@@ -153,6 +161,9 @@ pub fn run() {
             commands::app_info,
             commands::check_update,
             commands::install_update,
+            commands::log_ui,
+            commands::diagnostics,
+            commands::open_logs,
             commands::quit_now,
         ])
         .run(tauri::generate_context!())
@@ -163,13 +174,13 @@ fn on_config_file_changed(app: &AppHandle) {
     let state = app.state::<ConfigState>();
     match state.reload() {
         Reload::Unchanged => return,
-        Reload::Invalid => eprintln!("qterm: {}", state.snapshot().error.unwrap_or_default()),
+        Reload::Invalid => qlog!("{}", state.snapshot().error.unwrap_or_default()),
         Reload::ErrorCleared => {}
         Reload::Changed(old) => {
             let new = state.get();
             if new.hotkey != old.hotkey {
                 if let Err(e) = hotkey::apply(app) {
-                    eprintln!("qterm: could not register the hotkey: {e}");
+                    qlog!("could not register the hotkey: {e}");
                 }
                 tray::refresh(app);
             }

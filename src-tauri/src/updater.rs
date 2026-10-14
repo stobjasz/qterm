@@ -184,7 +184,7 @@ pub fn start_checking(app: AppHandle) {
                         let _ = app.emit_to(crate::window::LABEL, "update-available", info);
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("qterm: {e}"),
+                    Err(e) => crate::qlog!("{e}"),
                 }
             }
             std::thread::sleep(CHECK_EVERY);

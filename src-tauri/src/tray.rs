@@ -42,6 +42,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let update = MenuItem::with_id(app, "update", "Check for updates…", true, None::<&str>)?;
+    let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit qterm", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -52,6 +53,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             &autostart,
             &settings,
             &update,
+            &logs,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -67,7 +69,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             "autostart" => {
                 let wanted = autostart.is_checked().unwrap_or(false);
                 if let Err(e) = set_autostart(app, wanted) {
-                    eprintln!("qterm: {e}");
+                    crate::qlog!("{e}");
                 }
             }
             "settings" => window::open_settings(app),
@@ -76,6 +78,11 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 use tauri::Emitter;
                 window::open_settings(app);
                 let _ = app.emit_to(window::LABEL, "check-updates", ());
+            }
+            "logs" => {
+                if let Err(e) = open_logs(app) {
+                    crate::qlog!("{e}");
+                }
             }
             "quit" => request_quit(app),
             _ => {}
@@ -128,7 +135,7 @@ fn set_hotkey(app: &AppHandle) {
     let Some(items) = app.try_state::<TrayItems>() else { return };
     let wanted = items.hotkey.is_checked().unwrap_or(true);
     if let Err(e) = hotkey::set_enabled(app, wanted) {
-        eprintln!("qterm: could not register the hotkey: {e}");
+        crate::qlog!("could not register the hotkey: {e}");
     }
     refresh(app);
 }
@@ -168,8 +175,13 @@ pub fn repoint_autostart(app: &AppHandle) {
     if crate::install::should_take(current.as_deref())
         && let Err(e) = autolaunch.enable()
     {
-        eprintln!("qterm: could not update autostart: {e}");
+        crate::qlog!("could not update autostart: {e}");
     }
+}
+
+pub fn open_logs(app: &AppHandle) -> Result<(), String> {
+    let dir = crate::log::path().and_then(|p| p.parent().map(|d| d.to_owned())).ok_or("no log yet")?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| format!("could not open the log folder: {e}"))
 }
 
 pub fn open_config_file(app: &AppHandle) -> Result<(), String> {

@@ -439,6 +439,20 @@ export function onUpdateAvailable(handler: (update: UpdateInfo) => void): Promis
   return listen<UpdateInfo>("update-available", (event) => handler(event.payload));
 }
 
+/** Writes a line to qterm's log file. */
+export function logUi(message: string): Promise<void> {
+  return invoke("log_ui", { message });
+}
+
+/** Version, Windows, console host, settings, hotkey and the log's tail, for bug reports. */
+export function diagnostics(): Promise<string> {
+  return invoke("diagnostics");
+}
+
+export function openLogs(): Promise<void> {
+  return invoke("open_logs");
+}
+
 /** Tray → Quit: save what needs saving, then call quitNow (Rust exits anyway after a grace period). */
 export function onQuitRequested(handler: () => void): Promise<UnlistenFn> {
   return listen("quit-requested", () => handler());

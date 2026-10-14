@@ -22,7 +22,7 @@ pub fn get_config(config: State<'_, ConfigState>) -> Snapshot {
 }
 
 /// Detected shells, SSH hosts (if switched on), then the [[profiles]] from the settings.
-fn all_profiles(sessions: &SessionManager, config: &ConfigState) -> Vec<Profile> {
+pub(crate) fn all_profiles(sessions: &SessionManager, config: &ConfigState) -> Vec<Profile> {
     let config = config.get();
     let mut detected = sessions.detected_profiles().to_vec();
     if config.ssh_profiles {
@@ -358,6 +358,24 @@ pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, ke
 }
 
 /// The UI has saved what it needs after "quit-requested"; exit now.
+/// An error from the UI, for the log file.
+#[tauri::command]
+pub fn log_ui(message: String) {
+    crate::qlog!("UI: {message}");
+}
+
+/// Settings → "Copy diagnostics".
+#[tauri::command]
+pub fn diagnostics(app: AppHandle) -> String {
+    crate::diagnostics::report(&app)
+}
+
+/// Settings and tray → "Open logs": the log folder in Explorer.
+#[tauri::command]
+pub fn open_logs(app: AppHandle) -> Result<(), String> {
+    crate::tray::open_logs(&app)
+}
+
 #[tauri::command]
 pub fn quit_now(app: AppHandle) {
     app.exit(0);
