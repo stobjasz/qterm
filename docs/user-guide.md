@@ -47,6 +47,7 @@ follows the copy you ran last.
 | Hotkey ✓ | Switches the ~ hotkey off, for when you need to type ~ in another app. |
 | Start with Windows ✓ | Starts qterm hidden when you sign in. |
 | Settings… | Opens the console with the settings panel. |
+| Open logs | Opens the folder with qterm's log file, for when something goes wrong. |
 | Check for updates… | Opens Settings → Updates and checks. Once a newer version is found it reads "Update to qterm *version*…". |
 | Quit qterm | Saves your tabs and their output, then closes qterm and every shell in it. |
 
@@ -100,7 +101,9 @@ daily checks. Nothing installs without your click.
   button next to it lists every shell, your own profiles and saved layouts.
   Ctrl+Shift+1…9 opens the shell at that position in the list.
 - **Switch:** click a tab, Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+Alt+1…9.
-- **Rename:** double-click the tab title.
+- **Rename:** double-click the tab title. Without a name of your own, a tab shows the
+  title of the Claude Code session in it (it keeps it after Claude exits and across
+  restarts), else the title the shell sets, else the shell's name.
 - **Reorder:** drag a tab.
 - **Close:** the × on the tab, a middle click on the tab, or Ctrl+Shift+W for the current pane.
 - **Colour and icon:** right-click a tab to give it one of eight colours and an icon
@@ -149,6 +152,24 @@ Markers disappear when you look at the tab.
   it in your editor at that line. VS Code is used by default; change the command in
   Settings → Terminal → "Open files with".
 
+**Quick select:** Alt+Shift+S puts a yellow label on every web address, file
+reference, Windows folder, git hash and IP address on screen. Type a label to copy that
+text; hold Shift while typing it to open it instead: a link in the browser, a file in
+your editor at its line, a folder in a new tab. Esc or a click cancels.
+
+**Recent commands and folders.** qterm remembers the commands you ran (100) and the
+folders your shells were in (30), across tabs and restarts. In the palette:
+
+- **Recent command:** typed at the prompt of the pane you're in; press Enter to run it.
+- **Recent folder:** opens a new tab there.
+- **Forget recent commands and folders** clears both lists.
+
+They need shell integration, like command marks (PowerShell, Command Prompt, Git Bash).
+
+**Saving output:** "Save pane output…" in the palette writes everything the pane
+shows and keeps to a file: plain text, or an HTML page with the colours if you choose
+`.html`. "Open pane output in editor" opens it in your editor at the last line instead.
+
 **Finding text**
 
 - **In one pane:** Ctrl+Shift+F. Enter / Shift+Enter go to the next / previous match;
@@ -165,6 +186,11 @@ can't tell (Command Prompt).
 - **Ctrl+↑ / Ctrl+↓** scroll to the previous / next command.
 - **"Copy last command's output"** in the command palette copies what the last command
   printed.
+
+**Open in qterm from Explorer:** with Settings → Terminal → **“Open in qterm” in
+Explorer's menu** on, right-click a folder (or the empty space inside one, or a drive) for
+**Open in qterm**: a new tab in that folder, in the running qterm or a new one. On
+Windows 11 it is under **Show more options**.
 
 **Dropping files**
 
@@ -210,6 +236,13 @@ panes = [
   { cwd = "C:/work/web", command = "npm start" },
 ]
 ```
+
+**Workspaces** keep all your tabs under a name: **Save all tabs as a workspace…** in
+the palette asks for the name (saving under an existing name replaces it). **Workspace:
+<name>** opens its tabs again next to the ones already open, each shell in its folder,
+with the same splits, colours and titles; it can be opened more than once. Claude
+sessions in it aren't resumed (start them from the ✳ menu). **Delete workspace: <name>**
+removes one.
 
 **Profiles** add your own shells next to the detected ones: an SSH host, a shell that
 starts in a project folder, or one with its own colours:
@@ -280,8 +313,14 @@ restored pane gets `claude --resume <id>` typed for it. It needs "Reopen tabs an
 layout on start", and works best with the hook set up, which says exactly which session
 ran where.
 
+**Waiting for you.** When Claude waits in more than one pane, **Alt+Shift+W** goes to
+the next one, in tab order. The palette lists them too ("Claude waits"), with Claude's
+message.
+
 **The ✳ menu** in the tab bar:
 
+- **Waiting for you:** the panes where Claude waits, with its message. Click one to go
+  there.
 - **Running now:** the Claude sessions in your panes, with context and cost. Click one
   to go to its pane.
 - **Remembered:** with "Remember Claude Code sessions" on, every time a terminal prints
@@ -319,6 +358,7 @@ click **Save**; Esc or Cancel discards them. At the bottom:
   (profiles, layouts, snippets). Saving the file applies it immediately; a mistake is
   shown at the top of the console and the previous settings stay in effect.
 - **Export…** saves your settings to a file, e.g. to move them to another PC.
+- **Copy diagnostics** and **Open logs**: see Troubleshooting.
 - **Import…** replaces your settings with such a file. Your current ones are kept as
   `config.toml.bak` next to the settings file.
 
@@ -342,6 +382,7 @@ click **Save**; Esc or Cancel discards them. At the bottom:
 | | Right-click copies, or pastes when nothing is selected | on |
 | | Show inline images | on |
 | | SSH hosts as shells | on |
+| | “Open in qterm” in Explorer's menu | off |
 | | Reopen tabs and layout on start | on |
 | | Shell integration (folder tracking, command marks) | on |
 | | Notify when a long command finishes (seconds, 0 = off) | 30 |
@@ -381,8 +422,10 @@ All of these can be changed in Settings → Keyboard shortcuts.
 | Find in the pane | Ctrl+Shift+F |
 | Search all panes | Alt+Shift+F |
 | Previous / next command | Ctrl+↑ / Ctrl+↓ |
+| Quick select (copy or open what's on screen) | Alt+Shift+S |
+| Next pane where Claude waits | Alt+Shift+W |
 | Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
-| Swap panes, clear pane history, copy last command's output | (palette; no shortcut by default) |
+| Swap panes, clear pane history, copy last command's output, save / open pane output | (palette; no shortcut by default) |
 
 Ctrl+Shift+1…9 and Ctrl+Alt+1…9 are fixed. On keyboards where Ctrl+Alt (AltGr) types
 characters, qterm leaves AltGr combinations to the shell.
@@ -394,19 +437,33 @@ characters, qterm leaves AltGr combinations to the shell.
 | Settings | `%APPDATA%\dev.qterm.app\config.toml` |
 | Open tabs and layout | `%APPDATA%\dev.qterm.app\session.json` |
 | Remembered Claude sessions | `%APPDATA%\dev.qterm.app\claude-sessions.json` |
+| Recent commands and folders | `%APPDATA%\dev.qterm.app\history.json` |
+| Named workspaces | `%APPDATA%\dev.qterm.app\workspaces.json` |
+| Log file | `%LOCALAPPDATA%\dev.qterm.app\logs\qterm.log` (moved to `qterm.log.1` past 1 MB) |
 | Saved pane output | `%LOCALAPPDATA%\dev.qterm.app\scrollback\` |
 | Console host and browser data | `%LOCALAPPDATA%\dev.qterm.app\` |
 
-The installer puts qterm in `%LOCALAPPDATA%\Programs\qterm`. The portable exe writes
+The installer puts qterm in `%LOCALAPPDATA%\qterm`. The portable exe writes
 nothing next to itself, except during an update (`qterm.exe.old`, the previous version,
 deleted when the new one starts).
 
-To remove qterm completely: untick **Start with Windows**, remove the Claude Code hook
+To remove qterm completely: untick **Start with Windows** and **“Open in qterm” in
+Explorer's menu**, remove the Claude Code hook
 (Settings → Claude Code → Remove) if you set it up, quit qterm, then uninstall it from
 Windows' Installed apps (or delete the portable exe), and delete the two `dev.qterm.app`
 folders.
 
 ## Troubleshooting
+
+**Something doesn't work and you want to report it.** Settings → **Copy diagnostics**
+puts qterm's version, how it is installed, your Windows and WebView2 versions, the
+console host, settings problems, the hotkey, Start with Windows, the shells found and
+the last lines of the log on the clipboard. Nothing is sent anywhere; paste it into your
+report. **Open logs** (Settings, or the tray) shows the log file itself.
+
+**"Start with Windows" or "Open in qterm" starts the other copy.** With both the
+installer and a portable exe, the installed qterm always takes these over, and a
+portable copy leaves them to it. To use the portable exe instead, uninstall qterm.
 
 **The ~ key types ~ instead of showing the console.** Another app holds that key, or the
 hotkey is switched off in the tray menu. The tray tooltip says which. Choose another

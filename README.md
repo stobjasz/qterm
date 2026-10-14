@@ -18,7 +18,7 @@ How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
 Two ways to run it:
 
 - **`qterm_<version>_x64-setup.exe`**: installs for your user only (no administrator
-  rights) into `%LOCALAPPDATA%\Programs\qterm`, with a Start menu entry and an
+  rights) into `%LOCALAPPDATA%\qterm`, with a Start menu entry and an
   uninstaller in Windows' Installed apps.
 - **`qterm-<version>-portable-x64.exe`**: one file, nothing to install; put it in any
   folder and run it.
@@ -41,6 +41,11 @@ checks off.
 - Drop files from Explorer on a pane to type their paths, quoted for its shell
 - Command marks: a ✓/✗ bar per command, Ctrl+↑/↓ between prompts, copy the last
   command's output, and a notification when a long command finishes while you're away
+- Quick select (Alt+Shift+S): copy or open any link, file, folder, git hash or IP on
+  screen by typing its label
+- Recent commands and folders across panes in the palette; named workspaces (every tab
+  saved under a name); save a pane's output as text or HTML
+- "Open in qterm" in Explorer's folder menu (optional)
 - Search the output of every pane at once (Alt+Shift+F); snippets in the palette;
   inline images (sixel, iTerm, Kitty) and optional font ligatures
 - Administrator tabs through Windows' sudo (Inline); settings export and import
@@ -51,7 +56,8 @@ checks off.
 - Claude Code: remembers sessions (from `claude --resume <id>` in the output), grouped
   by folder, and resumes them from the ✳ menu; alerts you (Windows notification, ✳ on
   the tab) when Claude is waiting for you; each tab shows how full Claude's context is and
-  an estimated cost. Turn them on in Settings → Claude Code.
+  an estimated cost. Turn them on in Settings → Claude Code. Tabs take the Claude
+  session's title; Alt+Shift+W jumps to the next pane where Claude waits.
 - Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
   editor (VS Code by default)
 - Command palette (Ctrl+Shift+P) for every action, tab, profile, layout, theme and
@@ -63,7 +69,8 @@ checks off.
 - Claude Code: browse every session on the PC grouped by folder (with branch and
   prompt count), start a new one in a folder, see per tab whether Claude is working or
   idle
-- Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"
+- Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"; a log file and
+  "Copy diagnostics" for bug reports
 
 | Keys | Action |
 |---|---|
@@ -81,6 +88,8 @@ checks off.
 | Ctrl+Shift+P | Command palette |
 | Alt+Shift+Z | Zoom the focused pane |
 | Alt+Shift+B | Type into every pane of the tab |
+| Alt+Shift+S | Quick select: copy (or Shift: open) what's on screen |
+| Alt+Shift+W | Next pane where Claude waits |
 
 Settings: the ⚙ button, Ctrl+, or tray → **Settings…** open the settings panel. Everything
 lives in `%APPDATA%\dev.qterm.app\config.toml`, which the panel edits for you (keeping its

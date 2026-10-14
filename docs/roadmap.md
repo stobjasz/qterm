@@ -75,7 +75,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 29 | **Log file** plus tray → "Open logs". | S | ⬜ |
+| 29 | **Log file** plus tray → "Open logs". | S | ✅ with #37: `logs\qterm.log`, tray and Settings → Open logs |
 | 30 | **Publish to winget** (after #13). | S | ⬜ |
 | 31 | **Settings export/import** for moving to another PC. | S | ✅ Settings footer: Export… / Import… |
 
@@ -85,31 +85,31 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 33 | **The installed copy owns "Start with Windows"**: both builds share one autostart entry ("qterm") and each re-points it to itself on start, so a portable copy left running keeps it after an install (the installer's "Run qterm" only toggles the running portable copy). Installed copies always take the entry; a portable copy takes it only when it doesn't point at an installed qterm. | S | ⬜ decided 2026-10-12 |
+| 33 | **The installed copy owns "Start with Windows"**: both builds share one autostart entry ("qterm") and each re-points it to itself on start, so a portable copy left running keeps it after an install (the installer's "Run qterm" only toggles the running portable copy). Installed copies always take the entry; a portable copy takes it only when it doesn't point at an installed qterm. | S | ✅ `install.rs`, also for the Explorer item (#36) |
 | 34 | **Code signing** (e.g. Azure Trusted Signing) in `release.yml`, so SmartScreen stops warning on first run. | S + cost | ⬜ |
 | 35 | **"What's new" after an update**: the release notes (already in the update feed) shown once after the restart. | S | ⬜ |
-| 36 | **"Open in qterm" in Explorer's context menu**: a new tab in that folder, console shown. Registered by the installer; a setting for the portable exe. | S–M | ⬜ |
-| 37 | **Diagnostics**: panics and errors into the log file (#29), plus "Copy diagnostics" (version, build, Windows, ConPTY, settings errors) for bug reports. | S | ⬜ |
+| 36 | **"Open in qterm" in Explorer's context menu**: a new tab in that folder, console shown. Registered by the installer; a setting for the portable exe. | S–M | ✅ one setting for both, `explorer_menu` (off); the uninstaller removes it; E2E R8 |
+| 37 | **Diagnostics**: panics and errors into the log file (#29), plus "Copy diagnostics" (version, build, Windows, ConPTY, settings errors) for bug reports. | S | ✅ Settings → Copy diagnostics; panics and UI errors logged too |
 | 38 | **ARM64 build** next to x64 (Windows on Snapdragon). | S–M | ⬜ |
 
 ### Claude Code
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 39 | **Tabs named after their Claude session** (its first prompt or summary from the transcript) unless renamed by hand. | S | ⬜ |
+| 39 | **Tabs named after their Claude session** (its first prompt or summary from the transcript) unless renamed by hand. | S | ✅ Claude Code titles the terminal itself while it runs; the tab now keeps the title after it exits and across restarts |
 | 40 | **New Claude session in a git worktree**: `git worktree add` on a new branch, then a pane there running `claude`, for parallel tasks in one repo. | M | ⬜ |
 | 41 | **Usage overview**: tokens and estimated cost per day and per project across all sessions (the per-tab figures from #17, summed). | M | ⬜ |
-| 42 | **Waiting list**: every pane where Claude waits for you, in one popup, with a key to jump to the next one. | S | ⬜ |
+| 42 | **Waiting list**: every pane where Claude waits for you, in one popup, with a key to jump to the next one. | S | ✅ ✳ menu → Waiting for you, palette, Alt+Shift+W |
 
 ### Terminal
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 43 | **Recent commands** (from the command marks of #18) across panes in the palette: run again here, or copy. | S–M | ⬜ |
-| 44 | **Recent folders** (from shell integration's folder tracking) in the palette: a new tab there. | S | ⬜ |
-| 45 | **Quick select**: label every URL, path, git hash and IP on screen and copy or open one by its label, keyboard only. | M | ⬜ |
+| 43 | **Recent commands** (from the command marks of #18) across panes in the palette: run again here, or copy. | S–M | ✅ typed at the prompt (Enter is yours); `history.json`; E2E R9 |
+| 44 | **Recent folders** (from shell integration's folder tracking) in the palette: a new tab there. | S | ✅ with #43 |
+| 45 | **Quick select**: label every URL, path, git hash and IP on screen and copy or open one by its label, keyboard only. | M | ✅ Alt+Shift+S; Shift+label opens; E2E R11 |
 | 46 | **Output triggers**: patterns in config that highlight a line, mark the tab or notify (e.g. "Compiled successfully", "error TS"). | M | ⬜ |
-| 47 | **Save a pane's output** to a text or HTML file, or open it in the editor. | S | ⬜ |
+| 47 | **Save a pane's output** to a text or HTML file, or open it in the editor. | S | ✅ palette: Save pane output… / Open pane output in editor |
 | 48 | **Accessibility**: screen reader mode (xterm.js) and a minimum-contrast setting. | S | ⬜ |
 
 ### The console window
@@ -117,6 +117,6 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 49 | **Size toggle**: a key that switches the console between its height and full screen. | S | ⬜ |
-| 50 | **Named workspaces**: save and reopen a whole set of tabs (layouts cover one tab). | M | ⬜ |
+| 50 | **Named workspaces**: save and reopen a whole set of tabs (layouts cover one tab). | M | ✅ opened next to the open tabs; `workspaces.json`; E2E R10 |
 
-Suggested next: #33 (autostart), #29 with #37 (log and diagnostics), then #30 (winget) and #35.
+Suggested next: #30 (winget) and #35 ("What's new" after an update), then #16 and #25.

@@ -59,8 +59,8 @@ mod tests {
 
     #[test]
     fn the_installed_copy_always_takes_a_portable_one_only_when_free() {
-        let installed = |exe: &Path| exe.starts_with(r"C:\Programs\qterm");
-        let at_installed = Some(r#""C:\Programs\qterm\qterm.exe" --background"#);
+        let installed = |exe: &Path| exe.starts_with(r"C:\Users\me\AppData\Local\qterm");
+        let at_installed = Some(r#""C:\Users\me\AppData\Local\qterm\qterm.exe" --background"#);
         let at_portable = Some(r"C:\tools\qterm-portable.exe --background");
         // Installed: always.
         assert!(take(at_portable, true, installed));

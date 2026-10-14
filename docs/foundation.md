@@ -939,3 +939,82 @@ works once the repo (or its releases) is public. Entries: `windows-x86_64-nsis` 
   "could not download the update: The signature verification failed", qterm kept
   running and the exe was unchanged.
 - `tauri build` with the key set produced the per-user installer and its `.sig`.
+
+## 26. Roadmap round 3: #29, #33, #36, #37, #39, #42–#45, #47, #50 (2026-10-14)
+
+**Which copy owns shared integrations (#33, `install.rs`).** The autostart entry and
+the Explorer item have one name for every copy. An installed qterm (an
+`uninstall.exe` next to it) always points them at itself on start; a portable one only
+when they don't already point at an existing installed qterm. Settings are shared
+between copies (same identifier), so an explicit change in either copy applies to all.
+
+**Log and diagnostics (#29, #37, `log.rs`, `diagnostics.rs`).** `qlog!` replaces every
+`eprintln!`: local-time lines in `%LOCALAPPDATA%\<id>\logs\qterm.log`, rotated to
+`.log.1` past 1 MB; lines logged before setup knows the folder are buffered. A panic
+hook logs panics (release builds abort right after). UI `error` /
+`unhandledrejection` events are forwarded (at most 50 a session). "Copy diagnostics"
+builds a plain-text report (version, install kind, Windows name/build — ProductName
+still says Windows 10 on 11, so the build number decides — WebView2, console host,
+settings path and error, hotkey, autostart target, shells, last 40 log lines).
+
+**Open in qterm (#36, `explorer.rs`).** `explorer_menu` writes
+`HKCU\Software\Classes\{Directory,Directory\Background,Drive}\shell\qterm` with
+`"<exe>" --open-here "%V"`. Test builds use their identifier as the key name, so they
+never replace the real one; dev builds with the real identifier refuse. A second
+start hands its arguments to the running qterm through single-instance, which shows
+the console and emits `open-here`; a first start keeps the folder until the UI takes
+it after restoring tabs. `%V` of a drive root ends in a backslash, which escapes the
+closing quote, so a stray trailing `"` is dropped. The uninstaller hook
+(`windows/hooks.nsh`, NSIS_HOOK_POSTUNINSTALL) removes the keys if their command
+starts with the install folder. Note: Tauri's per-user NSIS installs to
+`%LOCALAPPDATA%\qterm` (the docs said `...\Programs\qterm` until this round).
+
+**Tab names from Claude (#39).** Claude Code already titles the terminal while it
+runs (unless `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`). The usage reader now also takes the
+transcript's `aiTitle` (else the first typed prompt) and the pane keeps it as
+`claudeTitle`, saved with the tabs; `tabTitle` = custom > Claude title > shell title >
+profile.
+
+**Waiting list (#42).** From the existing attention map: ✳ menu section, palette
+group, `next_waiting` (Alt+Shift+W) cycling in tab order (`claude/waiting.ts`). The ✳
+menu only exists with "Remember Claude Code sessions" on; the shortcut and palette
+work regardless.
+
+**Recent commands and folders (#43, #44, `terminal/history.ts`).** From the
+`onCommandFinished` and `onCwd` events; MRU, unique (folders compared ignoring case and
+a trailing backslash), 100 / 30; `history.json` via Rust like the session, saved
+shortly after a change and on quit / update. A recent command is typed without Enter.
+
+**Quick select (#45, `terminal/quickSelect.ts`).** `registry.screen()` returns the
+viewport as logical lines (wrapped rows joined, wide characters' second halves
+skipped) with each UTF-16 unit's row/column, and the cell grid's page geometry.
+Targets: URLs (sentence punctuation trimmed, a `)` closing a `(` inside kept), file
+references (the link finder's pattern, with line/column), Windows folders, hashes
+(7–40 hex with a digit and a letter), IPv4 with port; overlaps go to the earliest,
+longest. Labels: home-row letters, pairs past 26, shortest at the bottom. While the
+overlay shows, a capture-phase keydown listener takes every key (preventDefault +
+stopPropagation, so xterm never sees it).
+
+**Save output (#47).** `registry.plainText` (normal buffer, wrapped lines joined,
+trailing blank lines dropped, CRLF) or the SerializeAddon's HTML; `save_output` writes
+to the chosen path, or a temp file that the editor opens at the last line.
+
+**Named workspaces (#50, `workspace/named.ts`).** Entries hold `saveWorkspace` text;
+opening restores it and `appendWorkspace` re-ids every tab and pane (so it can be
+opened twice), drops `claudeSession` (resume is a restart feature) and activates its
+first tab.
+
+**Verified:**
+- Unit: install ownership and command-line parsing, Explorer argument parsing,
+  transcript titles, history, waiting order, workspaces (append with fresh ids, round
+  trip), quick select targets and labels: 175 vitest, 84 cargo tests.
+- E2E (each with a deliberate break that turned it red): R8 open-here (break: the
+  running copy ignores the folder), R9 recent command after a restart (break: commands
+  not remembered), R10 named workspace after a restart (break: folders dropped), R11
+  quick select (breaks: a label picking its neighbour; letters reaching the shell —
+  the first version of the spec missed the second, so it now runs a command afterwards
+  instead of reading the prompt line).
+- Live, against the test build: the diagnostics report, plain-text/HTML export (a
+  300-column line comes out whole) and the temp file; the log file's contents.
+- `tauri build` with the hook: the installer includes `hooks.nsh` and its
+  POSTUNINSTALL macro.
