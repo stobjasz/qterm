@@ -34,6 +34,7 @@ unit tests can't reproduce. One spec per risk.
 | R7 | A background chosen for one pane colours that pane only and survives a restart. | `pane-background-picker.spec.ts` |
 | R8 | Explorer's "Open in qterm" (registered from the setting) opens a tab in that folder in the qterm already running. | `open-here.spec.ts` |
 | R9 | A command run in one shell can be typed again from the palette after a restart. | `recent-command.spec.ts` |
+| R10 | Tabs saved as a named workspace open again after a restart, each shell in its folder. | `named-workspace.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

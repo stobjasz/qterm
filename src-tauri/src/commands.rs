@@ -125,6 +125,21 @@ fn history_path(app: &AppHandle) -> Option<std::path::PathBuf> {
     Some(app.path().app_config_dir().ok()?.join("history.json"))
 }
 
+/// Named workspaces (see named.ts), if any.
+#[tauri::command]
+pub fn load_workspaces(app: AppHandle) -> Option<String> {
+    std::fs::read_to_string(workspaces_path(&app)?).ok()
+}
+
+#[tauri::command]
+pub fn save_workspaces(app: AppHandle, workspaces: String) -> Result<(), String> {
+    write_atomically(&workspaces_path(&app).ok_or("no config folder")?, &workspaces)
+}
+
+fn workspaces_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    Some(app.path().app_config_dir().ok()?.join("workspaces.json"))
+}
+
 #[tauri::command]
 pub fn list_claude_sessions(store: State<'_, ClaudeStore>) -> Vec<ClaudeSession> {
     store.list()

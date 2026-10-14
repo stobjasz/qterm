@@ -1283,3 +1283,15 @@ body,
   white-space: nowrap;
   color: var(--tab-fg);
 }
+
+/* Palette → "Save all tabs as a workspace…": the name dialog. */
+.workspace-dialog {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workspace-dialog input {
+  width: 100%;
+}

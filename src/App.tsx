@@ -31,6 +31,8 @@ import {
   loadHistory,
   saveHistory,
   chooseOutputFile,
+  loadWorkspaces,
+  saveWorkspaces,
   openInEditor,
   saveOutput,
   onUpdateAvailable,
@@ -63,6 +65,8 @@ import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
 import { nextWaiting } from "./claude/waiting";
+import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
+import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
@@ -99,6 +103,7 @@ import {
   splitPane,
   tabTitle,
   withClaudeTitles,
+  appendWorkspace,
   swapPane,
   toggleBroadcast,
   toggleZoom,
@@ -142,6 +147,9 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** Named workspaces (workspaces.json); the name dialog when saving one. */
+  const [namedWorkspaces, setNamedWorkspaces] = useState<NamedWorkspace[]>([]);
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
   /** Recent commands and folders across panes, for the palette (history.json). */
   const [history, setHistory] = useState<History>(emptyHistory);
   const historyLoaded = useRef(false);
@@ -587,6 +595,28 @@ export default function App() {
     [registry],
   );
 
+  // --- named workspaces: every tab under a name, opened again next to the open ones ---
+  useEffect(() => void loadWorkspaces().then((text) => setNamedWorkspaces(parseNamed(text)), () => {}), []);
+  const changeNamedWorkspaces = useCallback((change: (list: NamedWorkspace[]) => NamedWorkspace[]) => {
+    setNamedWorkspaces((list) => {
+      const next = change(list);
+      void saveWorkspaces(serializeNamed(next)).catch((e) => setNotice(`Could not save workspaces: ${e}`));
+      return next;
+    });
+  }, []);
+  const saveNamedWorkspace = useCallback(
+    (name: string) => changeNamedWorkspaces((list) => upsertNamed(list, name, saveWorkspace(workspaceRef.current), Date.now())),
+    [changeNamedWorkspaces],
+  );
+  const openNamedWorkspace = useCallback(
+    (named: NamedWorkspace) => {
+      const add = profiles ? restoreWorkspace(named.session, profiles) : undefined;
+      if (!add) return setNotice(`The workspace “${named.name}” couldn't be read.`);
+      setWorkspace((ws) => appendWorkspace(ws, add, (kind) => nextId(kind)));
+    },
+    [profiles],
+  );
+
   // --- command palette: everything you can do, by name ------------------------------
   const paletteItems = useMemo((): PaletteItem[] => {
     const chordFor = (name: string) => {
@@ -688,9 +718,23 @@ export default function App() {
       ...(history.commands.length || history.folders.length
         ? [{ id: "recent:forget", group: "Recent", label: "Forget recent commands and folders", run: () => setHistory(emptyHistory()) }]
         : []),
+      ...namedWorkspaces.map((named) => ({
+        id: `workspace:${named.name}`,
+        group: "Workspace",
+        label: named.name,
+        hint: `${tabCount(named.session)} tabs`,
+        run: () => openNamedWorkspace(named),
+      })),
+      { id: "workspace:save", group: "Workspace", label: "Save all tabs as a workspace…", run: () => setSavingWorkspace(true) },
+      ...namedWorkspaces.map((named) => ({
+        id: `workspace-delete:${named.name}`,
+        group: "Delete workspace",
+        label: named.name,
+        run: () => changeNamedWorkspaces((list) => removeNamed(list, named.name)),
+      })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -1112,6 +1156,13 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+        {savingWorkspace && (
+          <SaveWorkspaceDialog
+            existing={namedWorkspaces.map((w) => w.name)}
+            onSave={saveNamedWorkspace}
+            onClose={() => setSavingWorkspace(false)}
+          />
+        )}
       {paneMenu && workspace.panes[paneMenu.paneId] && (
         <PaneBackgroundMenu
           key={paneMenu.paneId}
@@ -1210,6 +1261,16 @@ export default function App() {
       <HeightHandle />
     </div>
   );
+}
+
+/** How many tabs a saved workspace holds (for the palette). */
+function tabCount(session: string): number {
+  try {
+    const tabs = (JSON.parse(session) as { tabs?: unknown[] }).tabs;
+    return Array.isArray(tabs) ? tabs.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** What was saved, with anything remembered while it loaded on top. */

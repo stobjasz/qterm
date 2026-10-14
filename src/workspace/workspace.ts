@@ -411,6 +411,29 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
   return { tabs, activeTab, panes };
 }
 
+/**
+ * Adds another workspace's tabs (a saved named workspace) after the open ones, with
+ * fresh tab and pane ids so the same one can be opened twice. Its first tab becomes
+ * active. Claude sessions aren't carried over: resuming is for restarts only.
+ */
+export function appendWorkspace(ws: Workspace, add: Workspace, nextId: (kind: "tab" | "pane") => string): Workspace {
+  const paneIdMap = new Map(Object.keys(add.panes).map((id) => [id, nextId("pane")]));
+  const remap = (node: LayoutNode): LayoutNode =>
+    node.kind === "leaf" ? { kind: "leaf", pane: paneIdMap.get(node.pane)! } : { ...node, children: node.children.map(remap) };
+  const panes = { ...ws.panes };
+  for (const pane of Object.values(add.panes)) {
+    const id = paneIdMap.get(pane.id)!;
+    const { claudeSession: _resume, ...rest } = pane;
+    panes[id] = { ...rest, id, title: "" };
+  }
+  const tabs = add.tabs.map((tab) => {
+    const { zoomed: _zoomed, broadcast: _broadcast, ...rest } = tab;
+    return { ...rest, id: nextId("tab"), root: remap(tab.root), focusedPane: paneIdMap.get(tab.focusedPane)! };
+  });
+  if (tabs.length === 0) return ws;
+  return { tabs: [...ws.tabs, ...tabs], activeTab: tabs[0].id, panes };
+}
+
 function isLayout(node: unknown): node is LayoutNode {
   if (typeof node !== "object" || node === null) return false;
   const n = node as Record<string, unknown>;

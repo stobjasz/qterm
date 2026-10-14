@@ -137,6 +137,8 @@ pub fn run() {
             commands::save_session,
             commands::load_history,
             commands::save_history,
+            commands::load_workspaces,
+            commands::save_workspaces,
             commands::list_claude_sessions,
             commands::claude_session_seen,
             commands::forget_claude_sessions,

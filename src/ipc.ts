@@ -476,6 +476,15 @@ export function saveOutput(path: string | null, contents: string): Promise<strin
   return invoke("save_output", { path, contents });
 }
 
+/** Named workspaces (workspaces.json). */
+export function loadWorkspaces(): Promise<string | null> {
+  return invoke("load_workspaces");
+}
+
+export function saveWorkspaces(workspaces: string): Promise<void> {
+  return invoke("save_workspaces", { workspaces });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });
