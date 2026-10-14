@@ -485,6 +485,11 @@ export function saveWorkspaces(workspaces: string): Promise<void> {
   return invoke("save_workspaces", { workspaces });
 }
 
+/** Pinned open: clicking elsewhere and the hotkey don't hide the console. */
+export function setPinned(pinned: boolean): Promise<void> {
+  return invoke("set_pinned", { pinned });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

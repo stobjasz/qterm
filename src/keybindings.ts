@@ -27,7 +27,8 @@ export type Command =
   | { type: "nextWaiting" }
   | { type: "saveOutput" }
   | { type: "openOutput" }
-  | { type: "quickSelect" };
+  | { type: "quickSelect" }
+  | { type: "togglePin" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -69,6 +70,7 @@ const ACTIONS = {
   save_output: { command: { type: "saveOutput" }, chord: "" },
   open_output: { command: { type: "openOutput" }, chord: "" },
   quick_select: { command: { type: "quickSelect" }, chord: "alt+shift+s" },
+  toggle_pin: { command: { type: "togglePin" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -110,6 +112,7 @@ const LABELS: Record<Action, string> = {
   save_output: "Save pane output…",
   open_output: "Open pane output in editor",
   quick_select: "Quick select (copy or open what's on screen)",
+  toggle_pin: "Pin the console open / unpin",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

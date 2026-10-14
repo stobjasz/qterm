@@ -31,6 +31,7 @@ import {
   loadHistory,
   saveHistory,
   chooseOutputFile,
+  setPinned as setPinnedInRust,
   loadWorkspaces,
   saveWorkspaces,
   openInEditor,
@@ -152,6 +153,15 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** Pinned open (📌): Rust ignores hide-on-blur and the hotkey's hide meanwhile. Not kept across restarts. */
+  const [pinned, setPinned] = useState(false);
+  const pinnedRef = useRef(pinned);
+  pinnedRef.current = pinned;
+  const togglePin = useCallback(() => {
+    const next = !pinnedRef.current;
+    setPinned(next);
+    void setPinnedInRust(next);
+  }, []);
   /** Quick select (Alt+Shift+S): labels over the focused pane, and what was typed. */
   const [quickSelect, setQuickSelect] = useState<{ paneId: PaneId; items: QuickSelectItem[] }>();
   const [quickTyped, setQuickTyped] = useState("");
@@ -487,6 +497,9 @@ export default function App() {
         }
         case "searchAll":
           setSearchAllOpen((open) => !open);
+          break;
+        case "togglePin":
+          togglePin();
           break;
         case "quickSelect": {
           const screen = registry.screen(paneId);
@@ -1327,6 +1340,8 @@ export default function App() {
         onStyle={(tabId, style) => setWorkspace((ws) => setTabStyle(ws, tabId, style))}
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
+        pinned={pinned}
+        onTogglePin={togglePin}
         attention={attentionTabs}
         markers={tabMarkers}
         layouts={config?.layouts ?? []}

@@ -120,6 +120,9 @@ pub fn refresh(app: &AppHandle) {
         (true, None) => format!("qterm: press {key}"),
         (false, None) => format!("qterm: hotkey {key} is off"),
     };
+    if window::is_pinned(app) {
+        tooltip.push_str("\npinned open");
+    }
     match ATTENTION.load(Ordering::Relaxed) {
         0 => {}
         1 => tooltip.push_str("\nClaude is waiting for you in 1 pane"),

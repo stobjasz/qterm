@@ -25,6 +25,9 @@ interface Props {
   onStyle(tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): void;
   onMove(tabId: TabId, toIndex: number): void;
   onOpenSettings(): void;
+  /** Pinned open: clicking elsewhere and the hotkey don't hide the console. */
+  pinned: boolean;
+  onTogglePin(): void;
   /** Tabs with a pane where Claude Code is waiting, and its latest message. */
   attention: ReadonlyMap<TabId, ClaudeAlert>;
   markers: ReadonlyMap<TabId, TabMarkers>;
@@ -272,6 +275,15 @@ export function TabBar(props: Props) {
       </button>
       <button className="tab-new" aria-label="Split down" title="Split down (Alt+Shift+-)" onClick={() => props.onSplit("column")}>
         <SplitIcon dir="column" />
+      </button>
+      <button
+        className={`tab-new tab-pin${props.pinned ? " pinned" : ""}`}
+        aria-label="Pin the console open"
+        aria-pressed={props.pinned}
+        title={props.pinned ? "Pinned open: click to unpin" : "Pin the console open: clicking elsewhere and the hotkey won't hide it"}
+        onClick={props.onTogglePin}
+      >
+        📌
       </button>
       <button className="tab-new" aria-label="Settings" title="Settings (Ctrl+,)" onClick={props.onOpenSettings}>
         ⚙

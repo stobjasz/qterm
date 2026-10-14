@@ -21,6 +21,34 @@ const MIN_HEIGHT: f64 = 0.1;
 pub struct QuakeState {
     hiding: AtomicBool,
     show_when_ready: AtomicBool,
+    /// Pinned open (the 📌 button): neither clicking elsewhere nor the hotkey hides it.
+    pinned: AtomicBool,
+}
+
+pub fn set_pinned(app: &AppHandle, pinned: bool) {
+    app.state::<QuakeState>().pinned.store(pinned, Ordering::Release);
+    crate::tray::refresh(app);
+}
+
+pub fn is_pinned(app: &AppHandle) -> bool {
+    app.state::<QuakeState>().pinned.load(Ordering::Acquire)
+}
+
+#[derive(Debug, PartialEq)]
+enum HotkeyAction {
+    Show,
+    Focus,
+    Hide,
+}
+
+/// What the hotkey does: show when hidden, focus when visible but behind, hide when
+/// in front, unless pinned (then it only brings the console to the front).
+fn hotkey_action(visible: bool, focused: bool, pinned: bool) -> HotkeyAction {
+    match (visible, focused) {
+        (false, _) => HotkeyAction::Show,
+        (true, true) if !pinned => HotkeyAction::Hide,
+        (true, _) => HotkeyAction::Focus,
+    }
 }
 
 /// Show the console once the UI reports ready (a normal launch, not `--background`).
@@ -44,15 +72,15 @@ struct Visibility {
     slide_ms: u64,
 }
 
-/// Hotkey behaviour: hide when focused, focus when visible but behind, show when hidden.
+/// Hotkey behaviour: see `hotkey_action`.
 pub fn toggle(app: &AppHandle) {
     let Some(win) = window(app) else { return };
-    match (win.is_visible().unwrap_or(false), win.is_focused().unwrap_or(false)) {
-        (true, true) => hide(app, win),
-        (true, false) => {
+    match hotkey_action(win.is_visible().unwrap_or(false), win.is_focused().unwrap_or(false), is_pinned(app)) {
+        HotkeyAction::Hide => hide(app, win),
+        HotkeyAction::Focus => {
             let _ = win.set_focus();
         }
-        (false, _) => show(app, &win),
+        HotkeyAction::Show => show(app, &win),
     }
 }
 
@@ -212,5 +240,21 @@ fn target_monitor(app: &AppHandle, choice: MonitorChoice) -> Option<Monitor> {
     match choice {
         MonitorChoice::Cursor => under_cursor().or_else(primary),
         MonitorChoice::Primary => primary().or_else(under_cursor),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_hotkey_hides_only_an_unpinned_console_in_front() {
+        assert_eq!(hotkey_action(false, false, false), HotkeyAction::Show);
+        assert_eq!(hotkey_action(true, false, false), HotkeyAction::Focus);
+        assert_eq!(hotkey_action(true, true, false), HotkeyAction::Hide);
+        // Pinned: shows and focuses as usual, never hides.
+        assert_eq!(hotkey_action(false, false, true), HotkeyAction::Show);
+        assert_eq!(hotkey_action(true, false, true), HotkeyAction::Focus);
+        assert_eq!(hotkey_action(true, true, true), HotkeyAction::Focus);
     }
 }

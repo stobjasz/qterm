@@ -403,6 +403,12 @@ pub fn prune_scrollback(store: State<'_, crate::scrollback::ScrollbackStore>, ke
 }
 
 /// The UI has saved what it needs after "quit-requested"; exit now.
+/// The 📌 button: pinned open, the console ignores hide-on-blur and the hotkey's hide.
+#[tauri::command]
+pub fn set_pinned(app: AppHandle, pinned: bool) {
+    window::set_pinned(&app, pinned);
+}
+
 /// The folder qterm was started with (`--open-here`, from Explorer's menu), once.
 #[tauri::command]
 pub fn take_open_here(pending: State<'_, crate::explorer::PendingOpenHere>) -> Option<String> {

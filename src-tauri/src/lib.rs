@@ -118,7 +118,7 @@ pub fn run() {
         .on_window_event(|win, event| {
             if let WindowEvent::Focused(false) = event {
                 let app = win.app_handle();
-                if app.state::<ConfigState>().get().hide_on_blur {
+                if app.state::<ConfigState>().get().hide_on_blur && !window::is_pinned(app) {
                     window::dismiss(app);
                 }
             }
@@ -175,6 +175,7 @@ pub fn run() {
             commands::check_update,
             commands::install_update,
             commands::take_open_here,
+            commands::set_pinned,
             commands::log_ui,
             commands::diagnostics,
             commands::open_logs,
