@@ -1,6 +1,6 @@
 [package]
 name = "qterm"
-version = "0.2.0"
+version = "0.2.1"
 description = "A quake-style drop-down terminal for Windows"
 authors = ["Sebastian Tobjasz"]
 license = "MIT"
