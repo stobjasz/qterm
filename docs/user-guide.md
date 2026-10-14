@@ -51,7 +51,8 @@ follows the copy you ran last.
 | Check for updates… | Opens Settings → Updates and checks. Once a newer version is found it reads "Update to qterm *version*…". |
 | Quit qterm | Saves your tabs and their output, then closes qterm and every shell in it. |
 
-When Claude Code is waiting for you, the tray tooltip says in how many panes.
+When Claude Code is waiting for you, the tray tooltip says in how many panes; with plan
+limits set up, it also shows your Claude plan usage.
 
 ## Updates
 
@@ -191,6 +192,8 @@ succeeded, red when it failed (hover for the command and exit code), grey when t
 can't tell (Command Prompt).
 
 - **Ctrl+↑ / Ctrl+↓** scroll to the previous / next command.
+- **Click a command's bar** for its menu: **Copy output**, **Copy command**, **Select
+  output** (selects it on screen) and **Run again**.
 - **"Copy last command's output"** in the command palette copies what the last command
   printed.
 
@@ -251,6 +254,12 @@ with the same splits, colours and titles; it can be opened more than once. Claud
 sessions in it aren't resumed (start them from the ✳ menu). **Delete workspace: <name>**
 removes one.
 
+**From Windows Terminal:** Settings → Terminal → **Import from Windows Terminal…** lists
+the shells Windows Terminal has and qterm doesn't (your own profiles there, ones other
+apps added, and Visual Studio's Developer PowerShell and Developer Command Prompt). Tick
+the ones you want; they're added to the settings file as profiles below, with their
+start folder, background and tab colour.
+
 **Profiles** add your own shells next to the detected ones: an SSH host, a shell that
 starts in a project folder, or one with its own colours:
 
@@ -304,7 +313,9 @@ Set these up in **Settings → Claude Code**.
 
 **Alerts and session tracking.** Click **Set up Claude Code alerts** once. qterm then
 learns from Claude Code when it is waiting for you (a permission question, or your next
-message after it has been idle for a minute) and which session runs in which pane. This
+message after it has been idle for a minute), when a reply stopped on an API error (a
+rate limit, overload or billing problem: the tab shows **!** with the reason), and which
+session runs in which pane. This
 only affects Claude Code running inside qterm. If qterm says **Update** there, click it:
 a newer qterm listens to more of Claude Code's events. Claude sessions started afterwards
 use the new setup.
@@ -313,6 +324,18 @@ use the new setup.
 full its context is, e.g. **44%**. Hover for the model, context size, number of requests
 and an estimated cost. The cost uses Anthropic's API prices; with a Claude subscription
 you aren't billed per token, so treat it as a measure of how much the session has done.
+
+**Plan limits and exact usage.** Settings → Claude Code → **Plan limits and exact
+usage** → **Set up** lets Claude Code's status line pass its figures to qterm:
+
+- your plan's **5-hour and 7-day usage** and when each resets, in the ✳ menu and the tray
+  tooltip, with a notice and a Windows notification at 80% and 95%;
+- Claude Code's own context and cost figures for each tab, instead of qterm's estimate.
+
+Under Claude's prompt, qterm's status line then shows the model, context and plan usage.
+If you have a status line of your own, it stays: qterm passes Claude Code's data on to
+it unchanged, and **Remove** puts your command back exactly as it was. A custom status
+line replaces Claude Code's keyboard hints in its footer.
 
 **Back after a restart.** With **Resume Claude Code sessions on start** on (off by
 default), the Claude sessions that were running when qterm closed come back too: each

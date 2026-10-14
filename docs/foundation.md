@@ -1055,3 +1055,63 @@ previous manifests with the new URL and checksum and opens the pull request, if 
 - Live: with `last-version` = 0.2.0, the real 0.2.1 notes load from GitHub and render
   (heading, list items, link).
 - `winget validate` on the 0.2.1 manifests: succeeded.
+
+## 28. Plan limits, stop alerts, Windows Terminal import, command blocks (#51, #52, #60, #57; 2026-10-14)
+
+**Status line relay (#51, `claude_statusline.rs`).** Claude Code runs `statusLine.command`
+with the session's JSON on stdin (context window, cost, `rate_limits.five_hour/seven_day`
+with `used_percentage` and `resets_at`, prompt cache). qterm's setup sets it to
+`<exe> --claude-statusline`; with a status line of the user's own, to
+`<exe> --claude-statusline --pass | <own command>`, where qterm forwards stdin unchanged;
+removing it restores the own command (other `statusLine` fields untouched). The exe is
+quoted only with a space in its path: Claude Code uses PowerShell when Git Bash is
+missing, and a quoted program doesn't start a PowerShell command line. The process
+drops a `usage` message in the pane's qterm inbox (same as the hooks; outside qterm it
+only prints). The UI merges Claude Code's context and cost into the tab's usage over the
+transcript estimate, keeps the latest plan usage (✳ menu, tray tooltip via
+`set_plan_summary`) and warns at 80% / 95% once per window (keyed by `resets_at`).
+
+**StopFailure (#52).** Added to the installed hook events (so older setups show
+"Update"). Input `error` (`rate_limit`, `overloaded`, `billing_error`, ...),
+`error_details`, `last_assistant_message`; it becomes an alert with kind
+`stop_failure:<error>` and the title "Claude stopped: <reason>", shown on the tab as
+"!".
+
+**Windows Terminal import (#60, `wt_import.rs`).** Sources: `settings.json` of the Store,
+Preview and unpackaged builds and `Fragments\<app>\*.json` (JSON with comments and
+trailing commas: a string-aware stripper; the naive regex breaks on `"https://..."`),
+with `profiles.defaults` applied, hidden and command-less (dynamic) profiles skipped;
+plus the Visual Studio developer shells WT generates, from `vswhere -format json`
+(`Import-Module <DevShell.dll>; Enter-VsDevShell <instanceId> -SkipAutomaticLocation`,
+written with single quotes so qterm's splitter keeps the script whole, and
+`cmd /k VsDevCmd.bat`). Anything matching an existing profile by program file name and
+arguments, or by name, isn't offered. Colours: the scheme's background (the file's or
+WT's built-in schemes), the nearest tab colour by hue. `Config::add_profiles` appends
+`[[profiles]]` with toml_edit.
+
+**PowerShell integration fix.** qterm appended `-NoExit -EncodedCommand <b64>` after a
+profile's own arguments; after a `-Command`, PowerShell takes everything as the script,
+so the integration's arguments became the script's (a VS developer shell failed). Now
+with `-Command` the integration is dot-sourced in front of the script
+(`. ([scriptblock]::Create(...FromBase64String('<b64>')))`; `-NoExit` added if missing);
+with `-File` it's left out.
+
+**Command blocks (#57).** The mark decoration takes clicks (the whole cell, the bar drawn
+by `::before`; mousedown stopped so xterm doesn't start a selection) and reports the
+command's prompt-marker id; `blockOutput` / `selectBlock` find the mark by that id
+(output = below the command line's wrapped rows, above the end mark, trailing blank
+lines dropped), shared with "Copy last command's output".
+
+**Verified:**
+- Unit: status line parsing, install / chain / restore, quoting; StopFailure alert;
+  JSONC, WT profile mapping, command keys, env expansion, VS dev shells, hue matching;
+  PowerShell integration with -Command / -c / -File; plan summary, warnings, usage merge.
+  184 vitest, 98 cargo tests.
+- E2E with Claude Code's documented JSON piped into the real commands: R13 status line →
+  ✳ menu (and qterm's printed line), R14 StopFailure → background tab's "!" marker; R15
+  command blocks. Each turned red under a deliberate break (usage not emitted;
+  StopFailure handled as a plain notification; the latest command selected instead of
+  the clicked one).
+- Live: importing from this PC's Windows Terminal, Visual Studio 2022's Developer
+  PowerShell opened with `VSINSTALLDIR` set, `cl.exe` found and folder tracking working;
+  before the fix the same profile came up without the VS environment.

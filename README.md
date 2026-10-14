@@ -39,8 +39,9 @@ checks off.
   and reorder (drag) tabs
 - Copy/paste (right-click, Ctrl+Shift+C/V, optional copy on select), scrollback search
 - Drop files from Explorer on a pane to type their paths, quoted for its shell
-- Command marks: a ✓/✗ bar per command, Ctrl+↑/↓ between prompts, copy the last
-  command's output, and a notification when a long command finishes while you're away
+- Command marks: a ✓/✗ bar per command (click it to copy or select its output, or run
+  it again), Ctrl+↑/↓ between prompts, and a notification when a long command finishes
+  while you're away
 - Quick select (Alt+Shift+S): copy or open any link, file, folder, git hash or IP on
   screen by typing its label
 - Recent commands and folders across panes in the palette; named workspaces (every tab
@@ -57,14 +58,17 @@ checks off.
   by folder, and resumes them from the ✳ menu; alerts you (Windows notification, ✳ on
   the tab) when Claude is waiting for you; each tab shows how full Claude's context is and
   an estimated cost. Turn them on in Settings → Claude Code. Tabs take the Claude
-  session's title; Alt+Shift+W jumps to the next pane where Claude waits.
+  session's title; Alt+Shift+W jumps to the next pane where Claude waits. Optionally,
+  your plan's 5-hour / 7-day usage (warnings at 80% and 95%) through Claude Code's status
+  line, and an alert when Claude stops on an API error (rate limit, overload).
 - Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
   editor (VS Code by default)
 - Command palette (Ctrl+Shift+P) for every action, tab, profile, layout, theme and
   Claude session
 - Pane tools: zoom a pane, swap panes, type into all panes of a tab at once; dots and
   bells on background tabs that printed something
-- Your own profiles (`[[profiles]]`: SSH hosts, dev servers, each with its own look) and
+- Your own profiles (`[[profiles]]`: SSH hosts, dev servers, each with its own look; or
+  imported from Windows Terminal, Visual Studio's developer shells included) and
   named layouts (`[[layouts]]`, or "Save this tab as a layout")
 - Claude Code: browse every session on the PC grouped by folder (with branch and
   prompt count), start a new one in a folder, see per tab whether Claude is working or

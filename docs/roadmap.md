@@ -129,8 +129,8 @@ Terminal 1.25's settings search).
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 51 | **Plan limits and exact usage**: relay Claude Code's status line data (an existing status line of your own keeps working) for the 5-hour / 7-day plan usage and reset times (tray, ✳ menu; warnings at 80% and 95%), and Claude Code's own context and cost figures instead of qterm's transcript estimate. | M | 🚧 |
-| 52 | **Alert when Claude stops on an error** (StopFailure hook): rate limit, overload or billing, with the reason. Rare, unlike #14. | S | 🚧 |
+| 51 | **Plan limits and exact usage**: relay Claude Code's status line data (an existing status line of your own keeps working) for the 5-hour / 7-day plan usage and reset times (tray, ✳ menu; warnings at 80% and 95%), and Claude Code's own context and cost figures instead of qterm's transcript estimate. | M | ✅ Settings → Claude Code → Plan limits and exact usage; ✳ menu, tray, warnings; E2E R13 |
+| 52 | **Alert when Claude stops on an error** (StopFailure hook): rate limit, overload or billing, with the reason. Rare, unlike #14. | S | ✅ hook setup adds StopFailure (Update in Settings); the tab shows ! with the reason; E2E R14 |
 | 53 | **Answer permission prompts from the notification** (PermissionRequest hook): Allow / Deny on the Windows notification. Off by default; needs a careful security design. | M–L | ⬜ |
 | 54 | **Claude's last reply on hover** (Stop hook's last message): in the tab tooltip and the waiting list; no notification. | S | ⬜ |
 | 55 | **Tasks and subagents per tab** ("3/7 tasks", "2 agents") from the task and subagent hooks, and a marker while compacting. | S–M | ⬜ |
@@ -140,7 +140,7 @@ Terminal 1.25's settings search).
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 57 | **Command blocks**: click a command's ✓/✗ bar to select or copy its output, collapse long output, run it again. | M | 🚧 |
+| 57 | **Command blocks**: click a command's ✓/✗ bar to select or copy its output, collapse long output, run it again. | M | ✅ copy / select output, copy command, run again; collapsing isn't possible in xterm.js; E2E R15 |
 | 58 | **Sticky command header**: while scrolling long output, the command that produced it stays at the top. | M | ⬜ |
 | 59 | **Search in Settings**: a filter box over the settings panel. | S | ⬜ |
 
@@ -148,9 +148,9 @@ Terminal 1.25's settings search).
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 60 | **Import from Windows Terminal**: its profiles (command, start folder, colours) as qterm profiles. | S–M | 🚧 |
+| 60 | **Import from Windows Terminal**: its profiles (command, start folder, colours) as qterm profiles. | S–M | ✅ settings, fragments, VS developer shells (vswhere); also fixed PowerShell profiles with -Command |
 | 61 | **Fully portable mode**: a marker file next to the exe keeps settings and data in that folder (USB stick). | M | ⬜ |
 | 62 | **Start menu jump list** (installed copy): recent folders and workspaces. | M | ⬜ |
 | 63 | **Settings in a folder of your choice** (OneDrive, a dotfiles repo) to keep PCs in sync. | S | ⬜ |
 
-Suggested next: #51, #52, #60 and #57 (in progress), then #54 and #59.
+Suggested next: #54 (last reply on hover) and #59 (search in Settings), then #56 (cache-cold countdown, with #51's data).
