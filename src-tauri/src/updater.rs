@@ -47,12 +47,8 @@ pub struct UpdateInfo {
     pub notes: Option<String>,
 }
 
-/// An installed qterm has the installer's uninstaller next to it; a portable one doesn't.
 pub fn is_portable() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("uninstall.exe")))
-        .is_none_or(|uninstaller| !uninstaller.exists())
+    !crate::install::this_is_installed()
 }
 
 /// Asks the release feed for a newer version; None when this one is current (or a

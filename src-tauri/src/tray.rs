@@ -152,13 +152,20 @@ pub fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     result
 }
 
-/// If "Start with Windows" is on, points it at this exe. The portable exe may have
-/// been moved or replaced, and an older entry may name a dev build; whichever
-/// release exe ran last is the one that starts at logon.
+/// If "Start with Windows" is on, points it at this exe: the portable exe may have
+/// been moved or replaced, and an older entry may name a dev build. An installed
+/// qterm always takes the entry; a portable one leaves it to an installed qterm
+/// (see install.rs).
 pub fn repoint_autostart(app: &AppHandle) {
     let autolaunch = app.autolaunch();
-    if !cfg!(debug_assertions)
-        && autolaunch.is_enabled().unwrap_or(false)
+    if cfg!(debug_assertions) || !autolaunch.is_enabled().unwrap_or(false) {
+        return;
+    }
+    let current = windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .and_then(|key| key.get_string(&app.package_info().name))
+        .ok();
+    if crate::install::should_take(current.as_deref())
         && let Err(e) = autolaunch.enable()
     {
         eprintln!("qterm: could not update autostart: {e}");

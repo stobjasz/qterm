@@ -7,6 +7,7 @@ mod config;
 mod editor;
 mod elevation;
 mod hotkey;
+mod install;
 mod procs;
 mod pty;
 mod scrollback;
