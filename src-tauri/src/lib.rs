@@ -150,6 +150,7 @@ pub fn run() {
             commands::save_console_height,
             commands::resolve_files,
             commands::open_in_editor,
+            commands::save_output,
             commands::show_claude_alert,
             commands::set_attention_count,
             commands::claude_hook_status,

@@ -461,6 +461,21 @@ export function saveHistory(history: string): Promise<void> {
   return invoke("save_history", { history });
 }
 
+const OUTPUT_FILTERS = [
+  { name: "Text", extensions: ["txt"] },
+  { name: "HTML (with colours)", extensions: ["html"] },
+];
+
+/** Asks where to save a pane's output; null when cancelled. */
+export function chooseOutputFile(defaultName: string): Promise<string | null> {
+  return saveDialog({ title: "Save pane output", defaultPath: defaultName, filters: OUTPUT_FILTERS });
+}
+
+/** Writes a pane's output to `path`, or to a new temp file without one; returns the file. */
+export function saveOutput(path: string | null, contents: string): Promise<string> {
+  return invoke("save_output", { path, contents });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

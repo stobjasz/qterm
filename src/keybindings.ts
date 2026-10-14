@@ -24,7 +24,9 @@ export type Command =
   | { type: "copyLastOutput" }
   | { type: "searchAll" }
   | { type: "paneBackground" }
-  | { type: "nextWaiting" };
+  | { type: "nextWaiting" }
+  | { type: "saveOutput" }
+  | { type: "openOutput" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -63,6 +65,8 @@ const ACTIONS = {
   // Also Shift+right-click on the pane.
   pane_background: { command: { type: "paneBackground" }, chord: "" },
   next_waiting: { command: { type: "nextWaiting" }, chord: "alt+shift+w" },
+  save_output: { command: { type: "saveOutput" }, chord: "" },
+  open_output: { command: { type: "openOutput" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -101,6 +105,8 @@ const LABELS: Record<Action, string> = {
   search_all: "Search all panes",
   pane_background: "Pane background…",
   next_waiting: "Go to the next pane where Claude waits",
+  save_output: "Save pane output…",
+  open_output: "Open pane output in editor",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

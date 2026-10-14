@@ -30,6 +30,9 @@ import {
   takeOpenHere,
   loadHistory,
   saveHistory,
+  chooseOutputFile,
+  openInEditor,
+  saveOutput,
   onUpdateAvailable,
   installUpdate,
   type UpdateInfo,
@@ -445,6 +448,27 @@ export default function App() {
         case "copyLastOutput":
           registry.copyLastOutput(paneId);
           break;
+        case "saveOutput": {
+          const name = `${paneLabel(paneId).replace(/^\d+ · /, "").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 60) || "output"}.txt`;
+          void chooseOutputFile(name)
+            .then((path) => {
+              if (!path) return;
+              const html = /\.html?$/i.test(path);
+              const contents = html ? registry.html(paneId) : registry.plainText(paneId);
+              return saveOutput(path, contents ?? "").then((saved) => setNotice(`Saved to ${saved}.`));
+            })
+            .catch((e) => setNotice(`Could not save the output: ${e}`));
+          break;
+        }
+        case "openOutput": {
+          // Opened at its last line: the latest output is what you came for.
+          const text = registry.plainText(paneId) ?? "";
+          const lastLine = Math.max(1, text.split("\n").length - 1);
+          void saveOutput(null, text)
+            .then((file) => openInEditor(file, lastLine))
+            .catch((e) => setNotice(`Could not open the output: ${e}`));
+          break;
+        }
         case "searchAll":
           setSearchAllOpen((open) => !open);
           break;

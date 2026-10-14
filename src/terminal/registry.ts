@@ -245,6 +245,27 @@ export class TerminalRegistry {
     }
   }
 
+  /** Everything the pane shows and keeps (normal screen), as plain text; wrapped lines joined. */
+  plainText(paneId: PaneId): string | undefined {
+    const buffer = this.entries.get(paneId)?.term.buffer.normal;
+    if (!buffer) return undefined;
+    const lines: string[] = [];
+    for (let y = 0; y < buffer.length; y++) {
+      const line = buffer.getLine(y);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
+      else lines.push(text);
+    }
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    return lines.join("\r\n") + "\r\n";
+  }
+
+  /** The pane's output as an HTML page, colours included. */
+  html(paneId: PaneId): string | undefined {
+    return this.entries.get(paneId)?.serialize.serializeAsHTML({ includeGlobalBackground: true });
+  }
+
   /** The pane's output (normal screen, colours included), last `lines` rows. */
   serialize(paneId: PaneId, lines: number): string | undefined {
     return this.entries.get(paneId)?.serialize.serialize({ scrollback: lines, excludeAltBuffer: true, excludeModes: true });

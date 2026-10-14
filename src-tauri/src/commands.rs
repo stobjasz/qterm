@@ -215,6 +215,21 @@ pub fn open_in_editor(config: State<'_, ConfigState>, file: String, line: Option
     crate::editor::open(&config.get().editor, &file, line, col)
 }
 
+/// A pane's output to a file: where the user chose, or (no path) a new file in the
+/// temp folder for the editor. Returns where it went.
+#[tauri::command]
+pub fn save_output(path: Option<String>, contents: String) -> Result<String, String> {
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+            std::env::temp_dir().join(format!("qterm-output-{stamp}.txt"))
+        }
+    };
+    std::fs::write(&path, contents).map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// The UI decided the user isn't looking at this pane: show a Windows notification.
 #[tauri::command]
 pub fn show_claude_alert(app: AppHandle, alert: crate::alerts::Alert) -> Result<(), String> {
