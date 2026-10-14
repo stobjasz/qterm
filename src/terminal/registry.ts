@@ -65,6 +65,17 @@ export interface RegistryEvents {
   onPaneMenu(paneId: PaneId, x: number, y: number): void;
   /** A command the user ran ended (shell integration marks). */
   onCommandFinished(paneId: PaneId, finished: FinishedCommand): void;
+  /** A click on a command's ✓/✗ bar, at page position (x, y). */
+  onCommandBlock(paneId: PaneId, block: CommandBlock, x: number, y: number): void;
+}
+
+/** A finished command, as its bar's menu sees it (see blockOutput, selectBlock). */
+export interface CommandBlock {
+  /** Its prompt marker's id. */
+  id: number;
+  command: string;
+  exitCode?: number;
+  hasOutput: boolean;
 }
 
 export interface FinishedCommand {
@@ -448,20 +459,27 @@ export class TerminalRegistry {
   copyLastOutput(paneId: PaneId): boolean {
     const entry = this.entries.get(paneId);
     const mark = entry?.marks.filter((m) => m.end && m.input && m.end.line >= 0 && m.input.line >= 0).pop();
-    if (!entry || !mark?.end || !mark.input) return false;
-    const buffer = entry.term.buffer.normal;
-    // Output starts below the command line and the lines it wrapped onto.
-    let line = mark.input.line + 1;
-    while (buffer.getLine(line)?.isWrapped) line++;
-    let text = "";
-    for (; line < mark.end.line; line++) {
-      const row = buffer.getLine(line);
-      if (!row) break;
-      text += (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped);
-    }
-    text = text.replace(/\s+$/, "");
+    const text = entry && mark ? outputOf(entry.term, mark) : "";
     if (!text) return false;
     void writeText(text);
+    return true;
+  }
+
+  /** The output of the command whose prompt marker has this id ("" if gone or none). */
+  blockOutput(paneId: PaneId, id: number): string {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks.find((m) => m.prompt.id === id);
+    return entry && mark ? outputOf(entry.term, mark) : "";
+  }
+
+  /** Selects that command's output on screen (the selection can then be copied). */
+  selectBlock(paneId: PaneId, id: number): boolean {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks.find((m) => m.prompt.id === id);
+    const range = entry && mark ? outputRange(entry.term, mark) : undefined;
+    if (!entry || !range) return false;
+    entry.term.selectLines(range.start, range.end);
+    entry.term.scrollToLine(range.start);
     return true;
   }
 
@@ -726,7 +744,9 @@ export class TerminalRegistry {
         last.end = term.registerMarker(0);
         last.exitCode = mark.exitCode;
         last.command = command;
-        last.decoration = decorate(term, last);
+        last.decoration = decorate(term, last, (x, y) =>
+          this.events.onCommandBlock(paneId, { id: last.prompt.id, command, exitCode: mark.exitCode, hasOutput: outputOf(term, last) !== "" }, x, y),
+        );
         this.events.onCommandFinished(paneId, { command, exitCode: mark.exitCode, durationMs: Date.now() - last.startedAt });
         return;
       }
@@ -884,13 +904,54 @@ function commandAt(term: Terminal, mark: CommandMark): string {
   return text.trim();
 }
 
-/** A thin bar at the prompt's left edge: green for exit 0, red otherwise, grey when unknown. */
-function decorate(term: Terminal, mark: CommandMark): IDecoration | undefined {
+/** The lines of a command's output: below its command line (and the rows that wrapped), above its end. */
+function outputRange(term: Terminal, mark: CommandMark): { start: number; end: number } | undefined {
+  if (!mark.input || !mark.end || mark.input.line < 0 || mark.end.line < 0) return undefined;
+  const buffer = term.buffer.normal;
+  let start = mark.input.line + 1;
+  while (buffer.getLine(start)?.isWrapped) start++;
+  let end = mark.end.line - 1;
+  while (end >= start && !buffer.getLine(end)?.translateToString(true).trim()) end--;
+  return end >= start ? { start, end } : undefined;
+}
+
+/** A command's output as text, wrapped rows joined; "" when it printed nothing. */
+function outputOf(term: Terminal, mark: CommandMark): string {
+  const range = outputRange(term, mark);
+  if (!range) return "";
+  const buffer = term.buffer.normal;
+  let text = "";
+  for (let line = range.start; line <= range.end; line++) {
+    const row = buffer.getLine(line);
+    if (!row) break;
+    text += (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped);
+  }
+  return text.replace(/\s+$/, "");
+}
+
+/**
+ * A thin bar at the prompt's left edge: green for exit 0, red otherwise, grey when
+ * unknown. Clicking it opens the command's menu (copy, select, run again).
+ */
+function decorate(term: Terminal, mark: CommandMark, onClick: (x: number, y: number) => void): IDecoration | undefined {
   const decoration = term.registerDecoration({ marker: mark.prompt, x: 0, width: 1, layer: "top" });
   decoration?.onRender((el) => {
     const state = mark.exitCode === undefined ? "unknown" : mark.exitCode === 0 ? "ok" : "failed";
     el.classList.add("command-mark", state);
-    el.title = `${mark.command}${mark.exitCode === undefined ? "" : ` (exit ${mark.exitCode})`}`;
+    el.title = `${mark.command}${mark.exitCode === undefined ? "" : ` (exit ${mark.exitCode})`}\nClick for copy, select and run again`;
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", `Command: ${mark.command}`);
+    if (el.dataset.wired) return;
+    el.dataset.wired = "";
+    // Before xterm's own mousedown, which would start a selection.
+    el.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick(e.clientX, e.clientY);
+    });
   });
   return decoration;
 }

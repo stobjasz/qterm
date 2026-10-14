@@ -455,22 +455,37 @@ body,
 }
 
 /* Command marks: a thin bar at the left edge of each prompt (xterm decoration). */
+/* The whole cell takes the click; the bar itself is 3px. */
 .command-mark {
-  width: 3px !important;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.command-mark::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
   border-radius: 1px;
   opacity: 0.85;
+  background: var(--mark-color);
+}
+
+.command-mark:hover::before {
+  width: 5px;
+  opacity: 1;
 }
 
 .command-mark.ok {
-  background: #98c379;
+  --mark-color: #98c379;
 }
 
 .command-mark.failed {
-  background: var(--danger);
+  --mark-color: var(--danger);
 }
 
 .command-mark.unknown {
-  background: color-mix(in srgb, var(--tab-fg) 60%, transparent);
+  --mark-color: color-mix(in srgb, var(--tab-fg) 60%, transparent);
 }
 
 .tab.attention:not(.active) {
@@ -1365,4 +1380,35 @@ body,
 .whats-new-notes a {
   color: inherit;
   text-decoration: underline;
+}
+
+/* A command's menu (click its ✓/✗ bar). */
+.command-block-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-block-menu .tab-style-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.command-block-menu button {
+  text-align: left;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.command-block-menu button:hover:not(:disabled) {
+  background: var(--tab-active-bg);
+}
+
+.command-block-menu button:disabled {
+  opacity: 0.45;
 }

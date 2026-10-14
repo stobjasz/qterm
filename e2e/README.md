@@ -39,6 +39,7 @@ unit tests can't reproduce. One spec per risk.
 | R12 | The first start after an update shows what's new in that version, once. | `whats-new.spec.ts` |
 | R13 | Claude Code's status line, relayed by qterm, brings the plan usage into the app. | `claude-statusline.spec.ts` |
 | R14 | Claude stopping on an API error in a background tab marks that tab with the reason. | `claude-stop-failure.spec.ts` |
+| R15 | A command's ✓/✗ bar opens that command's menu, and its actions (select output, run again) work on that command. | `command-block.spec.ts` |
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).

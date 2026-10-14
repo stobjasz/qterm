@@ -82,8 +82,9 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
 import { formatDuration } from "./terminal/marks";
-import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
+import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
+import { CommandBlockMenu } from "./terminal/CommandBlockMenu";
 import { SearchAllPanel } from "./terminal/SearchAllPanel";
 import { SearchBar } from "./terminal/SearchBar";
 import type { SearchHit, SearchOptions } from "./terminal/searchAll";
@@ -199,6 +200,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchAllOpen, setSearchAllOpen] = useState(false);
   const [paneMenu, setPaneMenu] = useState<{ paneId: PaneId; x: number; y: number }>();
+  /** A click on a command's ✓/✗ bar: its menu. */
+  const [blockMenu, setBlockMenu] = useState<{ paneId: PaneId; block: CommandBlock; x: number; y: number }>();
   /** Panes with Claude Code running: working (recent output) or idle. */
   const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
   const [claudeUsages, setClaudeUsages] = useState<ReadonlyMap<PaneId, ClaudeUsage>>(new Map());
@@ -227,6 +230,7 @@ export default function App() {
         onBell: (...args) => handlers.current.onBell(...args),
         onCommandFinished: (...args) => handlers.current.onCommandFinished(...args),
         onPaneMenu: (...args) => handlers.current.onPaneMenu(...args),
+        onCommandBlock: (...args) => handlers.current.onCommandBlock(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -580,6 +584,7 @@ export default function App() {
       setBells((current) => new Set(current).add(paneId));
     },
     onPaneMenu: (paneId, x, y) => setPaneMenu({ paneId, x, y }),
+    onCommandBlock: (paneId, block, x, y) => setBlockMenu({ paneId, block, x, y }),
     onCommandFinished: (paneId, finished) => {
       const cwd = workspaceRef.current.panes[paneId]?.cwd;
       setHistory((h) => rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now() }));
@@ -1302,6 +1307,28 @@ export default function App() {
             onClose={() => setSavingWorkspace(false)}
           />
         )}
+      {blockMenu && workspace.panes[blockMenu.paneId] && (
+        <CommandBlockMenu
+          block={blockMenu.block}
+          x={blockMenu.x}
+          y={blockMenu.y}
+          onCopyOutput={() => {
+            const text = registry.blockOutput(blockMenu.paneId, blockMenu.block.id);
+            if (text) void writeText(text).then(() => setNotice("Output copied."));
+            else setNotice("That output is no longer in the scrollback.");
+          }}
+          onCopyCommand={() => void writeText(blockMenu.block.command)}
+          onSelectOutput={() => {
+            if (!registry.selectBlock(blockMenu.paneId, blockMenu.block.id)) setNotice("That output is no longer in the scrollback.");
+            registry.focus(blockMenu.paneId);
+          }}
+          onRunAgain={() => {
+            registry.focus(blockMenu.paneId);
+            registry.typeSnippet(blockMenu.paneId, blockMenu.block.command, true);
+          }}
+          onClose={() => setBlockMenu(undefined)}
+        />
+      )}
       {paneMenu && workspace.panes[paneMenu.paneId] && (
         <PaneBackgroundMenu
           key={paneMenu.paneId}
