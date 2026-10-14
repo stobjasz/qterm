@@ -61,6 +61,8 @@ pub struct PaneSession {
 enum InboxMessage {
     Alert(Alert),
     Session(PaneSession),
+    /// From the status line relay (claude_statusline.rs).
+    Usage(crate::claude_statusline::StatuslineUsage),
 }
 
 /// The fields of Claude Code's hook input that matter here.
@@ -72,6 +74,10 @@ struct HookInput {
     notification_type: Option<String>,
     session_id: Option<String>,
     transcript_path: Option<String>,
+    /// StopFailure: the error type ("rate_limit", "overloaded", ...) and its details.
+    error: Option<String>,
+    error_details: Option<String>,
+    last_assistant_message: Option<String>,
 }
 
 /// Hook mode: never fails loudly, since a failing hook would bother Claude Code.
@@ -100,6 +106,17 @@ fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
             transcript_path: hook.transcript_path,
         }));
     }
+    if hook.hook_event_name.as_deref() == Some("StopFailure") {
+        let error = hook.error.unwrap_or_else(|| "unknown".into());
+        let message = [hook.last_assistant_message, hook.error_details].into_iter().flatten().find(|m| !m.trim().is_empty());
+        return Some(InboxMessage::Alert(Alert {
+            pane_id: pane_id.to_string(),
+            title: Some(format!("Claude stopped: {}", stop_reason(&error))),
+            message: message.unwrap_or_else(|| format!("The turn ended with an API error ({error}).")),
+            kind: Some(format!("stop_failure:{error}")),
+            session_id: hook.session_id,
+        }));
+    }
     Some(InboxMessage::Alert(Alert {
         pane_id: pane_id.to_string(),
         title: hook.title,
@@ -107,6 +124,29 @@ fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
         kind: hook.notification_type,
         session_id: hook.session_id,
     }))
+}
+
+/// StopFailure's error type, in words.
+fn stop_reason(error: &str) -> &str {
+    match error {
+        "rate_limit" => "rate limit reached",
+        "overloaded" => "the API is overloaded",
+        "billing_error" => "a billing problem",
+        "authentication_failed" | "oauth_org_not_allowed" | "cloud_credential_error" => "sign-in failed",
+        "account_on_hold" => "the account is on hold",
+        "invalid_request" => "an invalid request",
+        "model_not_found" => "the model isn't available",
+        "server_error" => "an API server error",
+        "max_output_tokens" => "the reply hit its length limit",
+        _ => "an API error",
+    }
+}
+
+/// The status line relay's figures, to the inbox of the qterm running the pane.
+pub fn deliver_usage(usage: &crate::claude_statusline::StatuslineUsage) {
+    if let Some(inbox) = hook_inbox() {
+        let _ = deliver(&inbox, &InboxMessage::Usage(usage.clone()));
+    }
 }
 
 /// Where the hook delivers: the inbox its shell was given, else the installed
@@ -183,6 +223,7 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
                 let _ = match message {
                     InboxMessage::Alert(alert) => app.emit("claude-attention", alert),
                     InboxMessage::Session(session) => app.emit("claude-session-start", session),
+                    InboxMessage::Usage(usage) => app.emit("claude-statusline", usage),
                 };
             }
         }
@@ -201,6 +242,22 @@ pub fn show_notification(app: &AppHandle, alert: &Alert) -> Result<(), String> {
         .sound(Some(Sound::Default))
         .on_activated(move |_| {
             crate::window::focus_pane(&app, &pane);
+            Ok(())
+        })
+        .show()
+        .map_err(|e| format!("could not show the notification: {e}"))
+}
+
+/// A notification that isn't about a pane (plan limits); clicking it shows the console.
+pub fn show_plain_notification(app: &AppHandle, title: &str, message: &str) -> Result<(), String> {
+    let app_id = registered_app_id(app);
+    let app = app.clone();
+    Toast::new(&app_id)
+        .title(title)
+        .text1(message)
+        .sound(Some(Sound::Default))
+        .on_activated(move |_| {
+            crate::window::show_now(&app);
             Ok(())
         })
         .show()
@@ -235,6 +292,21 @@ fn register_app_id(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stop_failure_becomes_an_alert_with_the_reason() {
+        let input = r#"{"session_id":"s1","hook_event_name":"StopFailure","error":"rate_limit",
+            "error_details":"429 Too Many Requests","last_assistant_message":"API Error: Rate limit reached"}"#;
+        let Some(InboxMessage::Alert(alert)) = message_from_hook("pane-2", input) else { panic!("no alert") };
+        assert_eq!(alert.title.as_deref(), Some("Claude stopped: rate limit reached"));
+        assert_eq!(alert.message, "API Error: Rate limit reached");
+        assert_eq!(alert.kind.as_deref(), Some("stop_failure:rate_limit"));
+        // Without a message: the details, else a generic sentence.
+        let bare = r#"{"hook_event_name":"StopFailure","error":"overloaded"}"#;
+        let Some(InboxMessage::Alert(alert)) = message_from_hook("p", bare) else { panic!("no alert") };
+        assert_eq!(alert.title.as_deref(), Some("Claude stopped: the API is overloaded"));
+        assert_eq!(alert.message, "The turn ended with an API error (overloaded).");
+    }
 
     #[test]
     fn reads_claude_codes_hook_input() {
@@ -291,6 +363,7 @@ mod tests {
             .map(|m| match m {
                 InboxMessage::Alert(a) => a.message,
                 InboxMessage::Session(s) => s.session_id,
+                InboxMessage::Usage(u) => u.pane_id,
             })
             .collect();
         assert_eq!(taken, ["first", "second"]);

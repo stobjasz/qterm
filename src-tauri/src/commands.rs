@@ -283,6 +283,44 @@ pub fn remove_claude_hook() -> Result<crate::claude_hook::HookStatus, String> {
     crate::claude_hook::status(&settings, &command)
 }
 
+fn statusline_paths() -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let home = crate::claude::claude_home().ok_or("no home folder for Claude Code")?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok((crate::claude_hook::settings_path(&home), exe))
+}
+
+#[tauri::command]
+pub fn claude_statusline_status() -> Result<crate::claude_statusline::StatuslineStatus, String> {
+    let (settings, exe) = statusline_paths()?;
+    crate::claude_statusline::status(&settings, &exe)
+}
+
+#[tauri::command]
+pub fn install_claude_statusline() -> Result<crate::claude_statusline::StatuslineStatus, String> {
+    let (settings, exe) = statusline_paths()?;
+    crate::claude_statusline::install(&settings, &exe)?;
+    crate::claude_statusline::status(&settings, &exe)
+}
+
+#[tauri::command]
+pub fn remove_claude_statusline() -> Result<crate::claude_statusline::StatuslineStatus, String> {
+    let (settings, exe) = statusline_paths()?;
+    crate::claude_statusline::remove(&settings)?;
+    crate::claude_statusline::status(&settings, &exe)
+}
+
+/// The plan usage line for the tray tooltip (None: unknown).
+#[tauri::command]
+pub fn set_plan_summary(app: AppHandle, summary: Option<String>) {
+    crate::tray::set_plan(&app, summary);
+}
+
+/// A plan limit crossed 80% or 95%: a Windows notification (clicking it shows the console).
+#[tauri::command]
+pub fn show_plan_warning(app: AppHandle, title: String, message: String) -> Result<(), String> {
+    crate::alerts::show_plain_notification(&app, &title, &message)
+}
+
 /// Saves (or replaces by name) a [[layouts]] entry in config.toml.
 #[tauri::command]
 pub fn save_layout(config: State<'_, ConfigState>, layout: serde_json::Value) -> Result<(), String> {

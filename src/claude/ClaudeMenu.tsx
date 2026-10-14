@@ -35,6 +35,8 @@ export interface ClaudeMenuProps {
   running: RunningClaude[];
   /** Panes where Claude waits for you, in tab order. */
   waiting: WaitingClaude[];
+  /** "5-hour 23% (resets 14:30) · 7-day 41%", once Claude Code's status line reported it. */
+  plan?: string;
   onFocusPane(paneId: string): void;
 }
 
@@ -49,7 +51,7 @@ interface Row extends GroupableSession {
 }
 
 /** The ✳ tab-bar button: remembered Claude Code sessions, grouped by folder. */
-export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSession, running, waiting, onFocusPane }: Props) {
+export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSession, running, waiting, plan, onFocusPane }: Props) {
   return (
     <Popup
       label="Claude sessions"
@@ -60,6 +62,11 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
     >
       {(close) => (
         <>
+          {plan && (
+            <section className="claude-running" aria-label="Claude plan usage">
+              <div className="claude-running-title">Claude plan: {plan}</div>
+            </section>
+          )}
           {waiting.length > 0 && (
             <section className="claude-running" aria-label="Claude is waiting for you">
               <div className="claude-running-title">Waiting for you · Alt+Shift+W goes to the next</div>

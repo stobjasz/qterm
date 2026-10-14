@@ -8,6 +8,10 @@ import {
   openLogs,
   checkUpdate,
   claudeHookStatus,
+  claudeStatuslineStatus,
+  installClaudeStatusline,
+  removeClaudeStatusline,
+  type StatuslineStatus,
   exportSettings,
   importSettings,
   getAutostart,
@@ -107,6 +111,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
   useEffect(() => void getAutostart().then(setAutostartState), []);
   useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
   const changeHook = (action: () => Promise<HookStatus>) => void action().then(setHook, (e) => setError(String(e)));
+  const [statusline, setStatusline] = useState<StatuslineStatus>();
+  useEffect(() => void claudeStatuslineStatus().then(setStatusline, (e) => setError(String(e))), []);
+  const changeStatusline = (action: () => Promise<StatuslineStatus>) => void action().then(setStatusline, (e) => setError(String(e)));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -429,6 +436,32 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 <button onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
               )}
               {hook?.installed && <button onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
+            </div>
+          </div>
+          <div className="settings-field">
+            <span className="settings-label">Plan limits and exact usage</span>
+            <span className="settings-hint">
+              Claude Code's status line passes qterm your plan's 5-hour and 7-day usage (shown in the ✳ menu and the tray,
+              with a warning at 80% and 95%) and its own context and cost figures. qterm's status line shows the model,
+              context and plan usage under Claude's prompt; with one of your own, yours stays and qterm only listens.
+              A custom status line hides Claude Code's keyboard hints in its footer.
+            </span>
+            <div className="settings-actions">
+              <span>
+                {statusline === undefined
+                  ? "Checking…"
+                  : statusline.current
+                    ? statusline.ownCommand
+                      ? "✓ Set up, in front of your status line"
+                      : "✓ Set up"
+                    : statusline.installed
+                      ? "Set up for another qterm location"
+                      : "Not set up"}
+              </span>
+              {statusline && !statusline.current && (
+                <button onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
+              )}
+              {statusline?.installed && <button onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
             </div>
           </div>
         </Group>

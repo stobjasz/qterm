@@ -187,10 +187,10 @@ export function TabBar(props: Props) {
                 <span
                   className={`tab-attention ${waiting.kind ?? ""}`}
                   role="status"
-                  aria-label={waiting.kind?.startsWith("command_") ? `${waiting.title}: ${waiting.message}` : `Claude is waiting: ${waiting.message}`}
-                  title={waiting.kind?.startsWith("command_") ? `${waiting.title}: ${waiting.message}` : undefined}
+                  aria-label={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : `Claude is waiting: ${waiting.message}`}
+                  title={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : undefined}
                 >
-                  {waiting.kind === "command_done" ? "✓" : waiting.kind === "command_failed" ? "✗" : "✳"}
+                  {waiting.kind === "command_done" ? "✓" : waiting.kind === "command_failed" ? "✗" : waiting.kind?.startsWith("stop_failure") ? "!" : "✳"}
                 </span>
               )}
               <button
@@ -290,6 +290,11 @@ export function TabBar(props: Props) {
       </button>
     </div>
   );
+}
+
+/** Alerts that say what happened in their title: a long command's end, Claude stopping on an error. */
+function titled(kind: string | null | undefined): boolean {
+  return Boolean(kind?.startsWith("command_") || kind?.startsWith("stop_failure"));
 }
 
 function RenameField({ initial, onDone }: { initial: string; onDone(value?: string): void }) {

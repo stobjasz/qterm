@@ -32,6 +32,10 @@ import {
   saveHistory,
   chooseOutputFile,
   setPinned as setPinnedInRust,
+  onClaudeStatusline,
+  showPlanWarning,
+  setPlanSummary,
+  type StatuslineUsage,
   takeVersionChange,
   loadWorkspaces,
   saveWorkspaces,
@@ -68,6 +72,7 @@ import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
 import { resumeHereCommand } from "./claude/resume";
 import { nextWaiting } from "./claude/waiting";
+import { crossedWarning, formatReset, mergeUsage, planSummary, type PlanUsage } from "./claude/plan";
 import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
 import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
@@ -155,6 +160,15 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** Claude Code's own figures per pane, and the plan usage (its status line, relayed). */
+  const statuslines = useRef(new Map<PaneId, StatuslineUsage>());
+  const [plan, setPlan] = useState<PlanUsage>();
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  /** "fiveHour:<resets>:80": warnings already given for this window. */
+  const planWarned = useRef(new Set<string>());
+  const planText = planSummary(plan, new Date());
+  useEffect(() => void setPlanSummary(planText ?? null).catch(() => {}), [planText]);
   /** "What's new": once after an update, or from Settings → Updates. */
   const [whatsNew, setWhatsNew] = useState<{ version: string; from?: string }>();
   useEffect(() => void takeVersionChange().then((change) => change && setWhatsNew({ version: change.to, from: change.from }), () => {}), []);
@@ -645,6 +659,35 @@ export default function App() {
     [registry],
   );
 
+  // --- Claude Code's status line: exact figures and plan usage ------------------------
+  const onStatusline = useRef<(line: StatuslineUsage) => void>(null!);
+  onStatusline.current = (line) => {
+    statuslines.current.set(line.paneId, line);
+    setClaudeUsages((current) => {
+      const merged = mergeUsage(current.get(line.paneId), line);
+      return merged ? new Map(current).set(line.paneId, merged) : current;
+    });
+    if (!line.fiveHour && !line.sevenDay) return;
+    const before = planRef.current;
+    setPlan({ fiveHour: line.fiveHour ?? before?.fiveHour, sevenDay: line.sevenDay ?? before?.sevenDay });
+    for (const [key, name, limit, previous] of [
+      ["fiveHour", "5-hour", line.fiveHour, before?.fiveHour],
+      ["sevenDay", "7-day", line.sevenDay, before?.sevenDay],
+    ] as const) {
+      if (!limit) continue;
+      // A new window starts over: compare within the same reset time only.
+      const prior = previous && previous.resetsAt === limit.resetsAt ? previous.usedPercent : undefined;
+      const level = crossedWarning(prior, limit.usedPercent);
+      const id = `${key}:${limit.resetsAt}:${level}`;
+      if (level === undefined || planWarned.current.has(id)) continue;
+      planWarned.current.add(id);
+      const reset = limit.resetsAt ? `; it resets ${formatReset(limit.resetsAt, new Date())}` : "";
+      const message = `${Math.round(limit.usedPercent)}% of your Claude plan's ${name} limit is used${reset}.`;
+      setNotice(message);
+      void showPlanWarning(`Claude plan: ${name} limit at ${level}%`, message).catch(() => {});
+    }
+  };
+
   // --- quick select: keys pick a label while the labels show ------------------------
   /** Copies the target, or with Shift opens it: a link in the browser, a file in the editor, a folder in a new tab. */
   const pickTarget = useCallback(
@@ -865,7 +908,7 @@ export default function App() {
       for (const paneId of claudeStatus.keys()) {
         const known = paneSessions.current.get(paneId)?.transcriptPath ?? undefined;
         const cwd = known ? undefined : workspaceRef.current.panes[paneId]?.cwd;
-        const usage = await claudeUsage(known, cwd).catch(() => null);
+        const usage = mergeUsage((await claudeUsage(known, cwd).catch(() => null)) ?? undefined, statuslines.current.get(paneId));
         if (usage) next.set(paneId, usage);
       }
       setClaudeUsages(next);
@@ -957,6 +1000,7 @@ export default function App() {
       }),
       onClaudeAttention((alert) => onAlert.current(alert)),
       onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
+      onClaudeStatusline((line) => onStatusline.current(line)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
       onOpenHere((dir) => newTabRef.current(undefined, dir)),
       onQuakeVisibility(({ visible, slideMs }) => {
@@ -1338,6 +1382,7 @@ export default function App() {
                 onNewSession: newClaudeSession,
                 running: runningClaude,
                 waiting: waitingClaude,
+                plan: planText,
                 onFocusPane: (paneId: PaneId) => setWorkspace((ws) => focusPane(ws, paneId)),
               }
             : undefined

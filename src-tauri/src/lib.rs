@@ -1,6 +1,7 @@
 mod alerts;
 mod claude;
 mod claude_hook;
+mod claude_statusline;
 mod claude_usage;
 mod commands;
 mod config;
@@ -29,6 +30,12 @@ use config::{ConfigState, Reload};
 
 pub use alerts::{run_hook as run_claude_hook, HOOK_ARG};
 pub use updater::wait_for_previous;
+pub use claude_statusline::STATUSLINE_ARG;
+
+/// `--claude-statusline`: Claude Code's status line command (see claude_statusline.rs).
+pub fn run_claude_statusline(args: &[String]) {
+    claude_statusline::run(args)
+}
 
 /// Autostart launches with this: stay hidden until the hotkey is pressed.
 const BACKGROUND_ARG: &str = "--background";
@@ -159,6 +166,11 @@ pub fn run() {
             commands::claude_hook_status,
             commands::install_claude_hook,
             commands::remove_claude_hook,
+            commands::claude_statusline_status,
+            commands::install_claude_statusline,
+            commands::remove_claude_statusline,
+            commands::show_plan_warning,
+            commands::set_plan_summary,
             commands::save_layout,
             commands::delete_layout,
             commands::list_all_claude_sessions,

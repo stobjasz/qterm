@@ -500,6 +500,58 @@ export function takeVersionChange(): Promise<VersionChange | null> {
   return invoke("take_version_change");
 }
 
+export interface PlanLimit {
+  usedPercent: number;
+  /** Unix seconds. */
+  resetsAt: number | null;
+}
+
+/** Claude Code's own figures for the session in a pane (its status line, relayed). */
+export interface StatuslineUsage {
+  paneId: string;
+  sessionId: string | null;
+  modelId: string | null;
+  modelName: string | null;
+  contextTokens: number | null;
+  contextLimit: number | null;
+  contextPercent: number | null;
+  costUsd: number | null;
+  fiveHour: PlanLimit | null;
+  sevenDay: PlanLimit | null;
+  cache: { warm: boolean; expiresAt: number | null } | null;
+}
+
+export function onClaudeStatusline(handler: (usage: StatuslineUsage) => void): Promise<UnlistenFn> {
+  return listen<StatuslineUsage>("claude-statusline", (event) => handler(event.payload));
+}
+
+export interface StatuslineStatus {
+  installed: boolean;
+  current: boolean;
+  /** A status line of the user's own, kept behind qterm's (or replaced by it on setup). */
+  ownCommand: string | null;
+}
+
+export function claudeStatuslineStatus(): Promise<StatuslineStatus> {
+  return invoke("claude_statusline_status");
+}
+
+export function installClaudeStatusline(): Promise<StatuslineStatus> {
+  return invoke("install_claude_statusline");
+}
+
+export function removeClaudeStatusline(): Promise<StatuslineStatus> {
+  return invoke("remove_claude_statusline");
+}
+
+export function showPlanWarning(title: string, message: string): Promise<void> {
+  return invoke("show_plan_warning", { title, message });
+}
+
+export function setPlanSummary(summary: string | null): Promise<void> {
+  return invoke("set_plan_summary", { summary });
+}
+
 /** Writes a line to qterm's log file. */
 export function logUi(message: string): Promise<void> {
   return invoke("log_ui", { message });

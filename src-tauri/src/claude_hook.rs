@@ -1,6 +1,6 @@
 //! Adds or removes qterm's hooks in Claude Code's settings.json: Notification
-//! (Claude is waiting for you) and SessionStart (which session and transcript a
-//! pane runs, for its token use). Everything else in the file is kept, in its
+//! (Claude is waiting for you), StopFailure (a turn ended on an API error) and
+//! SessionStart (which session and transcript a pane runs, for its token use). Everything else in the file is kept, in its
 //! original order (serde_json's preserve_order), and the previous file is backed
 //! up before each change.
 
@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::alerts::HOOK_ARG;
 
 /// The hook events qterm listens to, all handled by the same command.
-const EVENTS: [&str; 2] = ["Notification", "SessionStart"];
+const EVENTS: [&str; 3] = ["Notification", "SessionStart", "StopFailure"];
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,7 +120,7 @@ fn remove_ours_from(doc: &mut Value, event: &str) -> bool {
     changed
 }
 
-fn read(settings: &Path) -> Result<Value, String> {
+pub(crate) fn read(settings: &Path) -> Result<Value, String> {
     match std::fs::read_to_string(settings) {
         Ok(text) if text.trim().is_empty() => Ok(Value::Object(Map::new())),
         Ok(text) => serde_json::from_str(&text)
@@ -131,7 +131,7 @@ fn read(settings: &Path) -> Result<Value, String> {
 }
 
 /// Keeps the previous version as settings.json.qterm-backup.
-fn write(settings: &Path, doc: &Value) -> Result<(), String> {
+pub(crate) fn write(settings: &Path, doc: &Value) -> Result<(), String> {
     if settings.exists() {
         std::fs::copy(settings, settings.with_extension("json.qterm-backup"))
             .map_err(|e| format!("could not back up {}: {e}", settings.display()))?;

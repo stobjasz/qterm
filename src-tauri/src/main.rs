@@ -8,6 +8,9 @@ fn main() {
     if args.get(1).map(String::as_str) == Some(qterm_lib::HOOK_ARG) {
         return qterm_lib::run_claude_hook();
     }
+    if args.get(1).map(String::as_str) == Some(qterm_lib::STATUSLINE_ARG) {
+        return qterm_lib::run_claude_statusline(&args);
+    }
     // Started by a portable self-update: let the old process finish first.
     qterm_lib::wait_for_previous(&args);
     qterm_lib::run()

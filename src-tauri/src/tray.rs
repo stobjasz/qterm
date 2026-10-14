@@ -16,6 +16,14 @@ const TRAY_ID: &str = "main";
 /// Panes where Claude Code is waiting for the user (reported by the UI).
 static ATTENTION: AtomicUsize = AtomicUsize::new(0);
 
+/// "Claude plan: 5-hour 23% · 7-day 41%", from the status line relay (the UI sends it).
+static PLAN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_plan(app: &AppHandle, summary: Option<String>) {
+    *PLAN.lock().unwrap() = summary;
+    refresh(app);
+}
+
 pub fn set_attention(app: &AppHandle, count: usize) {
     ATTENTION.store(count, Ordering::Relaxed);
     refresh(app);
@@ -120,6 +128,9 @@ pub fn refresh(app: &AppHandle) {
         (true, None) => format!("qterm: press {key}"),
         (false, None) => format!("qterm: hotkey {key} is off"),
     };
+    if let Some(plan) = PLAN.lock().unwrap().as_deref() {
+        tooltip.push_str(&format!("\nClaude plan: {plan}"));
+    }
     if window::is_pinned(app) {
         tooltip.push_str("\npinned open");
     }
