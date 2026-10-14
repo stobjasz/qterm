@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fuzzyMatch, rank } from "./fuzzy";
+import { emptyQueryOrder, loadRecent, remember, saveRecent } from "./recent";
 
 export interface PaletteItem {
   id: string;
@@ -22,7 +23,12 @@ export function CommandPalette({ items, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const list = useRef<HTMLUListElement>(null);
-  const matches = useMemo(() => rank(items, (item) => `${item.group}: ${item.label}`, query), [items, query]);
+  const [recent] = useState(loadRecent);
+  // Nothing typed: what you ran lately first, without the long lists (emptyQueryOrder).
+  const matches = useMemo(
+    () => (query.trim() ? rank(items, (item) => `${item.group}: ${item.label}`, query) : emptyQueryOrder(items, recent)),
+    [items, query, recent],
+  );
 
   useEffect(() => setSelected(0), [query]);
   useEffect(() => {
@@ -31,6 +37,7 @@ export function CommandPalette({ items, onClose }: Props) {
 
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
+    saveRecent(remember(recent, item.id));
     onClose();
     item.run();
   };
