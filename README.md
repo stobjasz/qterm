@@ -73,8 +73,11 @@ checks off.
 - Claude Code: browse every session on the PC grouped by folder (with branch and
   prompt count), start a new one in a folder, see per tab whether Claude is working or
   idle
-- Settings panel (⚙ or Ctrl+,), tray icon with "Start with Windows"; a log file and
+- Settings panel (⚙ or Ctrl+,) with search, tray icon with "Start with Windows"; settings
+  can live in a folder of your choice (OneDrive) to share between PCs; a log file and
   "Copy diagnostics" for bug reports
+- Output triggers (`[[triggers]]`): highlight a line, mark the tab or notify when output
+  matches a pattern
 
 | Keys | Action |
 |---|---|

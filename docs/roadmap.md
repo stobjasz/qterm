@@ -108,7 +108,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | 43 | **Recent commands** (from the command marks of #18) across panes in the palette: run again here, or copy. | S–M | ✅ typed at the prompt (Enter is yours); `history.json`; E2E R9 |
 | 44 | **Recent folders** (from shell integration's folder tracking) in the palette: a new tab there. | S | ✅ with #43 |
 | 45 | **Quick select**: label every URL, path, git hash and IP on screen and copy or open one by its label, keyboard only. | M | ✅ Alt+Shift+S; Shift+label opens; E2E R11 |
-| 46 | **Output triggers**: patterns in config that highlight a line, mark the tab or notify (e.g. "Compiled successfully", "error TS"). | M | ⬜ |
+| 46 | **Output triggers**: patterns in config that highlight a line, mark the tab or notify (e.g. "Compiled successfully", "error TS"). | M | ✅ `[[triggers]]`: text or regex; highlight, mark or notify; E2E R17 |
 | 47 | **Save a pane's output** to a text or HTML file, or open it in the editor. | S | ✅ palette: Save pane output… / Open pane output in editor |
 | 48 | **Accessibility**: screen reader mode (xterm.js) and a minimum-contrast setting. | S | ⬜ |
 
@@ -142,7 +142,7 @@ Terminal 1.25's settings search).
 |---|---|---|---|
 | 57 | **Command blocks**: click a command's ✓/✗ bar to select or copy its output, collapse long output, run it again. | M | ✅ copy / select output, copy command, run again; collapsing isn't possible in xterm.js; E2E R15 |
 | 58 | **Sticky command header**: while scrolling long output, the command that produced it stays at the top. | M | ⬜ |
-| 59 | **Search in Settings**: a filter box over the settings panel. | S | ⬜ |
+| 59 | **Search in Settings**: a filter box over the settings panel. | S | ✅ search box in the Settings header; Esc clears it first; E2E R16 |
 
 ### Windows and setup
 
@@ -151,6 +151,6 @@ Terminal 1.25's settings search).
 | 60 | **Import from Windows Terminal**: its profiles (command, start folder, colours) as qterm profiles. | S–M | ✅ settings, fragments, VS developer shells (vswhere); also fixed PowerShell profiles with -Command |
 | 61 | **Fully portable mode**: a marker file next to the exe keeps settings and data in that folder (USB stick). | M | ⬜ |
 | 62 | **Start menu jump list** (installed copy): recent folders and workspaces. | M | ⬜ |
-| 63 | **Settings in a folder of your choice** (OneDrive, a dotfiles repo) to keep PCs in sync. | S | ⬜ |
+| 63 | **Settings in a folder of your choice** (OneDrive, a dotfiles repo) to keep PCs in sync. | S | ✅ Settings → Settings file; the folder's own settings win; falls back when unreachable; E2E R18 |
 
-Suggested next: #54 (last reply on hover) and #59 (search in Settings), then #56 (cache-cold countdown, with #51's data).
+Suggested next: #54 (last reply on hover) and #56 (cache-cold countdown, with #51's data), then #49 (size toggle).

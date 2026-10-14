@@ -222,6 +222,26 @@ Enter is not pressed, so you can finish the command first.
 shells, themes, layouts, snippets and Claude sessions. Type a few letters of anything
 ("spl r" finds Split right), then Enter.
 
+**Triggers** watch what your shells print. When a line matches, qterm highlights it,
+marks the tab (⚑ with the line), or also sends a Windows notification when you aren't
+looking. Add them in the settings file:
+
+```toml
+[[triggers]]
+name = "Build done"
+pattern = "Compiled successfully"   # text, ignoring case
+action = "notify"                   # notify (default), mark or highlight
+
+[[triggers]]
+pattern = 'error TS\d+'             # with regex = true, a regular expression
+regex = true
+action = "highlight"
+color = "#5c1a1a"                    # optional; a dark amber by default
+```
+
+Full-screen programs (an editor, Claude Code's own screen) and output restored after a
+restart don't set triggers off, and each one fires at most every 3 seconds per pane.
+
 **Snippets** are commands you use often, typed into the current pane from the palette.
 Add them in the settings file (Settings → "Open settings file"):
 
@@ -382,13 +402,21 @@ qterm never asks for administrator rights on its own.
 ## Settings
 
 Open the settings with the ⚙ button, Ctrl+, or the tray menu. Changes apply when you
-click **Save**; Esc or Cancel discards them. At the bottom:
+click **Save**; Esc or Cancel discards them. **Search settings** at the top shows only
+the settings that match what you type (Esc clears it). At the bottom:
 
 - **Open settings file** opens `config.toml` for options the panel doesn't show
   (profiles, layouts, snippets). Saving the file applies it immediately; a mistake is
   shown at the top of the console and the previous settings stay in effect.
 - **Export…** saves your settings to a file, e.g. to move them to another PC.
 - **Copy diagnostics** and **Open logs**: see Troubleshooting.
+- **Settings file** (a group of its own) shows where your settings are kept. **Keep
+  settings in a folder…** moves them to a folder of yours, such as OneDrive or a
+  dotfiles repository: choose the same folder on each PC to share them. If the folder
+  already has qterm settings (from another PC), those are used; otherwise yours are
+  copied there. **Back to the default place** brings them home. Tabs, history and saved
+  output stay on each PC. If the folder isn't there when qterm starts (OneDrive not
+  ready), qterm uses the settings in the default place and says so at the top.
 - **Import…** replaces your settings with such a file. Your current ones are kept as
   `config.toml.bak` next to the settings file.
 
@@ -464,7 +492,7 @@ characters, qterm leaves AltGr combinations to the shell.
 
 | What | Where |
 |---|---|
-| Settings | `%APPDATA%\dev.qterm.app\config.toml` |
+| Settings | `%APPDATA%\dev.qterm.app\config.toml`, or the folder you chose (Settings → Settings file) |
 | Open tabs and layout | `%APPDATA%\dev.qterm.app\session.json` |
 | Remembered Claude sessions | `%APPDATA%\dev.qterm.app\claude-sessions.json` |
 | Recent commands and folders | `%APPDATA%\dev.qterm.app\history.json` |

@@ -1115,3 +1115,43 @@ lines dropped), shared with "Copy last command's output".
 - Live: importing from this PC's Windows Terminal, Visual Studio 2022's Developer
   PowerShell opened with `VSINSTALLDIR` set, `cl.exe` found and folder tracking working;
   before the fix the same profile came up without the VS environment.
+
+## 29. Settings search, output triggers, settings in a folder (#59, #46, #63; 2026-10-14)
+
+**Settings search (#59, `settings/filter.ts`).** A search box in the panel's header; after
+every render a layout effect walks `.settings-group` children and sets `hidden` on those
+whose text (labels, hints, `<select>` option texts; shortcut rows one by one) doesn't
+contain every query word, accents and case folded; a group whose title matches keeps all
+its items. React never sets `hidden` on these elements, so nothing fights it. Esc in the
+box clears it (`preventDefault`, which the panel's window-level Esc handler checks).
+
+**Output triggers (#46, `terminal/triggers.ts`).** `[[triggers]]` (Rust: `Trigger`,
+`TriggerAction` notify/mark/highlight, colour validated) compiled in the UI (JS RegExp;
+compile errors join the settings problems). The registry checks on `onLineFeed`: the line
+above the cursor, wrapped rows joined, normal buffer only, and only once the shell
+session exists (not restored output). highlight: a marker plus a full-width decoration
+with `backgroundColor` on the bottom layer; mark / notify: `onTrigger`, throttled to one
+per trigger and pane per 3 s, becoming an alert (kind `trigger`, ⚑ on the tab; notify
+also shows the Windows notification when you aren't looking).
+
+**Settings in a folder (#63).** `ConfigState` keeps its home (the app's config folder)
+and a lockable path. `relocate(Some(folder))`: an existing `config.toml` there must parse
+(then it's used), otherwise the current one is copied; `settings-folder` in the home
+names the folder. `relocate(None)`: the current file is copied home (the old local one to
+`.bak`) and the pointer removed. `load` follows the pointer; a missing file there means
+the local one plus a problem message. The config watcher lives in its own slot
+(`ConfigWatcher`) and is replaced after a move; `on_config_file_changed` then applies the
+differences (hotkey, size, effect) at once. The UI resets the panel's draft when the
+path changes.
+
+**Verified:**
+- Unit: search matching; triggers (text/regex, labels, compile errors), config parsing
+  of `[[triggers]]`; relocation (move, use existing, back home with .bak, refusing
+  invalid settings, falling back when the folder is gone). 189 vitest, 101 cargo tests.
+- E2E, each red under a deliberate break: R16 settings search (break: everything
+  matches), R17 a mark trigger in a background tab (break: lines never checked), R18 the
+  folder's settings apply live and after a restart (break: the watcher left on the old
+  file).
+- Live: a highlight trigger decorates exactly the matching line, full width.
+- On the way: a commented example in default.toml used `"error TS\d+"`, an invalid escape
+  in a TOML basic string; it uses a literal string now.
