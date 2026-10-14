@@ -947,6 +947,18 @@ panes = [
     }
 
     #[test]
+    fn the_user_guides_examples_are_valid_settings() {
+        let guide = include_str!("../../../docs/user-guide.md").replace("\r\n", "\n");
+        let blocks: Vec<&str> = guide.split("```toml\n").skip(1).map(|rest| rest.split("```").next().unwrap()).collect();
+        assert!(blocks.len() >= 8, "found {} examples", blocks.len());
+        for block in blocks {
+            if let Err(e) = Config::parse(block) {
+                panic!("this example in docs/user-guide.md isn't valid: {e}\n{block}");
+            }
+        }
+    }
+
+    #[test]
     fn reads_triggers() {
         let config = Config::parse(
             "[[triggers]]\npattern = \"Compiled successfully\"\n[[triggers]]\nname = \"error\"\npattern = \"error TS\\\\d+\"\nregex = true\naction = \"highlight\"\ncolor = \"#5c1a1a\"",

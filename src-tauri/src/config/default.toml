@@ -106,17 +106,48 @@ size = 14   # 6 - 72
 # Code" or "Fira Code"; Cascadia Mono has none.
 ligatures = false
 
-# Override shortcuts as  action = "ctrl+shift+t"  ("" unbinds it).
-# Modifiers: ctrl, alt, shift. Keys: a-z, 0-9, f1-f24, tab, left, right, up,
-# down, "=", "-", "`", pageup, pagedown, home, end, insert, delete, space, enter.
-# Actions and defaults:
-#   new_tab      = "ctrl+shift+t"     split_right  = "alt+shift+="
-#   close_pane   = "ctrl+shift+w"     split_down   = "alt+shift+-"
-#   next_tab     = "ctrl+tab"         equalize     = "alt+shift+0"
-#   prev_tab     = "ctrl+shift+tab"   focus_left   = "alt+left"    (also _right/_up/_down)
-#   copy         = "ctrl+shift+c"     resize_left  = "alt+shift+left"  (also _right/_up/_down)
-#   paste        = "ctrl+shift+v"     find         = "ctrl+shift+f"
-#   settings     = "ctrl+,"
+# Override shortcuts as  action = "ctrl+shift+t"  ("" unbinds it). A chord needs
+# ctrl or alt unless its key is an F-key. Modifiers: ctrl, alt, shift. Keys: a-z,
+# 0-9, f1-f24, tab, left, right, up, down, pageup, pagedown, home, end, insert,
+# delete, space, enter, and ` - = , . / \ [ ] ; '
+# Every action and its default:
+#   new_tab          = "ctrl+shift+t"
+#   close_pane       = "ctrl+shift+w"
+#   next_tab         = "ctrl+tab"
+#   prev_tab         = "ctrl+shift+tab"
+#   split_right      = "alt+shift+="
+#   split_down       = "alt+shift+-"
+#   equalize         = "alt+shift+0"
+#   focus_left       = "alt+left"
+#   focus_right      = "alt+right"
+#   focus_up         = "alt+up"
+#   focus_down       = "alt+down"
+#   resize_left      = "alt+shift+left"
+#   resize_right     = "alt+shift+right"
+#   resize_up        = "alt+shift+up"
+#   resize_down      = "alt+shift+down"
+#   copy             = "ctrl+shift+c"
+#   paste            = "ctrl+shift+v"
+#   find             = "ctrl+shift+f"
+#   settings         = "ctrl+,"
+#   command_palette  = "ctrl+shift+p"
+#   zoom_pane        = "alt+shift+z"
+#   toggle_broadcast = "alt+shift+b"
+#   swap_left        = ""   (none)
+#   swap_right       = ""   (none)
+#   swap_up          = ""   (none)
+#   swap_down        = ""   (none)
+#   clear_history    = ""   (none)
+#   prev_command     = "ctrl+up"
+#   next_command     = "ctrl+down"
+#   copy_last_output = ""   (none)
+#   search_all       = "alt+shift+f"
+#   pane_background  = ""   (none)
+#   next_waiting     = "alt+shift+w"
+#   save_output      = ""   (none)
+#   open_output      = ""   (none)
+#   quick_select     = "alt+shift+s"
+#   toggle_pin       = ""   (none)
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]
 

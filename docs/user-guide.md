@@ -16,6 +16,7 @@ it has extras for working with Claude Code.
 - [Claude Code](#claude-code)
 - [Administrator tabs](#administrator-tabs)
 - [Settings](#settings)
+- [The settings file](#the-settings-file)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Files qterm keeps](#files-qterm-keeps)
 - [Troubleshooting](#troubleshooting)
@@ -463,9 +464,175 @@ everything fits without scrolling. At the bottom:
 | Settings file | Where your settings are kept: a folder of your choice, or back to the default place | default place |
 | Keyboard shortcuts | Every shortcut below; empty switches one off | |
 
+## The settings file
+
+Everything in the Settings panel, and a few things it doesn't show, lives in
+`config.toml` (Settings → **Open settings file**; where it is: see
+[Files qterm keeps](#files-qterm-keeps)). The file explains every setting in its comments.
+Saving it applies the changes at once; a mistake is shown at the top of the console and
+the previous settings stay in effect until it's fixed. The Settings panel edits the same
+file and keeps your comments.
+
+Top-level settings, as the panel names them:
+
+| Key | Values | Default |
+|---|---|---|
+| `hotkey` | one key, no modifiers: `Backquote` (~), `ScrollLock`, `Pause`, `Insert`, `F13`…`F24` (F12 is reserved by Windows) | `Backquote` |
+| `height`, `width` | share of the screen: `0.1`…`1.0` (width from `0.2`) | `0.5`, `1.0` |
+| `monitor` | `cursor` (where the mouse is) or `primary` | `cursor` |
+| `opacity` | `0.0`…`1.0` | `0.82` |
+| `background_effect` | `none`, `acrylic` or `mica` | `none` |
+| `slide_ms` | `0`…`1000` | `150` |
+| `hide_on_blur` | `true` / `false` | `false` |
+| `theme` | `qterm`, `campbell`, `one-dark`, `dracula`, `nord`, `gruvbox-dark`, `tokyo-night`, `solarized-dark`, `solarized-light` | `qterm` |
+| `default_profile` | a shell's id (below); empty for the first one found | `""` |
+| `copy_on_select`, `right_click_paste` | `true` / `false` | `false`, `true` |
+| `restore_session`, `shell_integration`, `inline_images`, `ssh_profiles` | `true` / `false` | `true` |
+| `long_command_alert` | seconds; `0` turns it off | `30` |
+| `editor` | a command with `{file}`, `{line}`, `{col}` (below) | VS Code |
+| `claude_sessions`, `claude_alerts`, `claude_restore` | `true` / `false` | `false`, `true`, `false` |
+| `check_updates`, `explorer_menu` | `true` / `false` | `true`, `false` |
+| `[font]` `family`, `size`, `ligatures` | a CSS font list, `6`…`72`, `true` / `false` | Cascadia Mono, `14`, `false` |
+
+**Which shell new tabs get.** `default_profile` takes a shell's id: `pwsh` (PowerShell 7),
+`powershell` (Windows PowerShell), `cmd`, `git-bash`, `wsl:<distro>`, `ssh:<host>`, or
+`custom:<name>` for one of your own profiles (unless you gave it an `id`):
+
+```toml
+default_profile = "wsl:Ubuntu-24.04"
+```
+
+**Another editor.** `editor` is the command that opens a file at a line (Ctrl+click on
+`src/app.ts:42`, quick select, "Open pane output in editor"). The editor's program has to
+be on your PATH (or in a folder without spaces); file paths with spaces work. If the
+program isn't found, the file opens in its default app.
+
+```toml
+editor = "code --goto {file}:{line}:{col}"            # VS Code (the default)
+# editor = "cursor --goto {file}:{line}:{col}"        # Cursor
+# editor = "subl {file}:{line}:{col}"                 # Sublime Text (subl on the PATH)
+# editor = "zed {file}:{line}:{col}"                  # Zed
+# editor = "webstorm --line {line} --column {col} {file}"   # JetBrains IDEs: idea, pycharm, rider, ... (Toolbox shell scripts)
+# editor = "notepad++ -n{line} -c{col} {file}"        # Notepad++ (its folder on the PATH)
+```
+
+**Saved output per shell.** `[scrollback]`: whether panes keep their output across
+restarts, how many lines, and exceptions per shell id:
+
+```toml
+[scrollback]
+restore = true
+lines = 3000                                          # 100 - 10000 per pane
+profiles = { "wsl:Ubuntu" = false, cmd = true }       # off for WSL, on for Command Prompt
+```
+
+**Your own shortcuts.** `[keybindings]` sets an action to a chord, or `""` to switch it
+off; the rest keep their defaults (Settings → Keyboard shortcuts edits the same table).
+A chord is `ctrl`, `alt` and/or `shift` plus one key, and needs `ctrl` or `alt` unless the
+key is an F-key. Keys: `a`-`z`, `0`-`9`, `f1`-`f24`, `tab`, `left`, `right`, `up`,
+`down`, `pageup`, `pagedown`, `home`, `end`, `insert`, `delete`, `space`, `enter`, and
+`` ` `` `-` `=` `,` `.` `/` `\` `[` `]` `;` `'`. Ctrl+Shift+1…9 (new tab with shell N) and
+Ctrl+Alt+1…9 (go to tab N) are fixed.
+
+```toml
+[keybindings]
+split_right = "alt+shift+d"
+toggle_pin = "alt+shift+p"
+quick_select = "f10"
+toggle_broadcast = ""                                 # off
+```
+
+| Action | What it does | Default |
+|---|---|---|
+| `new_tab` | New tab | `ctrl+shift+t` |
+| `close_pane` | Close pane | `ctrl+shift+w` |
+| `next_tab` | Next tab | `ctrl+tab` |
+| `prev_tab` | Previous tab | `ctrl+shift+tab` |
+| `split_right` | Split right | `alt+shift+=` |
+| `split_down` | Split down | `alt+shift+-` |
+| `equalize` | Equalize panes | `alt+shift+0` |
+| `focus_left` | Focus pane left | `alt+left` |
+| `focus_right` | Focus pane right | `alt+right` |
+| `focus_up` | Focus pane up | `alt+up` |
+| `focus_down` | Focus pane down | `alt+down` |
+| `resize_left` | Resize pane left | `alt+shift+left` |
+| `resize_right` | Resize pane right | `alt+shift+right` |
+| `resize_up` | Resize pane up | `alt+shift+up` |
+| `resize_down` | Resize pane down | `alt+shift+down` |
+| `copy` | Copy | `ctrl+shift+c` |
+| `paste` | Paste | `ctrl+shift+v` |
+| `find` | Find | `ctrl+shift+f` |
+| `settings` | Settings | `ctrl+,` |
+| `command_palette` | Command palette | `ctrl+shift+p` |
+| `zoom_pane` | Zoom pane | `alt+shift+z` |
+| `toggle_broadcast` | Type into all panes of the tab | `alt+shift+b` |
+| `swap_left` | Swap pane left | (none) |
+| `swap_right` | Swap pane right | (none) |
+| `swap_up` | Swap pane up | (none) |
+| `swap_down` | Swap pane down | (none) |
+| `clear_history` | Clear pane history | (none) |
+| `prev_command` | Scroll to previous command | `ctrl+up` |
+| `next_command` | Scroll to next command | `ctrl+down` |
+| `copy_last_output` | Copy last command's output | (none) |
+| `search_all` | Search all panes | `alt+shift+f` |
+| `pane_background` | Pane background… | (none) |
+| `next_waiting` | Go to the next pane where Claude waits | `alt+shift+w` |
+| `save_output` | Save pane output… | (none) |
+| `open_output` | Open pane output in editor | (none) |
+| `quick_select` | Quick select (copy or open what's on screen) | `alt+shift+s` |
+| `toggle_pin` | Pin the console open / unpin | (none) |
+
+**Your own shells** (`[[profiles]]`): the full set of options. `command` is the program and
+its arguments; double quotes keep words with spaces together, so put the whole command in
+single quotes when it contains double quotes. `cwd` is where it starts, `env` sets
+environment variables for it.
+
+```toml
+[[profiles]]
+name = "API server"
+command = 'pwsh -NoExit -Command "npm run dev"'
+cwd = "C:/work/api"
+env = { NODE_ENV = "development", PORT = "4000" }
+theme = "dracula"                                     # its own colours, background included
+font_size = 13
+tab_color = "green"                                   # red, orange, yellow, green, teal, blue, purple, pink
+icon = "🚀"                                           # an emoji or a few letters
+background = "#1e1e2e"                                # its panes' background (instead of the theme's)
+```
+
+Giving a profile the `id` of a detected shell changes that shell instead of adding one,
+e.g. PowerShell 7 with its own colour and folder:
+
+```toml
+[[profiles]]
+id = "pwsh"
+name = "PowerShell 7"
+command = "pwsh -NoLogo"
+cwd = "C:/work"
+tab_color = "blue"
+```
+
+**Layouts with splits inside splits.** A pane with `split` and `panes` is itself split:
+here Claude Code on the left, and the server above a spare shell on the right. Keep each
+`{ ... }` on one line.
+
+```toml
+[[layouts]]
+name = "full stack"
+split = "row"
+panes = [
+  { cwd = "C:/work/app", command = "claude" },
+  { split = "column", panes = [{ profile = "API server" }, { cwd = "C:/work/web" }] },
+]
+```
+
+Snippets and triggers: see
+[Command palette, snippets, layouts and profiles](#command-palette-snippets-layouts-and-profiles).
+
 ## Keyboard shortcuts
 
-All of these can be changed in Settings → Keyboard shortcuts.
+All of these can be changed in Settings → Keyboard shortcuts, or in the settings file
+(every action and its name: [The settings file](#the-settings-file)).
 
 | Action | Shortcut |
 |---|---|
