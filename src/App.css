@@ -1510,3 +1510,16 @@ body,
 .help-columns li {
   margin: 4px 0;
 }
+
+/* Settings: what acts right away, without Save. */
+.settings-panel button.now::before {
+  content: "⚡ ";
+}
+
+.settings-toggle.now > span::after {
+  content: " ⚡";
+}
+
+.now-note {
+  margin-right: auto;
+}

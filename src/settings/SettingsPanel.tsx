@@ -235,7 +235,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
               </span>
               <div className="settings-actions">
                 {update ? (
-                  <button className="primary" disabled={updateStatus === "installing"} onClick={installNow}>
+                  <button className="primary now" title="Applies right away, no Save needed" disabled={updateStatus === "installing"} onClick={installNow}>
                     {updateStatus === "installing" ? "Updating…" : `Update to ${update.version} and restart`}
                   </button>
                 ) : (
@@ -287,6 +287,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
             <Toggle label="Hide when another window is clicked" checked={draft.hideOnBlur} onChange={(v) => set("hideOnBlur", v)} />
             <Toggle
               label="Start with Windows"
+              now
               hint="Applies right away."
               checked={autostart ?? false}
               disabled={autostart === undefined}
@@ -384,7 +385,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                     </label>
                   ))}
                   <div className="settings-actions">
-                    <button className="primary" disabled={wt.chosen.size === 0} onClick={importWt}>
+                    <button className="primary now" title="Applies right away, no Save needed" disabled={wt.chosen.size === 0} onClick={importWt}>
                       Add {wt.chosen.size} shell{wt.chosen.size === 1 ? "" : "s"}
                     </button>
                     <button onClick={() => setWt(undefined)}>Cancel</button>
@@ -477,7 +478,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 <span>{usage === undefined ? "Checking…" : usage.panes === 0 ? "Nothing saved" : `${usage.panes} ${usage.panes === 1 ? "pane" : "panes"}, ${formatBytes(usage.bytes)}`}</span>
                 {confirmClear ? (
                   <>
-                    <button className="danger" onClick={clearHistory}>
+                    <button className="danger now" title="Applies right away, no Save needed" onClick={clearHistory}>
                       Clear everything
                     </button>
                     <button onClick={() => setConfirmClear(false)}>Keep</button>
@@ -543,9 +544,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                         : "Not set up"}
                 </span>
                 {hook && !hook.current && (
-                  <button onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
+                  <button className="now" title="Applies right away, no Save needed" onClick={() => changeHook(installClaudeHook)}>{hook.installed ? "Update" : "Set up Claude Code alerts"}</button>
                 )}
-                {hook?.installed && <button onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
+                {hook?.installed && <button className="now" title="Applies right away, no Save needed" onClick={() => changeHook(removeClaudeHook)}>Remove</button>}
               </div>
             </div>
             <div className="settings-field">
@@ -569,9 +570,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                         : "Not set up"}
                 </span>
                 {statusline && !statusline.current && (
-                  <button onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
+                  <button className="now" title="Applies right away, no Save needed" onClick={() => changeStatusline(installClaudeStatusline)}>{statusline.installed ? "Update" : "Set up"}</button>
                 )}
-                {statusline?.installed && <button onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
+                {statusline?.installed && <button className="now" title="Applies right away, no Save needed" onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
               </div>
             </div>
           </Group>
@@ -586,10 +587,10 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 otherwise yours are copied there. Tabs, history and saved output stay on each PC.
               </span>
               <div className="settings-actions">
-                <button onClick={() => void chooseSettingsFolder().then((folder) => folder && relocate(folder))}>
+                <button className="now" title="Applies right away, no Save needed" onClick={() => void chooseSettingsFolder().then((folder) => folder && relocate(folder))}>
                   {snapshot.folder ? "Another folder…" : "Keep settings in a folder…"}
                 </button>
-                {snapshot.folder && <button onClick={() => relocate(null)}>Back to the default place</button>}
+                {snapshot.folder && <button className="now" title="Applies right away, no Save needed" onClick={() => relocate(null)}>Back to the default place</button>}
               </div>
             </div>
           </Group>
@@ -624,6 +625,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
       </div>
 
       <footer>
+        <span className="settings-hint now-note">⚡ applies right away; everything else applies when you Save.</span>
         <div className="settings-messages" role="status">
           {[error, ...keymapErrors].filter(Boolean).map((message) => (
             <p key={message} className="settings-error">
@@ -709,9 +711,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function Toggle(props: { label: string; hint?: string; checked: boolean; disabled?: boolean; onChange(value: boolean): void }) {
+function Toggle(props: { label: string; hint?: string; checked: boolean; disabled?: boolean; now?: boolean; onChange(value: boolean): void }) {
   return (
-    <label className="settings-toggle">
+    <label className={`settings-toggle${props.now ? " now" : ""}`} title={props.now ? "Applies right away, no Save needed" : undefined}>
       <input type="checkbox" checked={props.checked} disabled={props.disabled} onChange={(e) => props.onChange(e.target.checked)} />
       <span>
         {props.label}
