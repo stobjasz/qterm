@@ -4,7 +4,8 @@ A quake-style drop-down terminal for Windows 11: a hotkey slides a semi-transpar
 console down from the top of the screen. It starts with Windows, lives in the tray,
 supports tabs, and splits each tab into panes (e.g. 3 shells side by side).
 
-Status: M0–M4, M5a and the feature rounds (§16–19) done. Next: see roadmap.md. See §11–19. Date: 2026-10-11.
+Status: M0–M6 and the feature rounds done (§11–30; v0.2.2 released 2026-10-14). What's
+next: [roadmap.md](roadmap.md); what's done: [roadmap-archive.md](roadmap-archive.md).
 
 ---
 
@@ -308,8 +309,11 @@ qterm/
 | **M3** | Split tree: N-way splits, focus nav, drag resize, equalize | 3 shells side by side in one tab, all resizable |
 | **M4** | Config file + hot reload, keybinding overrides, multi-monitor/DPI, hide-on-blur, fonts/themes | No rebuild needed to customize |
 | **M5a** | Bundled ConPTY, backpressure, portable single-exe build | One exe that runs anywhere on Windows 11 |
-| *(next)* | More features, chosen with the user | |
 | **M6** | Job Objects, NSIS installer, auto-update, E2E suite | Installable release |
+
+All done. M6: shells ending with qterm needed no Job Object, as ConPTY already
+guarantees it (§19); E2E suite §23; installer and updates §25. The feature rounds chosen
+with the user since then are in [roadmap-archive.md](roadmap-archive.md) (§16–29 here).
 
 Rough effort for one developer with AI assistance: M0–M1 about 1 week, M2–M3 about
 1–2 weeks, M4–M5 about 2 weeks.
@@ -1155,3 +1159,26 @@ path changes.
 - Live: a highlight trigger decorates exactly the matching line, full width.
 - On the way: a commented example in default.toml used `"error TS\d+"`, an invalid escape
   in a TOML basic string; it uses a literal string now.
+
+## 30. The settings panel's layout (2026-10-14)
+
+**Problem:** the groups sat in a CSS grid (`repeat(auto-fit, minmax(300px, 1fr))`), which
+stretches every group in a row to the tallest one; short groups were mostly empty, and on
+a wide, short console (5120x720) the tall ones scrolled while two thirds of the width
+stayed unused. Plain CSS columns fixed the heights but couldn't use the width either:
+groups don't split, so 8 groups filled 6 of 15 possible columns and the tallest still
+scrolled.
+
+**Now (`settings/masonry.ts`):** as many columns as fit (300px or more, stretched to the
+width). Each group is measured at growing spans (its settings in a
+`.settings-group-body` flowing in that many inner columns; the shortcuts group, a grid
+that arranges itself by width, without inner columns) and takes the narrowest span at
+which it fits the panel's height, else the widest. Groups are then placed in order where
+they start highest (`pack`), absolutely positioned (`box-sizing: border-box`, or padding
+and border overlap the next column). It runs after every render (after the search
+filter, which now looks inside `.settings-group-body`) and on resize.
+
+**Verified:** packing and span choice unit-tested; measured in the test app at 5102x591
+(all 9 groups side by side, no scrolling; Appearance, Terminal and Claude Code at 2
+columns, the shortcuts at 4) and at 1508x1167 (4 columns, scrolls a little); the
+screenshots checked by eye. The E2E suite (Settings save, search) passes.

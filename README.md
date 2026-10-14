@@ -102,7 +102,8 @@ Settings: the ⚙ button, Ctrl+, or tray → **Settings…** open the settings p
 lives in `%APPDATA%\dev.qterm.app\config.toml`, which the panel edits for you (keeping its
 comments); you can also edit the file directly. Changes apply when saved.
 
-Design and roadmap: [docs/foundation.md](docs/foundation.md).
+Design notes: [docs/foundation.md](docs/foundation.md). What's planned:
+[docs/roadmap.md](docs/roadmap.md) (done so far: [docs/roadmap-archive.md](docs/roadmap-archive.md)).
 
 ## Develop
 

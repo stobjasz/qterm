@@ -369,6 +369,8 @@ message.
 
 **The ✳ menu** in the tab bar:
 
+- **Claude plan:** your 5-hour and 7-day usage and when they reset, once plan limits are
+  set up (see above).
 - **Waiting for you:** the panes where Claude waits, with its message. Click one to go
   there.
 - **Running now:** the Claude sessions in your panes, with context and cost. Click one
@@ -403,7 +405,9 @@ qterm never asks for administrator rights on its own.
 
 Open the settings with the ⚙ button, Ctrl+, or the tray menu. Changes apply when you
 click **Save**; Esc or Cancel discards them. **Search settings** at the top shows only
-the settings that match what you type (Esc clears it). At the bottom:
+the settings that match what you type (Esc clears it). The groups arrange themselves to
+the console's size: on a wide console, long groups spread over several columns so
+everything fits without scrolling. At the bottom:
 
 - **Open settings file** opens `config.toml` for options the panel doesn't show
   (profiles, layouts, snippets). Saving the file applies it immediately; a mistake is
@@ -441,6 +445,7 @@ the settings that match what you type (Esc clears it). At the bottom:
 | | Show inline images | on |
 | | SSH hosts as shells | on |
 | | “Open in qterm” in Explorer's menu | off |
+| | Shells from Windows Terminal: Import… | |
 | | Reopen tabs and layout on start | on |
 | | Shell integration (folder tracking, command marks) | on |
 | | Notify when a long command finishes (seconds, 0 = off) | 30 |
@@ -453,7 +458,9 @@ the settings that match what you type (Esc clears it). At the bottom:
 | Claude Code | Remember Claude Code sessions | off |
 | | Alert me when Claude is waiting | on |
 | | Resume Claude Code sessions on start | off |
-| | Notification hook: set up / update / remove | |
+| | Notification hook (waiting, stopped on an error, sessions): set up / update / remove | |
+| | Plan limits and exact usage (Claude Code's status line): set up / remove | |
+| Settings file | Where your settings are kept: a folder of your choice, or back to the default place | default place |
 | Keyboard shortcuts | Every shortcut below; empty switches one off | |
 
 ## Keyboard shortcuts
@@ -497,6 +504,9 @@ characters, qterm leaves AltGr combinations to the shell.
 | Remembered Claude sessions | `%APPDATA%\dev.qterm.app\claude-sessions.json` |
 | Recent commands and folders | `%APPDATA%\dev.qterm.app\history.json` |
 | Named workspaces | `%APPDATA%\dev.qterm.app\workspaces.json` |
+| Which folder your settings are in, if you chose one | `%APPDATA%\dev.qterm.app\settings-folder` |
+| The version that ran last (for What's new) | `%APPDATA%\dev.qterm.app\last-version` |
+| qterm's hooks and status line in Claude Code (if set up) | `%USERPROFILE%\.claude\settings.json`; the previous version is kept as `settings.json.qterm-backup` |
 | Log file | `%LOCALAPPDATA%\dev.qterm.app\logs\qterm.log` (moved to `qterm.log.1` past 1 MB) |
 | Saved pane output | `%LOCALAPPDATA%\dev.qterm.app\scrollback\` |
 | Console host and browser data | `%LOCALAPPDATA%\dev.qterm.app\` |
@@ -506,7 +516,9 @@ nothing next to itself, except during an update (`qterm.exe.old`, the previous v
 deleted when the new one starts).
 
 To remove qterm completely: untick **Start with Windows** and **“Open in qterm” in
-Explorer's menu**, remove the Claude Code hook
+Explorer's menu**, move your settings back to the default place if you chose a folder
+(or delete them there too), remove **Plan limits and exact usage** (Settings → Claude
+Code; your own status line comes back) and the Claude Code hook
 (Settings → Claude Code → Remove) if you set it up, quit qterm, then uninstall it from
 Windows' Installed apps (or delete the portable exe), and delete the two `dev.qterm.app`
 folders.
@@ -518,6 +530,12 @@ puts qterm's version, how it is installed, your Windows and WebView2 versions, t
 console host, settings problems, the hotkey, Start with Windows, the shells found and
 the last lines of the log on the clipboard. Nothing is sent anywhere; paste it into your
 report. **Open logs** (Settings, or the tray) shows the log file itself.
+
+**No plan usage in the ✳ menu or the tray.** It needs Settings → Claude Code → **Plan
+limits and exact usage** set up, a Claude Code session started afterwards inside qterm,
+and that session's first reply: Claude Code passes the figures to its status line from
+then on. They come from your Claude plan; without one (an API key), there are none to
+show.
 
 **"Start with Windows" or "Open in qterm" starts the other copy.** With both the
 installer and a portable exe, the installed qterm always takes these over, and a
