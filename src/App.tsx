@@ -34,6 +34,7 @@ import {
   loadWorkspaces,
   saveWorkspaces,
   openInEditor,
+  resolveFiles,
   saveOutput,
   onUpdateAvailable,
   installUpdate,
@@ -67,6 +68,10 @@ import { resumeHereCommand } from "./claude/resume";
 import { nextWaiting } from "./claude/waiting";
 import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
+import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
+import { QuickSelectOverlay, type QuickSelectItem } from "./terminal/QuickSelectOverlay";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
 import { formatDuration } from "./terminal/marks";
 import { TerminalRegistry, type PaneSpec, type RegistryEvents } from "./terminal/registry";
@@ -147,6 +152,9 @@ export default function App() {
   /** The banner offering the update; dismissing it leaves the offer in Settings. */
   const [updateBanner, setUpdateBanner] = useState(false);
   /** Panes where Claude Code is waiting for the user, with its latest message. */
+  /** Quick select (Alt+Shift+S): labels over the focused pane, and what was typed. */
+  const [quickSelect, setQuickSelect] = useState<{ paneId: PaneId; items: QuickSelectItem[] }>();
+  const [quickTyped, setQuickTyped] = useState("");
   /** Named workspaces (workspaces.json); the name dialog when saving one. */
   const [namedWorkspaces, setNamedWorkspaces] = useState<NamedWorkspace[]>([]);
   const [savingWorkspace, setSavingWorkspace] = useState(false);
@@ -480,6 +488,30 @@ export default function App() {
         case "searchAll":
           setSearchAllOpen((open) => !open);
           break;
+        case "quickSelect": {
+          const screen = registry.screen(paneId);
+          const found = (screen?.lines ?? []).flatMap((line) =>
+            findTargets(line.text).map((target) => ({ target, at: line.cells[target.start] })),
+          );
+          if (!screen || found.length === 0) {
+            setNotice("Nothing on screen to select: no links, files, folders, hashes or IP addresses.");
+            break;
+          }
+          // The shortest labels go to what's nearest the prompt: the bottom of the screen.
+          found.sort((a, b) => b.at.row - a.at.row || a.at.col - b.at.col);
+          const labels = labelsFor(found.length);
+          setQuickTyped("");
+          setQuickSelect({
+            paneId,
+            items: found.map(({ target, at }, i) => ({
+              label: labels[i],
+              target,
+              left: screen.left + at.col * screen.cellWidth,
+              top: screen.top + at.row * screen.cellHeight,
+            })),
+          });
+          break;
+        }
         case "nextWaiting": {
           const ws = workspaceRef.current;
           const order = ws.tabs.flatMap((tab) => paneIds(tab.root));
@@ -594,6 +626,49 @@ export default function App() {
     },
     [registry],
   );
+
+  // --- quick select: keys pick a label while the labels show ------------------------
+  /** Copies the target, or with Shift opens it: a link in the browser, a file in the editor, a folder in a new tab. */
+  const pickTarget = useCallback(
+    (paneId: PaneId, target: Target, open: boolean) => {
+      const copy = () => void writeText(target.text).then(() => setNotice(`Copied ${target.text}`));
+      if (!open || target.kind === "hash" || target.kind === "ip") return copy();
+      if (target.kind === "url") return void openUrl(target.text).catch((e) => setNotice(`Could not open it: ${e}`));
+      if (target.kind === "folder") return void newTab(undefined, target.text);
+      void resolveFiles([target.text], workspaceRef.current.panes[paneId]?.cwd)
+        .then(([file]) => (file ? openInEditor(file, target.line, target.col) : setNotice(`No such file: ${target.text}`)))
+        .catch((e) => setNotice(`Could not open it: ${e}`));
+    },
+    [newTab],
+  );
+  useEffect(() => {
+    if (!quickSelect) return;
+    const close = () => setQuickSelect(undefined);
+    const onKey = (e: KeyboardEvent) => {
+      if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+      // Nothing reaches the terminal while the labels show.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") return close();
+      if (e.key === "Backspace") return setQuickTyped((t) => t.slice(0, -1));
+      const letter = e.code.startsWith("Key") ? e.code.slice(3).toLowerCase() : "";
+      if (!letter) return;
+      const typed = quickTyped + letter;
+      const candidates = quickSelect.items.filter((item) => item.label.startsWith(typed));
+      if (candidates.length === 0) return;
+      const exact = candidates.find((item) => item.label === typed);
+      if (exact) {
+        close();
+        pickTarget(quickSelect.paneId, exact.target, e.shiftKey);
+      } else setQuickTyped(typed);
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", close, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("mousedown", close, true);
+    };
+  }, [quickSelect, quickTyped, pickTarget]);
 
   // --- named workspaces: every tab under a name, opened again next to the open ones ---
   useEffect(() => void loadWorkspaces().then((text) => setNamedWorkspaces(parseNamed(text)), () => {}), []);
@@ -1156,6 +1231,7 @@ export default function App() {
           />
         )}
         {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
+        {quickSelect && <QuickSelectOverlay items={quickSelect.items} typed={quickTyped} />}
         {savingWorkspace && (
           <SaveWorkspaceDialog
             existing={namedWorkspaces.map((w) => w.name)}

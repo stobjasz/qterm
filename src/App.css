@@ -1295,3 +1295,36 @@ body,
 .workspace-dialog input {
   width: 100%;
 }
+
+/* Quick select (Alt+Shift+S): a label over each target, and the keys to use. */
+.quick-select {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.quick-select-label {
+  position: fixed;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #ffd23f;
+  color: #1b1b1b;
+  font: bold 12px/1.3 "Cascadia Mono", Consolas, monospace;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.quick-select-typed {
+  opacity: 0.45;
+}
+
+.quick-select-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--panel-bg);
+  font-size: 12px;
+}

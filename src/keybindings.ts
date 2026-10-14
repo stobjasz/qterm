@@ -26,7 +26,8 @@ export type Command =
   | { type: "paneBackground" }
   | { type: "nextWaiting" }
   | { type: "saveOutput" }
-  | { type: "openOutput" };
+  | { type: "openOutput" }
+  | { type: "quickSelect" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -67,6 +68,7 @@ const ACTIONS = {
   next_waiting: { command: { type: "nextWaiting" }, chord: "alt+shift+w" },
   save_output: { command: { type: "saveOutput" }, chord: "" },
   open_output: { command: { type: "openOutput" }, chord: "" },
+  quick_select: { command: { type: "quickSelect" }, chord: "alt+shift+s" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -107,6 +109,7 @@ const LABELS: Record<Action, string> = {
   next_waiting: "Go to the next pane where Claude waits",
   save_output: "Save pane output…",
   open_output: "Open pane output in editor",
+  quick_select: "Quick select (copy or open what's on screen)",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

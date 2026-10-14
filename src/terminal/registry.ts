@@ -74,6 +74,23 @@ export interface FinishedCommand {
   durationMs: number;
 }
 
+/** A line on screen (wrapped rows joined) and where each of its characters is. */
+export interface ScreenLine {
+  text: string;
+  /** Per UTF-16 unit of `text`: its row in the viewport and its column. */
+  cells: { row: number; col: number }[];
+}
+
+/** See TerminalRegistry.screen. */
+export interface ScreenText {
+  lines: ScreenLine[];
+  /** The cell grid's top-left corner on the page, and one cell's size, in CSS pixels. */
+  left: number;
+  top: number;
+  cellWidth: number;
+  cellHeight: number;
+}
+
 /** Most recent commands remembered per pane; older ones lose their marks. */
 const MAX_MARKS = 500;
 
@@ -243,6 +260,36 @@ export class TerminalRegistry {
       entry.background = background.has(paneId);
       if (!entry.background) entry.activityReported = false;
     }
+  }
+
+  /**
+   * What the pane shows right now (either screen), as lines of text with wrapped rows
+   * joined, each character's row and column on screen, and where the cells are on the
+   * page: what quick select labels.
+   */
+  screen(paneId: PaneId): ScreenText | undefined {
+    const entry = this.entries.get(paneId);
+    const screenEl = entry?.term.element?.querySelector(".xterm-screen");
+    if (!entry || !screenEl) return undefined;
+    const { term } = entry;
+    const buffer = term.buffer.active;
+    const box = screenEl.getBoundingClientRect();
+    const lines: ScreenLine[] = [];
+    for (let row = 0; row < term.rows; row++) {
+      const line = buffer.getLine(buffer.viewportY + row);
+      if (!line) continue;
+      const current = line.isWrapped && lines.length ? lines[lines.length - 1] : undefined;
+      const target = current ?? { text: "", cells: [] };
+      for (let col = 0; col < term.cols; col++) {
+        const cell = line.getCell(col);
+        if (!cell || cell.getWidth() === 0) continue; // the second half of a wide character
+        const chars = cell.getChars() || " ";
+        target.text += chars;
+        for (let i = 0; i < chars.length; i++) target.cells.push({ row, col });
+      }
+      if (!current) lines.push(target);
+    }
+    return { lines, left: box.left, top: box.top, cellWidth: box.width / term.cols, cellHeight: box.height / term.rows };
   }
 
   /** Everything the pane shows and keeps (normal screen), as plain text; wrapped lines joined. */
