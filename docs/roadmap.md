@@ -153,4 +153,42 @@ Terminal 1.25's settings search).
 | 62 | **Start menu jump list** (installed copy): recent folders and workspaces. | M | ⬜ |
 | 63 | **Settings in a folder of your choice** (OneDrive, a dotfiles repo) to keep PCs in sync. | S | ✅ Settings → Settings file; the folder's own settings win; falls back when unreachable; E2E R18 |
 
-Suggested next: #54 (last reply on hover) and #56 (cache-cold countdown, with #51's data), then #49 (size toggle).
+Also done outside the list: the Settings panel's groups are as tall as their content
+(masonry layout, tall groups span more columns), so on a wide, short console every group
+fits without scrolling (2026-10-14, not released yet).
+
+## Round 5 (proposed 2026-10-14): for developers
+
+Built on what qterm already knows: each pane's folder, command marks, file links,
+triggers, the palette and the Claude Code integration.
+
+### Projects and tools
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 64 | **Project tasks in the palette**: the scripts of the pane's project (package.json, Cargo, Makefile, justfile, composer.json, pyproject), run in a new split beside it. | M | ⬜ |
+| 65 | **Git status per tab**: branch, uncommitted changes, ahead/behind for the pane's folder, in the tab tooltip and the palette; refreshed after each command. | S–M | ⬜ |
+| 66 | **Project settings** (`.qterm.toml` in a repo): tab name, colour and icon, snippets and triggers that apply in panes inside that project. | M | ⬜ |
+| 67 | **Containers as shells**: running Docker / Podman containers in the ▾ menu and palette, opened with `exec -it` (like the SSH hosts). | S–M | ⬜ |
+
+### Output and processes
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 68 | **Problems list**: compiler and test errors (tsc, eslint, rustc/cargo, go, pytest, dotnet) collected from every pane's output into one list; click to open the file at its line. | M | ⬜ |
+| 69 | **Dev server links**: a "Local: http://localhost:5173" in the output becomes an "Open" button on the tab while the server runs. | S | ⬜ |
+| 70 | **Stop what runs in a pane**: end the running program and everything it started (when Ctrl+C isn't enough), keeping the shell. | S | ⬜ |
+| 71 | **Who uses this port?**: the palette names the process listening on a port, with its pane if it's one of qterm's, and can end it. | S | ⬜ |
+| 72 | **Run on change**: re-run a pane's last command whenever files in its folder change (a quick watch mode for tests and builds). | M | ⬜ |
+| 73 | **Command timestamps and durations**: when each command ran and how long it took, on its ✓/✗ bar and in recent commands. | S | ⬜ |
+
+### Safety and convenience
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 74 | **Multi-line paste warning**: pasting several lines into a shell asks first (they would run one by one); off for Claude Code panes, where multi-line input is normal. | S | ⬜ |
+| 75 | **Paste an image as a file**: an image on the clipboard is saved to a temp file and its path typed, for Claude Code and other tools that read images from paths. | S | ⬜ |
+| 76 | **JSON viewer**: select JSON in the output (or a command's whole output) and see it formatted and foldable, with copy of any value. | M | ⬜ |
+| 77 | **Notes per workspace**: a plain text scratch pane kept with the workspace, for commands, TODOs and findings. | M | ⬜ |
+
+Suggested next: #54 (last reply on hover) and #56 (cache-cold countdown, with #51's data), then #49 (size toggle). From round 5: #64 (project tasks), #74 (paste warning) and #69 (dev server links) give the most for little effort.
