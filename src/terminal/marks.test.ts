@@ -24,11 +24,15 @@ describe("command marks", () => {
   });
 
   it("says when: the time today, the weekday this week, else the date", () => {
+    // In whatever locale runs the tests (14:32 or 2:32 PM).
+    const time = (d: Date, second?: "2-digit") => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second });
     const now = new Date(2026, 9, 15, 16, 0, 0).getTime();
-    const today = new Date(2026, 9, 15, 14, 32, 5).getTime();
-    expect(formatClock(today, now)).toMatch(/14.32$/);
-    expect(formatClock(today, now, true)).toMatch(/14.32.05$/);
-    expect(formatClock(new Date(2026, 9, 13, 9, 5).getTime(), now)).toMatch(/^\S+ 09.05$/);
-    expect(formatClock(new Date(2026, 8, 1, 9, 5).getTime(), now)).not.toMatch(/09.05/);
+    const today = new Date(2026, 9, 15, 14, 32, 5);
+    expect(formatClock(today.getTime(), now)).toBe(time(today));
+    expect(formatClock(today.getTime(), now, true)).toBe(time(today, "2-digit"));
+    const tuesday = new Date(2026, 9, 13, 9, 5);
+    expect(formatClock(tuesday.getTime(), now)).toBe(`${tuesday.toLocaleDateString(undefined, { weekday: "short" })} ${time(tuesday)}`);
+    const longAgo = new Date(2026, 8, 1, 9, 5);
+    expect(formatClock(longAgo.getTime(), now)).toBe(longAgo.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
   });
 });
