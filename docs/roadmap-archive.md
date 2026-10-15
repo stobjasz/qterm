@@ -108,6 +108,7 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 50 | **Named workspaces**: save and reopen a whole set of tabs (layouts cover one tab). | M | ✅ opened next to the open tabs; `workspaces.json`; E2E R10 |
+| 49 | **Size toggle**: a key that switches the console between its height and full screen. | S | ✅ F11 (`toggle_size`): the whole work area and back; kept while hidden, a drag of the edge ends it; E2E R31 |
 
 ## Round 4 (proposed 2026-10-14)
 
@@ -117,6 +118,8 @@ Also done outside the list: file drag and drop from Explorer, with paths quoted 
 |---|---|---|---|
 | 51 | **Plan limits and exact usage**: relay Claude Code's status line data (an existing status line of your own keeps working) for the 5-hour / 7-day plan usage and reset times (tray, ✳ menu; warnings at 80% and 95%), and Claude Code's own context and cost figures instead of qterm's transcript estimate. | M | ✅ Settings → Claude Code → Plan limits and exact usage; ✳ menu, tray, warnings; E2E R13 |
 | 52 | **Alert when Claude stops on an error** (StopFailure hook): rate limit, overload or billing, with the reason. Rare, unlike #14. | S | ✅ hook setup adds StopFailure (Update in Settings); the tab shows ! with the reason; E2E R14 |
+| 54 | **Claude's last reply on hover** (Stop hook's last message): in the tab tooltip and the waiting list; no notification. | S | ✅ Stop hook (hook setup → Update); tab tooltip and the ✳ menu's waiting list; E2E R23 |
+| 56 | **Cache-cold countdown** on idle Claude tabs (status line's prompt cache data): resuming after the cache expires costs more. | S | ✅ ⏱4m, then seconds, then “cold”, on idle Claude tabs (needs plan limits set up); E2E R24 |
 
 ### Terminal
 
@@ -153,3 +156,30 @@ Found by driving the app on a 5120x720 console, outside the roadmap:
 - ✅ "Claude is waiting" (tray, ✳ menu, palette, Alt+Shift+W) counts Claude only, not
   long-command or trigger marks.
 - ✅ The tab's × has a tooltip.
+
+## Round 5 (proposed 2026-10-14, for developers)
+
+### Projects and tools
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 64 | **Project tasks in the palette**: the scripts of the pane's project (package.json, Cargo, Makefile, justfile, composer.json, pyproject), run in a new split beside it. | M | ✅ palette “Project task”: package.json (pnpm / yarn / bun / npm), Cargo, Makefile, justfile, composer.json, pyproject; a split beside, in the manifest's folder; E2E R25 |
+| 65 | **Git status per tab**: branch, uncommitted changes, ahead/behind for the pane's folder, in the tab tooltip and the palette; refreshed after each command. | S–M | ✅ tab tooltip and its palette entry: `main · 3 changed, 1 new · ↑2 ↓1`; re-read after each command and Claude reply; E2E R26 |
+| 66 | **Project settings** (`.qterm.toml` in a repo): tab name, colour and icon, snippets and triggers that apply in panes inside that project. | M | ✅ `.qterm.toml` (here or any folder above): `name`, `tab_color`, `icon`, `[[snippets]]`, `[[triggers]]`; nothing runs by itself; E2E R27 |
+
+### Output and processes
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 69 | **Dev server links**: a "Local: http://localhost:5173" in the output becomes an "Open" button on the tab while the server runs. | S | ✅ ↗port button on the tab and a “Dev server” palette entry, while the port is listened on (gone at once when the server stops); E2E R32 |
+| 70 | **Stop what runs in a pane**: end the running program and everything it started (when Ctrl+C isn't enough), keeping the shell. | S | ✅ palette “Stop what runs in this pane” (`stop_programs`): the process tree under the shell, children first; Rust test on a real ConPTY |
+| 71 | **Who uses this port?**: the palette names the process listening on a port, with its pane if it's one of qterm's, and can end it. | S | ✅ palette “Port” entries (type “port 3000”): process, its pane, Go to its pane / End (with what it started); E2E R33 |
+| 73 | **Command timestamps and durations**: when each command ran and how long it took, on its ✓/✗ bar and in recent commands. | S | ✅ bar tooltip and menu (“14:32:05 · took 3s”), recent commands in the palette; E2E R34 |
+
+### Safety and convenience
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 74 | **Multi-line paste warning**: pasting several lines into a shell asks first (they would run one by one); off for Claude Code panes, where multi-line input is normal. | S | ✅ asks with a preview (`paste_warning`, on); not in Claude Code or full-screen programs; E2E R28 |
+| 75 | **Paste an image as a file**: an image on the clipboard is saved to a temp file and its path typed, for Claude Code and other tools that read images from paths. | S | ✅ PNG in `%TEMP%\qterm-images` (a week), its path typed for the pane's shell; E2E R29 |
+| 76 | **JSON viewer**: select JSON in the output (or a command's whole output) and see it formatted and foldable, with copy of any value. | M | ✅ selection or last output (`view_json`), or a command's bar → View output as JSON; JSON Lines and log prefixes too; E2E R30 |

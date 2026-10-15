@@ -1227,3 +1227,118 @@ pane closes at once), R22 (Ctrl+Shift+/ from the terminal; a rebound shortcut sh
 new keys), each red under a deliberate break; unit tests for chord labels, the hotkey
 label, palette order and memory, Claude alerts, `programs_below`, `first_start`. The doc
 guard caught `show_help` missing from the user guide and default.toml.
+
+## 32. Roadmap round 5: #49, #54, #56, #64–#66, #70, #74–#76 (2026-10-15)
+
+**Claude's last reply (#54).** qterm's hook now also handles `Stop`: its input carries
+`last_assistant_message` (Claude Code's documented field for notification hooks; the
+transcript may not have the final message yet at Stop time). `message_from_hook` turns
+it into an inbox `Reply` (cut at 4000 characters; nothing for an empty reply, and never
+an alert), emitted as `claude-reply`. The UI keeps one reply per pane while Claude runs
+there (pruned with `claudeStatus`) and shows its start (`replyPreview`) in the tab's
+tooltip and under the pane's row in the ✳ menu's waiting list. `EVENTS` gained `Stop`,
+so an existing setup reads "Update" in Settings until re-installed.
+
+**Cache countdown (#56).** The status line relay already carried `prompt_cache`; the UI
+keeps it per pane and `CacheCountdown` (on idle Claude tabs only) shows minutes, then
+seconds in the last minute (`cacheTick` redraws every second only then), then "cold".
+Busy tabs show nothing: a running turn refreshes the cache.
+
+**Projects (#64, #65, #66).** One command, `project_info(cwd)` (`project.rs`), answers
+everything about a pane's folder: `tasks` (the nearest folder with any manifest, up to
+the repository root: package.json scripts with the package manager from
+`packageManager` or the nearest lockfile, fixed cargo commands, Makefile targets without
+pattern rules, specials or variables, public just recipes, composer scripts, pyproject's
+poe / pdm / hatch scripts and entry points through uv or poetry), `git` (`git
+--no-optional-locks status --porcelain=v2 --branch`, only when a `.git` exists above,
+so no process outside repositories; `CREATE_NO_WINDOW`), and the nearest `.qterm.toml`
+(name, `tab_color`, icon, `[[snippets]]`, `[[triggers]]`; `deny_unknown_fields`, the
+same trigger checks as config.toml via `check_triggers`). A folder that doesn't exist on
+Windows (a WSL path) knows nothing. The UI reads it when a pane's folder changes, after
+each finished command, after each Claude reply and when the palette opens, at most one
+read per pane in flight (a second request re-reads when the first returns). Project
+look is a transient `Pane.project` (not saved); `tabTitle` puts its name after a manual
+title and before the Claude title; colour and icon go between the tab's own and the
+profile's. Project triggers go to the registry per pane (`setPaneTriggers`), their
+errors and `.qterm.toml` errors to the settings problem bar. Tasks run through
+`split(pane, "row", { cwd, command })`: a new pane beside, in the manifest's folder,
+the command typed once its shell starts. Nothing in `.qterm.toml` runs by itself.
+
+**Stop what runs (#70).** `stop_programs(session)`: `procs::tree_below` lists every
+process under the shell (children before parents, console helpers and their subtrees
+left alone), `procs::terminate` ends each (`TerminateProcess`, exit 1). The shell
+stays and prints its prompt; the notice names what ended.
+
+**Pastes (#74, #75).** Every user paste (Ctrl+Shift+V, right-click, and the browser's
+own paste event, captured on the terminal's wrapper before xterm sees it) now goes to
+the UI as `onPaste(pane, text)` instead of straight into the terminal. Text with more
+than one line (`isMultiLine`: one trailing line break doesn't count) asks through
+`ConfirmPaste` (Cancel focused, a preview of the first 8 lines) unless `paste_warning`
+is off, Claude Code runs in the pane, or the alternate screen is up. An empty paste
+asks Rust for `clipboard_image_file`: the clipboard plugin's RGBA image, encoded with
+the `png` crate into `%TEMP%\qterm-images\pasted-<ms>.png` (files older than a week go
+on the next paste), and its path typed with `dropText` for the pane's shell. PSReadLine's
+own Ctrl+V reads the clipboard itself and is unaffected.
+
+**JSON viewer (#76).** `findJson`: the whole text, then JSON Lines (every line an object
+or array), then the first `{` / `[` whose matching bracket (strings skipped) encloses
+valid JSON, trying up to 50 starts; lone numbers and strings don't count. Sources: the
+selection, else the last command's output (`view_json`), or a command's bar → View
+output as JSON. `JsonViewer` folds from depth 2, shows 200 items of a long list before
+"Show all", and copies any value (`copyText`: strings raw, the rest pretty JSON); paths
+read `$.items[2].name`.
+
+**Full size (#49).** `toggle_size` (F11, like Windows Terminal) calls
+`toggle_console_size`: `QuakeState.full` flips and `target_rect` takes the whole work
+area while it's set. It survives hiding, and a drag of the bottom edge clears it.
+
+**Verified:** E2E R23–R31 (`e2e/README.md`), each red under a deliberate break of the
+behaviour it protects; Rust tests for the Stop hook, `tree_below`, stopping ping while
+the shell lives (real ConPTY), task discovery per manifest, git status parsing and a
+real repository, `.qterm.toml` lookup and checks, PNG encoding and the full-size rect;
+unit tests for the cache countdown, reply previews, paste line counting, `findJson`,
+git summaries, project looks and project tab names. The doc guard caught the three new
+actions missing from the user guide and default.toml.
+
+## 33. Dev servers, ports, command times (#69, #71, #73; 2026-10-15)
+
+**Dev server links (#69).** Each line a shell prints (either screen; only its own
+output, not restored lines) goes through `findDevServerUrl`: an http(s) address on
+localhost, `*.localhost`, 127.0.0.1, `[::1]` or "every address" (0.0.0.0 / `[::]`,
+opened as localhost) with a port. Network addresses don't count. The registry reports
+each address once per pane until the running command ends (`onDevServer`); the UI keeps
+the latest three per pane and shows an ↗port button on the tab and a "Dev server" palette
+entry. While any exist it polls `listening_ports` every 3 s and drops links whose port
+nobody listens on, except within 15 s of being printed (some servers print first); when
+a pane's command ends it checks at once and drops that pane's unlistened links without
+the grace, so stopping a server removes its button right away. A server started in the
+background survives the commands after it, as long as it listens.
+
+**Who uses this port? (#71).** `ports::listeners` reads `GetExtendedTcpTable`
+(`TCP_TABLE_OWNER_PID_LISTENER`, IPv4 and IPv6; ports in network byte order), `owners`
+groups by port and process, names the process from the ToolHelp snapshot and finds the
+pane session whose shell it runs below (`procs::is_below`, the parent chain, safe from
+reused-id loops). The palette reads it when it opens, as "Port" entries (search-only:
+typing "port 3000" finds it); picking one opens `PortDialog` (Cancel focused; Go to its
+pane; End). `end_port_owner(port, pid)` first checks that pid still holds the port, then
+ends it and everything it started (`procs::tree_of`, children first); a process Windows
+won't let qterm end is an error, not a silent no-op.
+
+**Command times (#73).** A command mark records when it ended next to when Enter ran
+it; the bar's tooltip says "Ran at 14:32:05, took 3s" (`formatClock`: the time today,
+the weekday this week, else the date), the bar's menu shows it under the command, and
+`FinishedCommand` carries `startedAt`. Recent commands keep `durationMs` in history.json
+(dropped when malformed), shown in the palette next to the time it last finished.
+`formatDuration` now gives tenths under a second ("0.4s").
+
+**Verified:** E2E R32 (a real Node server on a free port: button, then gone within 5 s
+of Ctrl+C), R33 (a Node listener: the palette names node and its pane; End frees the
+port and the shell takes the next command), R34 (a 3-second command: the bar menu and
+the palette say "3s"), each red under deliberate breaks (no event, no prompt removal,
+End doing nothing, no pane, no time in the menu, no duration in history); Rust tests for
+the TCP table (a socket the test opens is found with its pid), grouping and pane lookup,
+`is_below` and `tree_of`; unit tests for address detection (Vite, Next, Django, Flask,
+ASP.NET, 0.0.0.0, `[::1]`, *.localhost; not network addresses), `formatClock`,
+sub-second durations and history durations. While writing them, the harness's `run()`
+got a Shift press before typing: xterm drops inserted text while it believes a key is
+down, which happened whenever the palette took Ctrl+Shift+P's key-up.

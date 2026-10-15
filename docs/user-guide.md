@@ -85,6 +85,9 @@ daily checks. Nothing installs without your click.
   another window has focus, the first press brings it to the front.
 - **Height:** drag the console's bottom edge. Double-click the edge for half the screen.
   The height is remembered.
+- **Full size:** F11 lets the console fill the whole screen (above the taskbar); F11
+  again brings it back to its size. It stays full while hidden, until you press F11 or
+  drag the bottom edge.
 - **Width, monitor, transparency, animation:** in Settings → Console and Appearance.
 - **Background effect** (Settings → Appearance): **Acrylic** blurs what's behind the
   console like frosted glass, **Mica** tints it with your wallpaper's colours. Lower the
@@ -108,14 +111,18 @@ daily checks. Nothing installs without your click.
   Ctrl+Shift+1…9 opens the shell at that position in the list.
 - **Switch:** click a tab, Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+Alt+1…9.
 - **Rename:** double-click the tab title. Without a name of your own, a tab shows the
-  title of the Claude Code session in it (it keeps it after Claude exits and across
-  restarts), else the title the shell sets, else the shell's name.
+  name its project gives it (`.qterm.toml`, see Projects below), else the title of the
+  Claude Code session in it (it keeps it after Claude exits and across restarts), else
+  the title the shell sets, else the shell's name.
 - **Reorder:** drag a tab.
 - **Close:** the × on the tab, a middle click on the tab, or Ctrl+Shift+W for the current pane.
   If a program still runs there (Claude Code, a dev server, a build), qterm says which
   and asks first; Cancel is the default. A shell you exit closes its pane right away.
 - **Colour and icon:** right-click a tab to give it one of eight colours and an icon
-  (an emoji or a few letters). A shell can bring its own, see Profiles below.
+  (an emoji or a few letters). A project can bring its own (Projects below), and so can
+  a shell (Profiles below).
+- **Hover a tab** for its git branch and changes (in a repository) and, in a Claude Code
+  tab, the start of Claude's last reply.
 
 **Pin the console open:** the 📌 button in the tab bar (or "Pin the console open" in
 the palette). While pinned, clicking another window doesn't hide the console and the
@@ -143,6 +150,8 @@ hides it. A restart unpins it.
 | Bell | A program in a background tab rang the bell. |
 | ✳ (spinning / dim) | Claude Code runs in the tab: working / idle at its prompt. |
 | 44% | How full Claude's context is in that tab (red from 80%). Hover for details. |
+| ⏱4m / cold | Claude is idle there and its prompt cache stays warm this long / has gone cold. |
+| ↗5173 | A dev server runs in the tab: click to open it in the browser. |
 | ✳ (pulsing) | Claude Code is waiting for you there. |
 | ✓ / ✗ | A long command finished there, successfully / with an error. |
 | ADMIN | A pane in the tab runs as administrator. |
@@ -157,6 +166,14 @@ Markers disappear when you look at the tab.
 - Ctrl+Shift+C copies the selection; Ctrl+Shift+V pastes.
 - Right-click copies the selection, or pastes when nothing is selected.
 - "Copy selected text automatically" (Settings → Terminal) copies as soon as you select.
+- **Several lines:** pasting more than one line into a shell asks first, showing what
+  you're about to paste, since each line would run as a command. Claude Code and
+  full-screen programs (an editor) take pasted lines as text, so there it isn't asked.
+  Settings → Terminal → **Ask before pasting several lines into a shell** switches it off.
+- **Pictures:** with an image on the clipboard (a screenshot from Win+Shift+S, say),
+  pasting saves it as a PNG file and types its path, quoted for that shell. Claude Code
+  attaches an image whose path you paste, and so do other tools that read images from a
+  file. The files are in your temp folder (`qterm-images`) and removed after a week.
 
 **Links and files**
 
@@ -174,6 +191,7 @@ your editor at its line, a folder in a new tab. Esc or a click cancels.
 folders your shells were in (30), across tabs and restarts. In the palette:
 
 - **Recent command:** typed at the prompt of the pane you're in; press Enter to run it.
+  Each shows when it last ran and how long it took (and ✗ with the exit code if it failed).
 - **Recent folder:** opens a new tab there.
 - **Forget recent commands and folders** clears both lists.
 
@@ -197,10 +215,33 @@ succeeded, red when it failed (hover for the command and exit code), grey when t
 can't tell (Command Prompt).
 
 - **Ctrl+↑ / Ctrl+↓** scroll to the previous / next command.
+- **Hover a command's bar** for when it ran and how long it took; its menu says so too.
 - **Click a command's bar** for its menu: **Copy output**, **Copy command**, **Select
-  output** (selects it on screen) and **Run again**.
+  output** (selects it on screen), **Run again** and **View output as JSON**.
 - **"Copy last command's output"** in the command palette copies what the last command
   printed.
+
+**Dev servers:** when a program prints the local address it serves on (Vite's `Local:
+http://localhost:5173/`, Next.js, Django, Flask, ASP.NET, ...), its tab gets an **↗5173**
+button that opens it in your browser, and the palette lists it under "Dev server". The
+button goes when the server stops listening on that port (when you stop it, at once).
+Addresses on your network (`192.168...`) aren't buttons; Ctrl+click still opens them.
+
+**Who uses this port?** Type "port" and the number in the palette (`port 3000`): it lists
+what listens on that port, with the pane it runs in when it's one of qterm's. Pick it to
+go to that pane, or to end the program (and whatever it started) and free the port.
+
+**Stop what runs in a pane:** when Ctrl+C isn't enough (a dev server that ignores it, a
+build that started a dozen helpers), "Stop what runs in this pane" in the palette ends
+the program and everything it started, and leaves the shell at its prompt. qterm says
+what it stopped.
+
+**JSON viewer:** select some JSON in a pane and choose "View the selection or last output
+as JSON" in the palette (without a selection, the last command's output is used), or
+click a command's bar → **View output as JSON**. It shows the JSON formatted and
+foldable; **Copy** on any row copies that value (a string as it is, anything else as
+JSON), and **Copy all** the whole thing. JSON after a log prefix and JSON Lines (one
+object per line) work too.
 
 **Open in qterm from Explorer:** with Settings → Terminal → **“Open in qterm” in
 Explorer's menu** on, right-click a folder (or the empty space inside one, or a drive) for
@@ -247,6 +288,42 @@ color = "#5c1a1a"                    # optional; a dark amber by default
 
 Full-screen programs (an editor, Claude Code's own screen) and output restored after a
 restart don't set triggers off, and each one fires at most every 3 seconds per pane.
+
+**Projects.** qterm looks at the folder a pane is in (with shell integration it follows
+your `cd`s):
+
+- **Project tasks:** the scripts of its project show in the palette as "Project task":
+  `package.json` scripts (run with pnpm, yarn, bun or npm, whichever the project uses),
+  Cargo's build / check / test / run / clippy, Makefile targets, `just` recipes,
+  `composer.json` scripts and `pyproject.toml` scripts (poe, pdm, hatch, and entry points
+  through uv or poetry). Picking one runs it in a new pane beside the current one, in the
+  folder the file is in. The nearest folder with any of these files counts, up to the
+  repository's root.
+- **Git status:** in a git repository, the tab's tooltip and its entry in the palette
+  show the branch, how many files changed or are new, and how far it is ahead of or
+  behind its upstream (`main · 3 changed, 1 new · ↑2`). It's read again after each
+  command and each Claude Code reply.
+- **Project settings:** a `.qterm.toml` in the project's folder (or any folder above the
+  pane's) gives tabs whose pane is inside it a name, colour and icon, and adds snippets
+  and triggers for those panes:
+
+```toml
+# .qterm.toml
+name = "Web shop"        # the tab's name (a name you give the tab wins)
+tab_color = "green"      # red, orange, yellow, green, teal, blue, purple, pink
+icon = "🛒"
+
+[[snippets]]
+name = "Seed the database"
+command = "pnpm run db:seed"
+
+[[triggers]]
+pattern = "Compiled successfully"
+```
+
+  Nothing in it runs by itself: snippets wait for you to pick them, and triggers only
+  highlight, mark or notify. A mistake in it shows at the top of the console. It's read
+  again when the pane changes folder and after each command.
 
 **Snippets** are commands you use often, typed into the current pane from the palette.
 Add them in the settings file (Settings → "Open settings file"):
@@ -339,9 +416,9 @@ Set these up in **Settings → Claude Code**.
 
 **Alerts and session tracking.** Click **Set up Claude Code alerts** once. qterm then
 learns from Claude Code when it is waiting for you (a permission question, or your next
-message after it has been idle for a minute), when a reply stopped on an API error (a
-rate limit, overload or billing problem: the tab shows **!** with the reason), and which
-session runs in which pane. This
+message after it has been idle for a minute), what it said when it finished a reply,
+when a reply stopped on an API error (a rate limit, overload or billing problem: the tab
+shows **!** with the reason), and which session runs in which pane. This
 only affects Claude Code running inside qterm. If qterm says **Update** there, click it:
 a newer qterm listens to more of Claude Code's events. Claude sessions started afterwards
 use the new setup.
@@ -350,6 +427,13 @@ use the new setup.
 full its context is, e.g. **44%**. Hover for the model, context size, number of requests
 and an estimated cost. The cost uses Anthropic's API prices; with a Claude subscription
 you aren't billed per token, so treat it as a measure of how much the session has done.
+The tooltip also shows the start of **Claude's last reply** (with the hook set up), so
+you can see how a background session got on without switching to it.
+
+**Prompt cache countdown.** With plan limits set up (below), an idle Claude tab shows how
+long Claude's prompt cache stays warm, e.g. **⏱4m**, then **cold**. Replying while it's
+warm re-reads the conversation cheaply; after it goes cold, the whole context is sent
+again, which costs more and uses more of your plan.
 
 **Plan limits and exact usage.** Settings → Claude Code → **Plan limits and exact
 usage** → **Set up** lets Claude Code's status line pass its figures to qterm:
@@ -377,8 +461,8 @@ message.
 
 - **Claude plan:** your 5-hour and 7-day usage and when they reset, once plan limits are
   set up (see above).
-- **Waiting for you:** the panes where Claude waits, with its message. Click one to go
-  there.
+- **Waiting for you:** the panes where Claude waits, with its message and the start of
+  its last reply. Click one to go there.
 - **Running now:** the Claude sessions in your panes, with context and cost. Click one
   to go to its pane.
 - **Remembered:** with "Remember Claude Code sessions" on, every time a terminal prints
@@ -449,6 +533,7 @@ everything fits without scrolling. At the bottom:
 | | Font ligatures | off |
 | Terminal | Shell for new tabs | first found (PowerShell 7 if installed) |
 | | Copy selected text automatically | off |
+| | Ask before pasting several lines into a shell | on |
 | | Right-click copies, or pastes when nothing is selected | on |
 | | Show inline images | on |
 | | SSH hosts as shells | on |
@@ -466,7 +551,7 @@ everything fits without scrolling. At the bottom:
 | Claude Code | Remember Claude Code sessions | off |
 | | Alert me when Claude is waiting | on |
 | | Resume Claude Code sessions on start | off |
-| | Notification hook (waiting, stopped on an error, sessions): set up / update / remove | |
+| | Notification hook (waiting, last replies, stopped on an error, sessions): set up / update / remove | |
 | | Plan limits and exact usage (Claude Code's status line): set up / remove | |
 | Settings file | Where your settings are kept: a folder of your choice, or back to the default place | default place |
 | Keyboard shortcuts | Every shortcut below; empty switches one off | |
@@ -590,6 +675,9 @@ toggle_broadcast = ""                                 # off
 | `quick_select` | Quick select (copy or open what's on screen) | `alt+shift+s` |
 | `toggle_pin` | Pin the console open / unpin | (none) |
 | `show_help` | Shortcuts and tips | `ctrl+shift+/` |
+| `stop_programs` | Stop what runs in this pane (keeps the shell) | (none) |
+| `view_json` | View the selection or last output as JSON | (none) |
+| `toggle_size` | Full size console / back | `f11` |
 
 **Your own shells** (`[[profiles]]`): the full set of options. `command` is the program and
 its arguments; double quotes keep words with spaces together, so put the whole command in
@@ -666,8 +754,9 @@ All of these can be changed in Settings → Keyboard shortcuts, or in the settin
 | Quick select (copy or open what's on screen) | Alt+Shift+S |
 | Next pane where Claude waits | Alt+Shift+W |
 | Shortcuts and tips (also the ? button) | Ctrl+Shift+/ |
+| Full size console / back | F11 |
 | Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
-| Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console | (palette; no shortcut by default) |
+| Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console, stop what runs in a pane, view JSON | (palette; no shortcut by default) |
 
 Ctrl+Shift+1…9 and Ctrl+Alt+1…9 are fixed. On keyboards where Ctrl+Alt (AltGr) types
 characters, qterm leaves AltGr combinations to the shell.
@@ -686,6 +775,7 @@ characters, qterm leaves AltGr combinations to the shell.
 | qterm's hooks and status line in Claude Code (if set up) | `%USERPROFILE%\.claude\settings.json`; the previous version is kept as `settings.json.qterm-backup` |
 | Log file | `%LOCALAPPDATA%\dev.qterm.app\logs\qterm.log` (moved to `qterm.log.1` past 1 MB) |
 | Saved pane output | `%LOCALAPPDATA%\dev.qterm.app\scrollback\` |
+| Pictures pasted from the clipboard | `%TEMP%\qterm-images\`, each removed after a week |
 | Console host and browser data | `%LOCALAPPDATA%\dev.qterm.app\` |
 
 The installer puts qterm in `%LOCALAPPDATA%\qterm`. The portable exe writes

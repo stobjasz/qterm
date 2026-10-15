@@ -47,6 +47,24 @@ unit tests can't reproduce. One spec per risk.
 | R20 | Esc closes a menu or panel (Settings) opened while the keyboard is in a terminal, and doesn't reach the shell. | `menu-escape.spec.ts` |
 | R21 | Closing a pane where a program still runs asks first and names it; an idle pane closes at once. | `close-confirm.spec.ts` |
 | R22 | Ctrl+Shift+/ opens "Shortcuts and tips", showing the shortcuts in effect (a rebound one by its new keys). | `help-sheet.spec.ts` |
+| R23 | When Claude finishes a turn in a pane, hovering its tab shows what it said last (Stop hook). | `claude-last-reply.spec.ts` |
+| R24 | An idle Claude tab counts down to when its prompt cache goes cold, then says it's cold. | `claude-cache-countdown.spec.ts` |
+| R25 | A package.json script picked from the palette runs in a new pane, in the project's folder. | `project-task.spec.ts` |
+| R26 | A tab in a git repository shows its branch and changes on hover, updated after a command changes them. | `git-status.spec.ts` |
+| R27 | A project's `.qterm.toml` names the tab and adds its snippets while a pane is inside it, and not after leaving. | `project-settings.spec.ts` |
+| R28 | Pasting several lines into a shell runs nothing until confirmed. | `paste-warning.spec.ts` |
+| R29 | Pasting with an image on the clipboard types the path of a PNG holding that image. | `image-paste.spec.ts` |
+| R30 | A command's JSON output opens in the JSON viewer, and Copy on one value puts exactly that value on the clipboard. | `json-viewer.spec.ts` |
+| R31 | F11 makes the console full size and back, and the terminal refits each time. | `console-size.spec.ts` |
+| R32 | A dev server's address gives its tab an Open button, which goes as soon as the server stops. | `dev-server-link.spec.ts` |
+| R33 | The palette names who listens on a port and in which pane; ending it frees the port and keeps the shell. | `port-owner.spec.ts` |
+| R34 | A command's bar and the palette's recent commands say when it ran and how long it took. | `command-timing.spec.ts` |
+
+Claude Code itself isn't needed for R23 and R24: its hook and status line input is piped
+in by hand, and a copy of Node named `claude.exe` (see `startFakeClaude` in `qterm.ts`)
+stands in for it, so qterm sees Claude running in the pane.
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).
+"Stop what runs in this pane" is covered by a Rust test on a real ConPTY
+(`pty::tests::stopping_ends_the_program_and_keeps_the_shell`).
