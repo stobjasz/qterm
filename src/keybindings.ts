@@ -32,7 +32,9 @@ export type Command =
   | { type: "showHelp" }
   | { type: "stopPrograms" }
   | { type: "viewJson" }
-  | { type: "toggleSize" };
+  | { type: "toggleSize" }
+  | { type: "splitWith"; dir: SplitDir }
+  | { type: "switchShell" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -80,6 +82,10 @@ const ACTIONS = {
   view_json: { command: { type: "viewJson" }, chord: "" },
   // Like Windows Terminal's full screen key.
   toggle_size: { command: { type: "toggleSize" }, chord: "f11" },
+  // Like Split right / down, with a shell picked from a list.
+  split_right_with: { command: { type: "splitWith", dir: "row" }, chord: "ctrl+alt+shift+=" },
+  split_down_with: { command: { type: "splitWith", dir: "column" }, chord: "ctrl+alt+shift+-" },
+  switch_shell: { command: { type: "switchShell" }, chord: "" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -126,6 +132,9 @@ const LABELS: Record<Action, string> = {
   stop_programs: "Stop what runs in this pane (keeps the shell)",
   view_json: "View the selection or last output as JSON",
   toggle_size: "Full size console / back",
+  split_right_with: "Split right with another shell…",
+  split_down_with: "Split down with another shell…",
+  switch_shell: "Switch this pane to another shell…",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

@@ -29,7 +29,8 @@ test("Claude's last reply in a pane shows on hovering its tab", async ({ qterm }
 
     // Claude Code runs in the pane (idle at its prompt)...
     await qterm.run(pane, startFakeClaude());
-    await expect(tab.getByRole("status", { name: "Claude is idle" })).toBeVisible();
+    // A first start of the copied exe can wait on the virus scanner: more time than usual.
+    await expect(tab.getByRole("status", { name: "Claude is idle" })).toBeVisible({ timeout: 30_000 });
 
     // ...and finishes a turn: its Stop hook runs.
     await qterm.run(pane, `Get-Content '${input}' -Raw | & '${EXE}' --claude-notify`);

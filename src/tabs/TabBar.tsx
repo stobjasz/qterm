@@ -24,6 +24,8 @@ interface Props {
   onClose(tabId: TabId): void;
   onNewTab(profileId?: string): void;
   onSplit(dir: SplitDir): void;
+  /** Splits the current pane with this shell instead of its own. */
+  onSplitWith(profileId: string, dir: SplitDir): void;
   onRename(tabId: TabId, title: string): void;
   /** Right-click menu: the tab's own colour / icon (null clears it). */
   onStyle(tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): void;
@@ -265,17 +267,32 @@ export function TabBar(props: Props) {
         {(close) => (
           <>
             {profiles.map((profile, i) => (
-              <button
-                key={profile.id}
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  props.onNewTab(profile.id);
-                }}
-              >
-                <span>{profile.name}</span>
-                {i < 9 && <kbd>Ctrl+Shift+{i + 1}</kbd>}
-              </button>
+              <div key={profile.id} className="menu-row">
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    close();
+                    props.onNewTab(profile.id);
+                  }}
+                >
+                  <span>{profile.name}</span>
+                  {i < 9 && <kbd>Ctrl+Shift+{i + 1}</kbd>}
+                </button>
+                {(["row", "column"] as const).map((dir) => (
+                  <button
+                    key={dir}
+                    className="tab-close menu-split"
+                    aria-label={`Split ${dir === "row" ? "right" : "down"} with ${profile.name}`}
+                    title={`Split the current pane ${dir === "row" ? "right" : "down"} with ${profile.name}`}
+                    onClick={() => {
+                      close();
+                      props.onSplitWith(profile.id, dir);
+                    }}
+                  >
+                    <SplitIcon dir={dir} />
+                  </button>
+                ))}
+              </div>
             ))}
             <div className="menu-heading">Layouts</div>
             {props.layouts.map((layout) => (

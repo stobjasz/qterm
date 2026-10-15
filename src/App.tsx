@@ -103,6 +103,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
 import { formatClock, formatDuration } from "./terminal/marks";
 import { PortDialog } from "./terminal/PortDialog";
+import { ShellPicker } from "./terminal/ShellPicker";
+import type { PaneBadge } from "./terminal/PaneView";
+import { startFolder } from "./workspace/shellCwd";
+import { TAB_COLOR_VALUES } from "./tabs/TabStyleMenu";
 import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
 import { CommandBlockMenu } from "./terminal/CommandBlockMenu";
@@ -126,6 +130,7 @@ import {
   openTab,
   openTabWith,
   paneIds,
+  replacePane,
   renameTab,
   setTabStyle,
   setPaneBackground,
@@ -255,6 +260,8 @@ export default function App() {
   /** Listening ports, read when the palette opens; the one picked there. */
   const [ports, setPorts] = useState<PortOwner[]>([]);
   const [portDialog, setPortDialog] = useState<PortOwner>();
+  /** Picking a shell: for a split of a pane, or to switch a pane to. */
+  const [shellPicker, setShellPicker] = useState<{ paneId: PaneId; dir?: SplitDir }>();
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -387,18 +394,34 @@ export default function App() {
     [newTab],
   );
 
-  // A split runs the same profile in the same folder as the pane being split, or in
-  // `options.cwd`, typing `options.command` once its shell starts (a project task).
+  /**
+   * Where `to` starts for a pane in `cwd` running `fromProfile`: the same folder, as that
+   * shell writes it. Says so when it can't start there (its home folder then).
+   */
+  const folderFor = useCallback(
+    (cwd: string | undefined, fromProfile: string | undefined, to: Profile) => {
+      const from = profiles?.find((p) => p.id === fromProfile);
+      const start = startFolder(cwd, from, to);
+      if (start.lost) setNotice(`${to.name} can't start in ${cwd}, so it opened in its home folder.`);
+      return start.cwd;
+    },
+    [profiles],
+  );
+
+  // A split runs the same profile (or `options.profileId`) in the same folder as the pane
+  // being split, or in `options.cwd`, typing `options.command` once its shell starts (a
+  // project task).
   const split = useCallback(
-    (paneId: PaneId, dir: SplitDir, options?: { cwd?: string; command?: string }) => {
+    (paneId: PaneId, dir: SplitDir, options?: { cwd?: string; command?: string; profileId?: string }) => {
       const source = workspaceRef.current.panes[paneId];
-      const profile = profiles?.find((p) => p.id === source?.profileId) ?? defaultProfile;
+      const profile = profiles?.find((p) => p.id === (options?.profileId ?? source?.profileId)) ?? defaultProfile;
       if (!profile) return;
       const newPane = nextId("pane");
       if (options?.command) startupInput.current.set(newPane, `${options.command}\r`);
-      setWorkspace((ws) => splitPane(ws, paneId, dir, newPane, profile, options?.cwd ?? source?.cwd));
+      const cwd = options?.cwd ?? folderFor(source?.cwd, source?.profileId, profile);
+      setWorkspace((ws) => splitPane(ws, paneId, dir, newPane, profile, cwd));
     },
-    [profiles, defaultProfile],
+    [profiles, defaultProfile, folderFor],
   );
 
   const closePaneById = useCallback(
@@ -420,13 +443,13 @@ export default function App() {
   );
 
   /** Closing by hand: ask first when a program still runs there (a shell that exits closes as before). */
-  const [confirmClose, setConfirmClose] = useState<{ what: "tab" | "pane"; programs: string[]; close(): void }>();
+  const [confirmClose, setConfirmClose] = useState<{ what: "tab" | "pane"; programs: string[]; verb: "close" | "switch"; close(): void }>();
   const askToClose = useCallback(
-    (what: "tab" | "pane", panes: PaneId[], close: () => void) => {
+    (what: "tab" | "pane", panes: PaneId[], close: () => void, verb: "close" | "switch" = "close") => {
       const sessions = panes.map((id) => registry.sessionOf(id)).filter((s): s is number => s !== undefined);
       void runningPrograms(sessions)
         .catch(() => [] as string[])
-        .then((programs) => (programs.length ? setConfirmClose({ what, programs: programs.map(programName), close }) : close()));
+        .then((programs) => (programs.length ? setConfirmClose({ what, programs: programs.map(programName), verb, close }) : close()));
     },
     [registry],
   );
@@ -436,6 +459,29 @@ export default function App() {
       if (tab) askToClose("tab", paneIds(tab.root), () => closeTab(tabId));
     },
     [askToClose, closeTab],
+  );
+
+  /** Puts `profileId`'s shell where the pane is, in its folder; asks first if a program runs there. */
+  const switchShell = useCallback(
+    (paneId: PaneId, profileId: string) => {
+      const pane = workspaceRef.current.panes[paneId];
+      const profile = profiles?.find((p) => p.id === profileId);
+      if (!pane || !profile) return;
+      askToClose(
+        "pane",
+        [paneId],
+        () => {
+          const cwd = folderFor(pane.cwd, pane.profileId, profile);
+          const newPane = nextId("pane");
+          registry.dispose(paneId);
+          startupInput.current.delete(paneId);
+          setAttention((current) => without(current, paneId));
+          setWorkspace((ws) => replacePane(ws, paneId, newPane, profile, cwd));
+        },
+        "switch",
+      );
+    },
+    [profiles, folderFor, askToClose, registry],
   );
 
   /** Opens a tab in the session's folder and types `claude --resume <id>` there. */
@@ -673,6 +719,12 @@ export default function App() {
           else setNotice("Select some JSON first, or run a command that prints JSON: its output is used.");
           break;
         }
+        case "splitWith":
+          setShellPicker({ paneId, dir: command.dir });
+          break;
+        case "switchShell":
+          setShellPicker({ paneId });
+          break;
         case "toggleSize":
           void toggleConsoleSize().catch((e) => setNotice(`Could not resize the console: ${e}`));
           break;
@@ -1052,6 +1104,26 @@ export default function App() {
         label: profile.name,
         run: () => void newTab(profile.id),
       })),
+      ...(["row", "column"] as const).flatMap((dir) =>
+        (profiles ?? []).map((profile) => ({
+          id: `split-with:${dir}:${profile.id}`,
+          group: dir === "row" ? "Split right with" : "Split down with",
+          label: profile.name,
+          run: () => {
+            const pane = target();
+            if (pane) split(pane, dir, { profileId: profile.id });
+          },
+        })),
+      ),
+      ...(profiles ?? []).map((profile) => ({
+        id: `switch-shell:${profile.id}`,
+        group: "Switch this pane to",
+        label: profile.name,
+        run: () => {
+          const pane = target();
+          if (pane) switchShell(pane, profile.id);
+        },
+      })),
       ...(profiles ?? []).map((profile) => ({
         id: `admin:${profile.id}`,
         group: "New admin tab",
@@ -1186,7 +1258,7 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry, switchShell]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -1526,8 +1598,8 @@ export default function App() {
     return tab ? `${tab.id}|${tab.zoomed ?? ""}|${JSON.stringify(tab.root)}` : "";
   }, [workspace]);
   useEffect(() => {
-    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen && !jsonView && !pasteConfirm && !portDialog) registry.focus(focusedPane);
-  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen, jsonView, pasteConfirm, portDialog]);
+    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen && !jsonView && !pasteConfirm && !portDialog && !shellPicker) registry.focus(focusedPane);
+  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen, jsonView, pasteConfirm, portDialog, shellPicker]);
 
   // Safety net: app shortcuts also work while focus is outside any terminal or field.
   useEffect(() => {
@@ -1578,6 +1650,23 @@ export default function App() {
     [profiles, config?.opacity],
   );
 
+  /** Tabs whose panes run more than one kind of shell: there, each pane names its own. */
+  const mixedTabs = useMemo(
+    () => new Set(workspace.tabs.filter((tab) => new Set(paneIds(tab.root).map((id) => workspace.panes[id]?.profileId)).size > 1).map((tab) => tab.id)),
+    [workspace.tabs, workspace.panes],
+  );
+  const paneBadge = useCallback(
+    (pane: Pane): PaneBadge | undefined => {
+      const profile = profiles?.find((p) => p.id === pane.profileId);
+      return {
+        name: profile?.name ?? pane.profileName,
+        color: profile?.tabColor ? TAB_COLOR_VALUES[profile.tabColor] : undefined,
+        title: `${profile?.name ?? pane.profileName}${pane.cwd ? ` in ${pane.cwd}` : ""}`,
+      };
+    },
+    [profiles],
+  );
+
   const closeSearch = () => {
     if (search) registry.clearSearch(search.pane);
     setSearch(undefined);
@@ -1610,6 +1699,7 @@ export default function App() {
               registry={registry}
               spec={paneSpec}
               background={paneBackground}
+              badge={mixedTabs.has(tab.id) ? paneBadge : undefined}
               onFocusPane={(paneId) => setWorkspace((ws) => focusPane(ws, paneId))}
               onResize={(path, index, delta) => setWorkspace((ws) => resizeDivider(ws, tab.id, path, index, delta))}
             />
@@ -1639,6 +1729,7 @@ export default function App() {
         <ConfirmClose
           what={confirmClose.what}
           programs={confirmClose.programs}
+          verb={confirmClose.verb}
           onClose={() => {
             setConfirmClose(undefined);
             confirmClose.close();
@@ -1679,6 +1770,17 @@ export default function App() {
           />
         );
       })()}
+      {shellPicker && profiles && workspace.panes[shellPicker.paneId] && (
+        <ShellPicker
+          title={shellPicker.dir ? `Split ${shellPicker.dir === "row" ? "right" : "down"} with` : "Switch this pane to"}
+          profiles={profiles}
+          current={workspace.panes[shellPicker.paneId].profileId}
+          onPick={(profile) =>
+            shellPicker.dir ? split(shellPicker.paneId, shellPicker.dir, { profileId: profile.id }) : switchShell(shellPicker.paneId, profile.id)
+          }
+          onClose={() => setShellPicker(undefined)}
+        />
+      )}
       {jsonView && (
         <JsonViewer value={jsonView.value} source={jsonView.source} onCopy={(text) => writeText(text)} onClose={() => setJsonView(undefined)} />
       )}
@@ -1716,6 +1818,8 @@ export default function App() {
           y={paneMenu.y}
           color={workspace.panes[paneMenu.paneId].background}
           onChange={(color) => setWorkspace((ws) => setPaneBackground(ws, paneMenu.paneId, color))}
+          shell={profiles?.find((p) => p.id === workspace.panes[paneMenu.paneId].profileId)?.name ?? workspace.panes[paneMenu.paneId].profileName}
+          onSwitchShell={() => setShellPicker({ paneId: paneMenu.paneId })}
           onClose={() => setPaneMenu(undefined)}
         />
       )}
@@ -1814,6 +1918,7 @@ export default function App() {
         onClose={requestCloseTab}
         onNewTab={(profileId) => newTab(profileId)}
         onSplit={(dir) => focusedPane && split(focusedPane, dir)}
+        onSplitWith={(profileId, dir) => focusedPane && split(focusedPane, dir, { profileId })}
         onRename={(tabId, title) => setWorkspace((ws) => renameTab(ws, tabId, title))}
         onStyle={(tabId, style) => setWorkspace((ws) => setTabStyle(ws, tabId, style))}
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}

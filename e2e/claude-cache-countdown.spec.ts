@@ -25,7 +25,8 @@ test("an idle Claude tab counts down its prompt cache, then says it's cold", asy
     await qterm.waitForPrompt(pane);
     const tab = qterm.page.getByRole("tab").first();
     await qterm.run(pane, startFakeClaude());
-    await expect(tab.getByRole("status", { name: "Claude is idle" })).toBeVisible();
+    // A first start of the copied exe can wait on the virus scanner: more time than usual.
+    await expect(tab.getByRole("status", { name: "Claude is idle" })).toBeVisible({ timeout: 30_000 });
 
     // What Claude Code does after each reply: pipe its figures into the status line command.
     await qterm.run(pane, `Get-Content '${warm}' -Raw | & '${EXE}' --claude-statusline`);

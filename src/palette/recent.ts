@@ -2,7 +2,7 @@
 // long lists you only want when you go looking (they show once you type).
 
 /** Groups shown only when something is typed. */
-export const ON_SEARCH_ONLY = new Set(["New admin tab", "Tab colour", "Theme", "Delete workspace", "Port"]);
+export const ON_SEARCH_ONLY = new Set(["New admin tab", "Tab colour", "Theme", "Delete workspace", "Port", "Split right with", "Split down with", "Switch this pane to"]);
 export const MAX_RECENT = 8;
 const STORAGE_KEY = "qterm.palette.recent";
 

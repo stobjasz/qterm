@@ -133,6 +133,29 @@ export function splitPane(
   };
 }
 
+/**
+ * Puts a new pane (`profile`, in `cwd`) where `paneId` was: switching a pane to another
+ * shell. Its place, size, focus and zoom carry over, and so does a background chosen
+ * for it; what belonged to the old shell (title, Claude session, project) doesn't.
+ */
+export function replacePane(ws: Workspace, paneId: PaneId, newPane: PaneId, profile: ProfileRef, cwd?: string): Workspace {
+  const tab = tabOf(ws, paneId);
+  const old = ws.panes[paneId];
+  if (!tab || !old) return ws;
+  const { [paneId]: _old, ...panes } = ws.panes;
+  const fresh = withPane(panes, newPane, profile, cwd);
+  if (old.background) fresh[newPane] = { ...fresh[newPane], background: old.background };
+  return {
+    ...replaceTab(ws, {
+      ...tab,
+      root: swapLeaves(tab.root, paneId, newPane),
+      focusedPane: tab.focusedPane === paneId ? newPane : tab.focusedPane,
+      ...(tab.zoomed === paneId ? { zoomed: newPane } : {}),
+    }),
+    panes: fresh,
+  };
+}
+
 /** Removes the pane; a tab whose last pane closes goes with it. */
 export function closePane(ws: Workspace, paneId: PaneId): Workspace {
   const index = ws.tabs.findIndex((tab) => paneIds(tab.root).includes(paneId));

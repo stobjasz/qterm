@@ -9,10 +9,12 @@ import {
   emptyWorkspace,
   equalizeActive,
   focusPane,
+  paneIds,
   moveFocus,
   moveTab,
   openTab,
   renameTab,
+  replacePane,
   restoreWorkspace,
   saveWorkspace,
   setPaneCwd,
@@ -405,5 +407,23 @@ describe("a background for one pane", () => {
     expect(setPaneBackground(ws, "right", "red")).toBe(ws);
     const text = saveWorkspace(ws).replace('"profileId":"pwsh"', '"profileId":"pwsh","background":"url(x)"');
     expect(Object.values(restoreWorkspace(text, profiles)!.panes).every((p) => p.background === undefined)).toBe(true);
+  });
+});
+
+describe("switching a pane's shell", () => {
+  it("puts the new shell in the same place, keeps focus, zoom and the chosen background", () => {
+    let ws = splitPane(withTabs(1), "p1", "row", "p2", pwsh);
+    ws = setPaneBackground(ws, "p1", "#14213d");
+    ws = focusPane(ws, "p1");
+    ws = toggleZoom(ws);
+    ws = setPaneTitle(ws, "p1", "old title");
+    const next = replacePane(ws, "p1", "p3", cmd, "C:\work");
+
+    expect(paneIds(next.tabs[0].root)).toEqual(["p3", "p2"]);
+    expect(next.tabs[0].focusedPane).toBe("p3");
+    expect(next.tabs[0].zoomed).toBe("p3");
+    expect(next.panes.p1).toBeUndefined();
+    expect(next.panes.p3).toEqual({ id: "p3", profileId: "cmd", profileName: "Command Prompt", title: "", cwd: "C:\work", background: "#14213d" });
+    expect(replacePane(ws, "nope", "p9", cmd)).toBe(ws);
   });
 });

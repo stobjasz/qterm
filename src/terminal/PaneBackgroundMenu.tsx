@@ -23,11 +23,14 @@ interface Props {
   color?: string;
   /** A colour ("#rrggbb"), or null for the default (its shell's, else the console's). */
   onChange(color: string | null): void;
+  /** The shell the pane runs, and switching it to another. */
+  shell?: string;
+  onSwitchShell?(): void;
   onClose(): void;
 }
 
 /** Shift+right-click on a pane, or "Pane background…": that one pane's background. */
-export function PaneBackgroundMenu({ x, y, color, onChange, onClose }: Props) {
+export function PaneBackgroundMenu({ x, y, color, onChange, shell, onSwitchShell, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const position = useFitInViewport(ref, x, y);
 
@@ -58,6 +61,19 @@ export function PaneBackgroundMenu({ x, y, color, onChange, onClose }: Props) {
         </label>
         <button onClick={() => onChange(null)}>Reset</button>
       </div>
+      {onSwitchShell && (
+        <div className="tab-style-row">
+          <span className="pane-shell-name">{shell}</span>
+          <button
+            onClick={() => {
+              onClose();
+              onSwitchShell();
+            }}
+          >
+            Switch shell…
+          </button>
+        </div>
+      )}
     </div>
   );
 }

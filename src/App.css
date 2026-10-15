@@ -1684,3 +1684,50 @@ body,
 .command-block-when {
   font-variant-numeric: tabular-nums;
 }
+
+/* ▾ menu: split the current pane with this shell. */
+.menu-split {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* A tab whose panes run different shells: each pane names its own. */
+.pane {
+  position: relative;
+}
+
+.pane-shell {
+  position: absolute;
+  top: 2px;
+  right: 10px;
+  z-index: 5;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--theme-bg) 70%, transparent);
+  color: color-mix(in srgb, var(--badge-color, var(--theme-fg)) 75%, transparent);
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+.pane-shell:hover {
+  opacity: 1;
+}
+
+.pane-shell-name {
+  flex: 1;
+  color: var(--tab-fg);
+}
+
+.shell-picker {
+  width: min(360px, 90%);
+}
+
+.shell-picker-title {
+  padding: 8px 12px 4px;
+  color: var(--tab-fg);
+  font-size: 12px;
+}
+
+.shell-picker ul:focus {
+  outline: none;
+}

@@ -5,12 +5,14 @@ interface Props {
   what: "tab" | "pane";
   /** What still runs there, as the user knows it ("Claude Code", "node"). */
   programs: string[];
+  /** Closing it (the default), or switching the pane to another shell. */
+  verb?: "close" | "switch";
   onClose(): void;
   onCancel(): void;
 }
 
 /** Closing a tab or pane where a program still runs: ask first (Cancel has the focus). */
-export function ConfirmClose({ what, programs, onClose, onCancel }: Props) {
+export function ConfirmClose({ what, programs, verb = "close", onClose, onCancel }: Props) {
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   const list = programs.length > 1 ? `${programs.slice(0, -1).join(", ")} and ${programs[programs.length - 1]}` : programs[0];
@@ -19,22 +21,22 @@ export function ConfirmClose({ what, programs, onClose, onCancel }: Props) {
       <div
         className="palette confirm-close"
         role="alertdialog"
-        aria-label={`Close this ${what}?`}
+        aria-label={verb === "switch" ? "Switch this pane's shell?" : `Close this ${what}?`}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Escape") onCancel();
         }}
       >
         <p>
-          <strong>{list}</strong> {programs.length > 1 ? "are" : "is"} still running in this {what}. Closing it ends{" "}
-          {programs.length > 1 ? "them" : "it"}.
+          <strong>{list}</strong> {programs.length > 1 ? "are" : "is"} still running in this {what}.{" "}
+          {verb === "switch" ? "Switching its shell" : "Closing it"} ends {programs.length > 1 ? "them" : "it"}.
         </p>
         <div className="settings-actions">
           <button ref={cancel} onClick={onCancel}>
             Cancel
           </button>
           <button className="primary" onClick={onClose}>
-            Close {what}
+            {verb === "switch" ? "Switch shell" : `Close ${what}`}
           </button>
         </div>
       </div>

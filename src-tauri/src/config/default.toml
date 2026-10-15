@@ -159,6 +159,9 @@ ligatures = false
 #   stop_programs    = ""   (none)
 #   view_json        = ""   (none)
 #   toggle_size      = "f11"
+#   split_right_with = "ctrl+alt+shift+="
+#   split_down_with  = "ctrl+alt+shift+-"
+#   switch_shell     = ""   (none)
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]
 
