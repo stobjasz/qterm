@@ -44,7 +44,7 @@ interface Hook {
       {
         term: {
           options: { fontSize?: number };
-          buffer: { normal: { length: number; getLine(y: number): { translateToString(trim: boolean): string } | undefined } };
+          buffer: { normal: { length: number; getLine(y: number): { isWrapped: boolean; translateToString(trim: boolean): string } | undefined } };
         };
       }
     >;
@@ -160,15 +160,22 @@ export class Qterm {
   }
 
   /**
-   * Everything the pane's terminal shows, scrollback included. The renderer draws
-   * on a canvas, so the text is read from the terminal itself (dev-only hook).
+   * Everything the pane's terminal shows, scrollback included, a line that wrapped at
+   * the pane's edge joined back into one (a narrow pane wraps differently). The renderer
+   * draws on a canvas, so the text is read from the terminal itself (dev-only hook).
    */
   terminalText(paneId: string): Promise<string> {
     return this.page.evaluate((paneId) => {
       const buffer = window.__qterm!.registry.entries.get(paneId)?.term.buffer.normal;
       if (!buffer) return "";
       const lines: string[] = [];
-      for (let y = 0; y < buffer.length; y++) lines.push(buffer.getLine(y)?.translateToString(true) ?? "");
+      for (let y = 0; y < buffer.length; y++) {
+        const line = buffer.getLine(y);
+        // A row that continues on the next keeps its trailing spaces: they're part of the line.
+        const text = line?.translateToString(!buffer.getLine(y + 1)?.isWrapped) ?? "";
+        if (line?.isWrapped && lines.length) lines[lines.length - 1] += text;
+        else lines.push(text);
+      }
       return lines.join("\n");
     }, paneId);
   }
