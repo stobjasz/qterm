@@ -10,9 +10,9 @@ How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
 
 ## Download
 
-**Latest release: [qterm 0.2.4](https://github.com/stobjasz/qterm/releases/tag/v0.2.4)**:
-[installer](https://github.com/stobjasz/qterm/releases/download/v0.2.4/qterm_0.2.4_x64-setup.exe) ·
-[portable exe](https://github.com/stobjasz/qterm/releases/download/v0.2.4/qterm-0.2.4-portable-x64.exe) ·
+**Latest release: [qterm 0.2.5](https://github.com/stobjasz/qterm/releases/tag/v0.2.5)**:
+[installer](https://github.com/stobjasz/qterm/releases/download/v0.2.5/qterm_0.2.5_x64-setup.exe) ·
+[portable exe](https://github.com/stobjasz/qterm/releases/download/v0.2.5/qterm-0.2.5-portable-x64.exe) ·
 [all releases](https://github.com/stobjasz/qterm/releases)
 
 Two ways to run it:
