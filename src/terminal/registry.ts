@@ -48,10 +48,6 @@ const COPY_ON_SELECT_DELAY_MS = 150;
 const CLAUDE_SCAN_DELAY_MS = 300;
 /** Never scan more than this many lines back in one go. */
 const CLAUDE_SCAN_MAX_LINES = 2000;
-/** Startup input for a shell with prompt marks waits for its prompt, but not longer than this... */
-const STARTUP_PROMPT_WAIT_MS = 10_000;
-/** ...and for one without, until its output has been quiet this long. */
-const STARTUP_QUIET_MS = 500;
 /** A shell ringing over and over reports one bell per this interval. */
 const BELL_INTERVAL_MS = 1000;
 
@@ -154,11 +150,6 @@ export interface PaneSpec {
   cwd?: string;
   /** Typed into the shell once it has started, e.g. "claude --resume <id>\r". */
   startupInput?: string;
-  /**
-   * The shell marks its prompt (shell integration): startup input waits for it. Typed
-   * any earlier, it can reach the console before the shell reads input, and be lost.
-   */
-  marksPrompt?: boolean;
   /** The profile's own look, instead of the global theme / font size. */
   theme?: Theme;
   fontSize?: number;
@@ -215,9 +206,6 @@ interface Entry {
   lastBell: number;
   /** Date.now() of the latest output (busy/idle status). */
   lastOutput: number;
-  /** Startup input not typed yet, and the timer that types it if the prompt doesn't come. */
-  startupInput?: string;
-  startupTimer?: number;
   /** Input produced before the shell's session id was known, e.g. the reply to ConPTY's cursor query. */
   earlyInput: string[];
   /** Lines sent to the shell (Enter, pasted lines, startup input) since it started. */
@@ -300,7 +288,7 @@ export class TerminalRegistry {
     if (!entry) return;
     this.entries.delete(paneId);
     this.paneTriggers.delete(paneId);
-    for (const timer of [entry.resizeTimer, entry.ackTimer, entry.copyTimer, entry.scanTimer, entry.startupTimer]) {
+    for (const timer of [entry.resizeTimer, entry.ackTimer, entry.copyTimer, entry.scanTimer]) {
       window.clearTimeout(timer);
     }
     if (entry.sessionId !== undefined) void ptyKill(entry.sessionId);
@@ -741,8 +729,8 @@ export class TerminalRegistry {
     if (entry.started) return;
     entry.started = true;
     const { term } = entry;
-    entry.startupInput = entry.spec.startupInput;
     // Acknowledge only after xterm has parsed the data, so a slow renderer slows the shell.
+    let pendingInput = entry.spec.startupInput;
     const onOutput = (data: Uint8Array) =>
       term.write(data, () => {
         this.processed(entry, data.length);
@@ -751,11 +739,11 @@ export class TerminalRegistry {
           entry.activityReported = true;
           this.events.onActivity(paneId);
         }
-        // Without prompt marks: type the startup input once the shell has gone quiet,
-        // waiting for input (ConPTY's own first output comes before the shell is up).
-        if (entry.startupInput && !entry.spec.marksPrompt) {
-          window.clearTimeout(entry.startupTimer);
-          entry.startupTimer = window.setTimeout(() => this.typeStartupInput(entry), STARTUP_QUIET_MS);
+        // The shell has started talking, so it is up: type the startup input now.
+        if (pendingInput && entry.sessionId !== undefined) {
+          void ptyWrite(entry.sessionId, pendingInput);
+          entry.commands++;
+          pendingInput = undefined;
         }
       });
     // Earlier output first: ConPTY asks where the cursor is and starts the shell there.
@@ -770,24 +758,8 @@ export class TerminalRegistry {
         entry.sessionId = id;
         this.flushAck(entry); // output may have arrived before the id did
         for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
-        // With prompt marks, the first prompt types it (onMark); this is the safety net.
-        // (The prompt may already have come, before the id did.)
-        if (entry.startupInput && entry.spec.marksPrompt) {
-          if (entry.marks.some((m) => m.input)) this.typeStartupInput(entry);
-          else entry.startupTimer = window.setTimeout(() => this.typeStartupInput(entry), STARTUP_PROMPT_WAIT_MS);
-        }
       })
       .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
-  }
-
-  /** Types the pane's startup input (once), now that its shell reads input. */
-  private typeStartupInput(entry: Entry): void {
-    window.clearTimeout(entry.startupTimer);
-    entry.startupTimer = undefined;
-    if (!entry.startupInput || entry.sessionId === undefined) return;
-    void ptyWrite(entry.sessionId, entry.startupInput);
-    entry.commands++;
-    entry.startupInput = undefined;
   }
 
   /** Turns ligatures on or off for an open terminal; the renderer is reloaded after. */
@@ -857,8 +829,6 @@ export class TerminalRegistry {
           last.input = term.registerMarker(0);
           last.inputCol = term.buffer.active.cursorX;
         }
-        // The first prompt waits for typing: the startup input can go now.
-        if (entry.startupInput) this.typeStartupInput(entry);
         return;
       case "C":
         return;
