@@ -496,6 +496,8 @@ export default function App() {
       profileId: pane.profileId,
       cwd: pane.cwd,
       startupInput: startupInput.current.get(pane.id),
+      // These shells mark their prompt with shell integration on (see profiles.rs).
+      marksPrompt: Boolean(configRef.current?.shellIntegration) && ["powershell", "cmd", "bash"].includes(profile?.kind ?? "other"),
       restored: restoredOutput.current.get(pane.id),
       elevated: pane.elevated,
       theme: profile?.theme ? THEMES[profile.theme] : undefined,
