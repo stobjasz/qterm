@@ -23,6 +23,8 @@ pub struct QuakeState {
     show_when_ready: AtomicBool,
     /// Pinned open (the 📌 button): neither clicking elsewhere nor the hotkey hides it.
     pinned: AtomicBool,
+    /// Filling the work area (the size toggle) instead of the configured height and width.
+    full: AtomicBool,
 }
 
 pub fn set_pinned(app: &AppHandle, pinned: bool) {
@@ -32,6 +34,19 @@ pub fn set_pinned(app: &AppHandle, pinned: bool) {
 
 pub fn is_pinned(app: &AppHandle) -> bool {
     app.state::<QuakeState>().pinned.load(Ordering::Acquire)
+}
+
+fn is_full(app: &AppHandle) -> bool {
+    app.state::<QuakeState>().full.load(Ordering::Acquire)
+}
+
+/// The size toggle: the whole work area, or back to the configured size. Kept while
+/// the console is hidden, until toggled back or the bottom edge is dragged. Returns
+/// whether it is full now.
+pub fn toggle_full(app: &AppHandle) -> bool {
+    let full = !app.state::<QuakeState>().full.fetch_xor(true, Ordering::AcqRel);
+    replace(app);
+    full
 }
 
 #[derive(Debug, PartialEq)]
@@ -176,7 +191,7 @@ pub fn replace(app: &AppHandle) {
     if win.is_visible().unwrap_or(false)
         && let Ok(Some(monitor)) = win.current_monitor()
     {
-        place_on(&win, &monitor, &app.state::<ConfigState>().get());
+        place_on(&win, &monitor, &app.state::<ConfigState>().get(), is_full(app));
     }
 }
 
@@ -189,18 +204,21 @@ pub fn resize_height(app: &AppHandle, logical_height: f64) -> Result<f64, String
     let available = f64::from(monitor.work_area().size.height);
     let height = (logical_height * monitor.scale_factor()).clamp(available * MIN_HEIGHT, available);
     let width = win.outer_size().map_err(|e| e.to_string())?.width;
+    // Dragging the edge picks a size of its own.
+    app.state::<QuakeState>().full.store(false, Ordering::Release);
     win.set_size(PhysicalSize::new(width, height.round() as u32)).map_err(|e| e.to_string())?;
     Ok(height / available)
 }
 
 fn place(app: &AppHandle, win: &WebviewWindow, config: &Config) {
     if let Some(monitor) = target_monitor(app, config.monitor) {
-        place_on(win, &monitor, config);
+        place_on(win, &monitor, config, is_full(app));
     }
 }
 
-fn place_on(win: &WebviewWindow, monitor: &Monitor, config: &Config) {
-    let (position, size) = target_rect(monitor, config);
+fn place_on(win: &WebviewWindow, monitor: &Monitor, config: &Config, full: bool) {
+    let area = monitor.work_area();
+    let (position, size) = target_rect(area.position, area.size, config, full);
     // Position first: landing on a monitor with another DPI makes Windows rescale the window.
     let _ = win.set_position(position);
     let _ = win.set_size(size);
@@ -222,13 +240,18 @@ fn hide(app: &AppHandle, win: WebviewWindow) {
     });
 }
 
-/// The top of the monitor's work area, sized by the config and centered.
-fn target_rect(monitor: &Monitor, config: &Config) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
-    let area = monitor.work_area();
-    let width = (f64::from(area.size.width) * config.width).round() as u32;
-    let height = (f64::from(area.size.height) * config.height).round() as u32;
-    let x = area.position.x + ((area.size.width - width) / 2) as i32;
-    (PhysicalPosition::new(x, area.position.y), PhysicalSize::new(width, height))
+/// The top of the work area, sized by the config and centered; all of it when `full`.
+fn target_rect(
+    origin: PhysicalPosition<i32>,
+    area: PhysicalSize<u32>,
+    config: &Config,
+    full: bool,
+) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+    let (width_share, height_share) = if full { (1.0, 1.0) } else { (config.width, config.height) };
+    let width = (f64::from(area.width) * width_share).round() as u32;
+    let height = (f64::from(area.height) * height_share).round() as u32;
+    let x = origin.x + ((area.width - width) / 2) as i32;
+    (PhysicalPosition::new(x, origin.y), PhysicalSize::new(width, height))
 }
 
 fn target_monitor(app: &AppHandle, choice: MonitorChoice) -> Option<Monitor> {
@@ -256,5 +279,14 @@ mod tests {
         assert_eq!(hotkey_action(false, false, true), HotkeyAction::Show);
         assert_eq!(hotkey_action(true, false, true), HotkeyAction::Focus);
         assert_eq!(hotkey_action(true, true, true), HotkeyAction::Focus);
+    }
+
+    #[test]
+    fn full_size_fills_the_work_area_and_back_is_the_configured_size() {
+        let config = Config { height: 0.5, width: 0.6, ..Config::default() };
+        let origin = PhysicalPosition::new(-1920, 40);
+        let area = PhysicalSize::new(1920, 1000);
+        assert_eq!(target_rect(origin, area, &config, false), (PhysicalPosition::new(-1920 + 384, 40), PhysicalSize::new(1152, 500)));
+        assert_eq!(target_rect(origin, area, &config, true), (origin, area));
     }
 }

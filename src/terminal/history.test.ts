@@ -24,6 +24,13 @@ describe("recent commands", () => {
   });
 });
 
+describe("history.json", () => {
+  it("keeps how long a command ran, and drops a malformed duration", () => {
+    const text = JSON.stringify({ commands: [{ command: "npm test", at: 5, durationMs: 3200 }, { command: "ls", at: 4, durationMs: "long" }] });
+    expect(parseHistory(text).commands).toEqual([{ command: "npm test", at: 5, durationMs: 3200 }, { command: "ls", at: 4 }]);
+  });
+});
+
 describe("recent folders", () => {
   it("treats case and a trailing backslash as the same folder", () => {
     let h = rememberFolder(emptyHistory(), "C:\\Work\\app");

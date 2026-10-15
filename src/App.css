@@ -1523,3 +1523,164 @@ body,
 .now-note {
   margin-right: auto;
 }
+
+/* ✳ menu → Waiting for you: Claude's last reply under the pane's message. */
+.claude-waiting-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.claude-waiting-reply {
+  grid-column: 1 / -1;
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+  color: var(--tab-fg);
+  font-size: 11.5px;
+  white-space: pre-line;
+  overflow: hidden;
+  max-height: 4.6em;
+}
+
+/* An idle Claude tab: how long its prompt cache stays warm. */
+.tab-cache {
+  font-size: 10.5px;
+  color: var(--tab-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-cache.cold {
+  color: var(--danger);
+  opacity: 0.8;
+}
+
+/* Pasting several lines: what will be pasted. */
+.paste-preview {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 12em;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--field-bg);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+}
+
+/* The JSON viewer. */
+.json-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.json-tree,
+.json-tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.json-tree ul {
+  margin-left: 9px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.json-tree {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.json-row:hover {
+  background: var(--hover-bg);
+}
+
+.json-toggle {
+  flex: none;
+  width: 14px;
+  color: var(--tab-fg);
+}
+
+.json-key {
+  color: var(--console-edge);
+}
+
+.json-key::after,
+.json-index::after {
+  content: ":";
+  color: var(--tab-fg);
+}
+
+.json-index {
+  color: var(--tab-fg);
+}
+
+.json-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.json-string {
+  color: #98c379;
+}
+
+.json-number,
+.json-boolean {
+  color: #d19a66;
+}
+
+.json-null,
+.json-object,
+.json-array {
+  color: var(--tab-fg);
+}
+
+.json-copy {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 3px;
+  color: var(--tab-fg);
+  font-family: inherit;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.json-row:hover .json-copy,
+.json-copy:focus-visible {
+  opacity: 1;
+}
+
+.json-copy:hover {
+  background: var(--hover-bg);
+  color: var(--theme-fg);
+}
+
+/* A dev server in the tab: its Open button. */
+.tab-dev {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--tab-fg);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-dev:hover {
+  border-color: var(--console-edge);
+  color: var(--theme-fg);
+}
+
+/* A command's menu: when it ran and how long it took. */
+.command-block-when {
+  font-variant-numeric: tabular-nums;
+}

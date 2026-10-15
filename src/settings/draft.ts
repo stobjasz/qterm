@@ -27,6 +27,7 @@ export interface Draft {
   sshProfiles: boolean;
   checkUpdates: boolean;
   explorerMenu: boolean;
+  pasteWarning: boolean;
   fontFamily: string;
   fontSize: number;
   fontLigatures: boolean;
@@ -63,6 +64,7 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   sshProfiles: "ssh_profiles",
   checkUpdates: "check_updates",
   explorerMenu: "explorer_menu",
+  pasteWarning: "paste_warning",
   fontFamily: "font.family",
   fontSize: "font.size",
   fontLigatures: "font.ligatures",
@@ -95,6 +97,7 @@ export function toDraft(config: Config): Draft {
     sshProfiles: config.sshProfiles,
     checkUpdates: config.checkUpdates,
     explorerMenu: config.explorerMenu,
+    pasteWarning: config.pasteWarning,
     fontFamily: config.font.family,
     fontSize: config.font.size,
     fontLigatures: config.font.ligatures,

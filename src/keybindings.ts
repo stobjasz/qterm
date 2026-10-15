@@ -29,7 +29,10 @@ export type Command =
   | { type: "openOutput" }
   | { type: "quickSelect" }
   | { type: "togglePin" }
-  | { type: "showHelp" };
+  | { type: "showHelp" }
+  | { type: "stopPrograms" }
+  | { type: "viewJson" }
+  | { type: "toggleSize" };
 
 const ACTIONS = {
   new_tab: { command: { type: "newTab" }, chord: "ctrl+shift+t" },
@@ -73,6 +76,10 @@ const ACTIONS = {
   quick_select: { command: { type: "quickSelect" }, chord: "alt+shift+s" },
   toggle_pin: { command: { type: "togglePin" }, chord: "" },
   show_help: { command: { type: "showHelp" }, chord: "ctrl+shift+/" },
+  stop_programs: { command: { type: "stopPrograms" }, chord: "" },
+  view_json: { command: { type: "viewJson" }, chord: "" },
+  // Like Windows Terminal's full screen key.
+  toggle_size: { command: { type: "toggleSize" }, chord: "f11" },
 } satisfies Record<string, { command: Command; chord: string }>;
 
 type Action = keyof typeof ACTIONS;
@@ -116,6 +123,9 @@ const LABELS: Record<Action, string> = {
   quick_select: "Quick select (copy or open what's on screen)",
   toggle_pin: "Pin the console open / unpin",
   show_help: "Shortcuts and tips",
+  stop_programs: "Stop what runs in this pane (keeps the shell)",
+  view_json: "View the selection or last output as JSON",
+  toggle_size: "Full size console / back",
 };
 
 /** Every rebindable action with its config name, label, command and default chord. */

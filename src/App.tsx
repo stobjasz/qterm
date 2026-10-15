@@ -34,6 +34,16 @@ import {
   setPinned as setPinnedInRust,
   runningPrograms,
   onClaudeStatusline,
+  onClaudeReply,
+  type ClaudeReply,
+  stopPrograms,
+  projectInfo,
+  type ProjectInfo,
+  clipboardImageFile,
+  toggleConsoleSize,
+  listeningPorts,
+  endPortOwner,
+  type PortOwner,
   showPlanWarning,
   setPlanSummary,
   type StatuslineUsage,
@@ -72,6 +82,12 @@ import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
 import { dropText } from "./terminal/drop";
+import { isMultiLine } from "./terminal/paste";
+import { ConfirmPaste } from "./terminal/ConfirmPaste";
+import { findJson, type Json } from "./terminal/json";
+import { JsonViewer } from "./terminal/JsonViewer";
+import type { CacheState } from "./claude/cache";
+import { gitSummary, projectLook } from "./project/project";
 import { resumeHereCommand } from "./claude/resume";
 import { isClaudeAlert, nextWaiting } from "./claude/waiting";
 import { crossedWarning, formatReset, mergeUsage, planSummary, type PlanUsage } from "./claude/plan";
@@ -85,7 +101,8 @@ import { HelpSheet, hotkeyLabel } from "./help/HelpSheet";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { emptyHistory, parseHistory, rememberCommand, rememberFolder, type History } from "./terminal/history";
-import { formatDuration } from "./terminal/marks";
+import { formatClock, formatDuration } from "./terminal/marks";
+import { PortDialog } from "./terminal/PortDialog";
 import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
 import { CommandBlockMenu } from "./terminal/CommandBlockMenu";
@@ -118,6 +135,7 @@ import {
   restoreWorkspace,
   saveWorkspace,
   setPaneCwd,
+  setPaneProject,
   setPaneTitle,
   splitPane,
   tabTitle,
@@ -142,6 +160,12 @@ const SAVE_DELAY_MS = 400;
 const SCROLLBACK_SAVE_MS = 30_000;
 /** How often to look for Claude Code in the panes, and how recent output means "working". */
 const CLAUDE_POLL_MS = 2000;
+/** While a tab shows a dev server's Open button, how often to check its port is still listened on... */
+const DEV_LINK_POLL_MS = 3000;
+/** ...and how long after it was printed a port not listened on yet is fine (some servers print first). */
+const DEV_LINK_GRACE_MS = 15_000;
+/** Open buttons kept per pane (the latest addresses). */
+const MAX_DEV_LINKS = 3;
 /** How long a notice stays over the tab bar. */
 const NOTICE_MS = 10_000;
 /** Transcripts are read incrementally, so this is cheap. */
@@ -217,6 +241,20 @@ export default function App() {
   const [claudeUsages, setClaudeUsages] = useState<ReadonlyMap<PaneId, ClaudeUsage>>(new Map());
   /** Which Claude session each pane runs, from the SessionStart hook. */
   const paneSessions = useRef(new Map<PaneId, PaneClaudeSession>());
+  /** What Claude said last in each pane (its Stop hook), and its prompt cache (status line). */
+  const [replies, setReplies] = useState<ReadonlyMap<PaneId, string>>(new Map());
+  const [caches, setCaches] = useState<ReadonlyMap<PaneId, CacheState>>(new Map());
+  /** The project each pane's folder is in: git status, scripts, .qterm.toml. */
+  const [projects, setProjects] = useState<ReadonlyMap<PaneId, ProjectInfo>>(new Map());
+  /** A paste of several lines waiting for a yes. */
+  const [pasteConfirm, setPasteConfirm] = useState<{ paneId: PaneId; text: string }>();
+  /** The JSON viewer: the value, and where it came from. */
+  const [jsonView, setJsonView] = useState<{ value: Json; source: string }>();
+  /** Dev server addresses each pane printed, while their servers listen. */
+  const [devLinks, setDevLinks] = useState<ReadonlyMap<PaneId, readonly DevLink[]>>(new Map());
+  /** Listening ports, read when the palette opens; the one picked there. */
+  const [ports, setPorts] = useState<PortOwner[]>([]);
+  const [portDialog, setPortDialog] = useState<PortOwner>();
   const config = settings?.config;
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -242,6 +280,8 @@ export default function App() {
         onPaneMenu: (...args) => handlers.current.onPaneMenu(...args),
         onCommandBlock: (...args) => handlers.current.onCommandBlock(...args),
         onTrigger: (...args) => handlers.current.onTrigger(...args),
+        onPaste: (...args) => handlers.current.onPaste(...args),
+        onDevServer: (...args) => handlers.current.onDevServer(...args),
       }),
   );
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
@@ -266,6 +306,22 @@ export default function App() {
     });
   }, [registry, config]);
 
+  // Triggers of each pane's project (.qterm.toml), and what's wrong with any project's settings.
+  const projectTriggers = useMemo(
+    () => new Map([...projects].map(([paneId, info]) => [paneId, compileTriggers(info.settings?.triggers ?? [])] as const)),
+    [projects],
+  );
+  const projectProblems = useMemo(
+    () => [
+      ...[...projects.values()].flatMap((info) => (info.settingsError ? [info.settingsError] : [])),
+      ...[...projects].flatMap(([paneId, info]) => (projectTriggers.get(paneId)?.errors ?? []).map((e) => `${info.settings?.path}: ${e}`)),
+    ],
+    [projects, projectTriggers],
+  );
+  useEffect(() => {
+    for (const paneId of Object.keys(workspaceRef.current.panes)) registry.setPaneTriggers(paneId, projectTriggers.get(paneId)?.triggers ?? []);
+  }, [registry, projectTriggers]);
+
   const defaultProfile = profiles?.find((p) => p.id === config?.defaultProfile) ?? profiles?.[0];
   const errors = [
     settings?.error,
@@ -279,7 +335,8 @@ export default function App() {
       .filter((p) => p.theme && !THEMES[p.theme])
       .map((p) => `profile "${p.name}": theme = "${p.theme}" is not one of: ${Object.keys(THEMES).join(", ")}`),
     ...(config && profiles ? layoutProblems(config.layouts, profiles) : []),
-  ].filter((e): e is string => Boolean(e));
+    ...projectProblems,
+  ].filter((e, i, all): e is string => Boolean(e) && all.indexOf(e) === i);
 
   // --- workspace actions -------------------------------------------------------
   const newTab = useCallback(
@@ -330,13 +387,16 @@ export default function App() {
     [newTab],
   );
 
-  // A split runs the same profile in the same folder as the pane being split.
+  // A split runs the same profile in the same folder as the pane being split, or in
+  // `options.cwd`, typing `options.command` once its shell starts (a project task).
   const split = useCallback(
-    (paneId: PaneId, dir: SplitDir) => {
+    (paneId: PaneId, dir: SplitDir, options?: { cwd?: string; command?: string }) => {
       const source = workspaceRef.current.panes[paneId];
       const profile = profiles?.find((p) => p.id === source?.profileId) ?? defaultProfile;
       if (!profile) return;
-      setWorkspace((ws) => splitPane(ws, paneId, dir, nextId("pane"), profile, source?.cwd));
+      const newPane = nextId("pane");
+      if (options?.command) startupInput.current.set(newPane, `${options.command}\r`);
+      setWorkspace((ws) => splitPane(ws, paneId, dir, newPane, profile, options?.cwd ?? source?.cwd));
     },
     [profiles, defaultProfile],
   );
@@ -467,6 +527,7 @@ export default function App() {
   }, [config]);
 
   const focusedPane = activeTab(workspace)?.focusedPane;
+  const focusedProject = focusedPane ? projects.get(focusedPane) : undefined;
 
   handlers.current = {
     onCommand(paneId: PaneId, command: Command) {
@@ -593,6 +654,28 @@ export default function App() {
           else setNotice("Claude isn't waiting for you in any pane.");
           break;
         }
+        case "stopPrograms": {
+          const session = registry.sessionOf(paneId);
+          if (session === undefined) break;
+          void stopPrograms(session)
+            .then((ended) =>
+              setNotice(ended.length ? `Stopped ${ended.map(programName).join(", ")}; the shell is still there.` : "Nothing runs in this pane but its shell."),
+            )
+            .catch((e) => setNotice(`Could not stop it: ${e}`));
+          break;
+        }
+        case "viewJson": {
+          const selected = registry.selection(paneId);
+          const text = selected || registry.lastCommandOutput(paneId);
+          const value = text ? findJson(text) : undefined;
+          if (value !== undefined) setJsonView({ value, source: selected ? "the selection" : "the last command's output" });
+          else if (selected) setNotice("There's no JSON in the selection.");
+          else setNotice("Select some JSON first, or run a command that prints JSON: its output is used.");
+          break;
+        }
+        case "toggleSize":
+          void toggleConsoleSize().catch((e) => setNotice(`Could not resize the console: ${e}`));
+          break;
         case "paneBackground": {
           // From the keyboard or the palette: open it over the middle of the pane.
           const box = document.querySelector(`[data-pane-id="${paneId}"]`)?.getBoundingClientRect();
@@ -627,9 +710,28 @@ export default function App() {
         { paneId, title: trigger.label, message: line.length > 200 ? `${line.slice(0, 199)}…` : line, kind: "trigger", sessionId: null },
         trigger.action === "notify",
       ),
+    onPaste: (paneId, text) => {
+      // No text: maybe an image (a screenshot), typed as the path of a file holding it.
+      if (!text) return void pasteImage(paneId);
+      // Several lines would run one by one in a shell; Claude Code and full-screen programs take them as input.
+      const ask = configRef.current?.pasteWarning !== false && isMultiLine(text) && !claudeStatusRef.current.has(paneId) && !registry.fullScreen(paneId);
+      if (ask) setPasteConfirm({ paneId, text });
+      else registry.pasteText(paneId, text);
+    },
+    onDevServer: (paneId, url, port) =>
+      setDevLinks((current) => {
+        const kept = (current.get(paneId) ?? []).filter((link) => link.port !== port && link.url !== url);
+        return new Map(current).set(paneId, [...kept, { url, port, at: Date.now() }].slice(-MAX_DEV_LINKS));
+      }),
     onCommandFinished: (paneId, finished) => {
+      // A command may have changed the repository, or the project's settings.
+      refreshProject.current(paneId);
+      // A server it ran has stopped: check its port now rather than at the next poll.
+      if (devLinksRef.current.size) void checkDevLinks.current(paneId);
       const cwd = workspaceRef.current.panes[paneId]?.cwd;
-      setHistory((h) => rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now() }));
+      setHistory((h) =>
+        rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now(), durationMs: finished.durationMs }),
+      );
       const seconds = configRef.current?.longCommandAlert ?? 0;
       if (!seconds || finished.durationMs < seconds * 1000) return;
       const failed = finished.exitCode !== undefined && finished.exitCode !== 0;
@@ -642,6 +744,107 @@ export default function App() {
       });
     },
   };
+
+  /** The image on the clipboard, saved as a file, its path typed as the pane's shell writes paths. */
+  function pasteImage(paneId: PaneId) {
+    void clipboardImageFile()
+      .then((file) => {
+        if (!file) return;
+        const kind = profilesRef.current?.find((p) => p.id === workspaceRef.current.panes[paneId]?.profileId)?.kind ?? "other";
+        registry.pasteText(paneId, dropText([file], kind));
+      })
+      .catch((e) => setNotice(`Could not paste the image: ${e}`));
+  }
+
+  // --- dev servers: an Open button while their port is listened on ---------------------
+  const devLinksRef = useRef(devLinks);
+  devLinksRef.current = devLinks;
+  /**
+   * Drops the links whose port nobody listens on any more. A port not listened on yet is
+   * fine for a moment after its address was printed, unless the command in that pane has
+   * ended (`endedIn`): then nothing will start listening there.
+   */
+  const checkDevLinks = useRef<(endedIn?: PaneId) => Promise<void>>(null!);
+  checkDevLinks.current = async (endedIn) => {
+    const owners = await listeningPorts().catch(() => undefined);
+    if (!owners) return;
+    const listened = new Set(owners.map((o) => o.port));
+    const now = Date.now();
+    const alive = (paneId: PaneId, link: DevLink) => listened.has(link.port) || (paneId !== endedIn && now - link.at < DEV_LINK_GRACE_MS);
+    setDevLinks((current) => {
+      if ([...current].every(([paneId, links]) => links.every((link) => alive(paneId, link)))) return current;
+      const next = new Map<PaneId, readonly DevLink[]>();
+      for (const [paneId, links] of current) {
+        const kept = links.filter((link) => alive(paneId, link));
+        if (kept.length) next.set(paneId, kept);
+      }
+      return next;
+    });
+  };
+  const hasDevLinks = devLinks.size > 0;
+  useEffect(() => {
+    if (!hasDevLinks) return;
+    const timer = window.setInterval(() => void checkDevLinks.current(), DEV_LINK_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [hasDevLinks]);
+  // The palette lists the ports in use as they are now.
+  useEffect(() => {
+    if (paletteOpen) void listeningPorts().then(setPorts, () => setPorts([]));
+  }, [paletteOpen]);
+  /** "Who uses this port?" → End: the process and what it started. */
+  const endPort = useCallback((owner: PortOwner) => {
+    void endPortOwner(owner.port, owner.pid)
+      .then((ended) => setNotice(`Ended ${ended.map(programName).join(", ")}; port ${owner.port} is free.`))
+      .catch((e) => setNotice(`Could not end it: ${e}`))
+      .finally(() => void checkDevLinks.current());
+  }, []);
+
+  // --- projects: each pane's git status, scripts and .qterm.toml ----------------------------
+  /** Per pane: a read in flight, and whether another is wanted when it's back (the folder changed meanwhile). */
+  const projectReads = useRef(new Map<PaneId, { again: boolean }>());
+  /** Reads the pane's project again (after a cd, a command, a Claude turn). */
+  const refreshProject = useRef<(paneId: PaneId) => void>(null!);
+  refreshProject.current = (paneId) => {
+    const pending = projectReads.current.get(paneId);
+    if (pending) {
+      pending.again = true;
+      return;
+    }
+    const cwd = workspaceRef.current.panes[paneId]?.cwd;
+    if (!cwd) return setProjects((current) => without(current, paneId));
+    const read = { again: false };
+    projectReads.current.set(paneId, read);
+    void projectInfo(cwd)
+      .catch(() => undefined)
+      .then((info) => {
+        projectReads.current.delete(paneId);
+        if (!workspaceRef.current.panes[paneId]) return;
+        setProjects((current) => (info ? new Map(current).set(paneId, info) : without(current, paneId)));
+        if (read.again) refreshProject.current(paneId);
+      });
+  };
+  // A new pane, or one whose folder changed: read its project. Closed panes are forgotten.
+  const projectCwds = useRef(new Map<PaneId, string | undefined>());
+  useEffect(() => {
+    for (const pane of Object.values(workspace.panes)) {
+      if (projectCwds.current.has(pane.id) && projectCwds.current.get(pane.id) === pane.cwd) continue;
+      projectCwds.current.set(pane.id, pane.cwd);
+      refreshProject.current(pane.id);
+    }
+    for (const paneId of [...projectCwds.current.keys()]) if (!workspace.panes[paneId]) projectCwds.current.delete(paneId);
+    const gone = (map: ReadonlyMap<PaneId, unknown>) => [...map.keys()].some((id) => !workspace.panes[id]);
+    setProjects((current) => (gone(current) ? new Map([...current].filter(([id]) => workspace.panes[id])) : current));
+    setDevLinks((current) => (gone(current) ? new Map([...current].filter(([id]) => workspace.panes[id])) : current));
+  }, [workspace.panes]);
+  // The project's name, colour and icon go on its panes' tabs.
+  useEffect(() => {
+    setWorkspace((ws) => Object.keys(ws.panes).reduce((next, paneId) => setPaneProject(next, paneId, projectLook(projects.get(paneId))), ws));
+  }, [projects]);
+  // The palette lists the focused pane's scripts as they are now.
+  useEffect(() => {
+    const paneId = activeTab(workspaceRef.current)?.focusedPane;
+    if (paletteOpen && paneId) refreshProject.current(paneId);
+  }, [paletteOpen]);
 
   // --- background activity, broadcast ----------------------------------------------
   const activeTabPanes = useMemo(() => {
@@ -712,6 +915,10 @@ export default function App() {
   const onStatusline = useRef<(line: StatuslineUsage) => void>(null!);
   onStatusline.current = (line) => {
     statuslines.current.set(line.paneId, line);
+    if (line.cache) {
+      const cache = line.cache;
+      setCaches((current) => new Map(current).set(line.paneId, cache));
+    }
     setClaudeUsages((current) => {
       const merged = mergeUsage(current.get(line.paneId), line);
       return merged ? new Map(current).set(line.paneId, merged) : current;
@@ -735,6 +942,15 @@ export default function App() {
       setNotice(message);
       void showPlanWarning(`Claude plan: ${name} limit at ${level}%`, message).catch(() => {});
     }
+  };
+
+  // --- Claude's last reply (Stop hook) --------------------------------------------------
+  const onReply = useRef<(reply: ClaudeReply) => void>(null!);
+  onReply.current = (reply) => {
+    if (!workspaceRef.current.panes[reply.paneId]) return;
+    setReplies((current) => new Map(current).set(reply.paneId, reply.message));
+    // Claude may have changed the repository during the turn.
+    refreshProject.current(reply.paneId);
   };
 
   // --- quick select: keys pick a label while the labels show ------------------------
@@ -824,7 +1040,10 @@ export default function App() {
         id: `tab:${tab.id}`,
         group: "Tab",
         label: tabTitle(workspace, tab),
-        hint: i < 9 ? `Ctrl+Alt+${i + 1}` : undefined,
+        hint:
+          [projects.get(tab.focusedPane)?.git && `⎇ ${gitSummary(projects.get(tab.focusedPane)!.git!)}`, i < 9 && `Ctrl+Alt+${i + 1}`]
+            .filter(Boolean)
+            .join(" · ") || undefined,
         run: () => setWorkspace((ws) => activateTab(ws, tab.id)),
       })),
       ...(profiles ?? []).map((profile) => ({
@@ -869,6 +1088,46 @@ export default function App() {
           if (pane) registry.typeSnippet(pane, snippet.command, snippet.run);
         },
       })),
+      ...(focusedProject?.settings?.snippets ?? []).map((snippet, i) => ({
+        id: `project-snippet:${i}`,
+        group: "Snippet",
+        label: snippet.name,
+        hint: `project · ${snippet.command.length > 40 ? `${snippet.command.slice(0, 39)}…` : snippet.command}`,
+        run: () => {
+          const pane = target();
+          if (pane) registry.typeSnippet(pane, snippet.command, snippet.run);
+        },
+      })),
+      ...(focusedProject?.tasks?.tasks ?? []).map((task) => ({
+        id: `task:${task.source}:${task.name}`,
+        group: "Project task",
+        label: task.name,
+        hint: `${task.command} · ${task.source}`,
+        // In a new pane beside this one, in the folder the manifest is in.
+        run: () => {
+          const pane = target();
+          if (pane) split(pane, "row", { cwd: focusedProject!.tasks!.dir, command: task.command });
+        },
+      })),
+      ...[...devLinks].flatMap(([paneId, links]) =>
+        links.map((link) => ({
+          id: `dev-server:${paneId}:${link.port}`,
+          group: "Dev server",
+          label: `Open ${link.url}`,
+          hint: paneLabel(paneId),
+          run: () => void openUrl(link.url).catch((e) => setNotice(`Could not open it: ${e}`)),
+        })),
+      ),
+      ...ports.map((owner) => {
+        const paneId = owner.sessionId === null ? undefined : Object.keys(workspace.panes).find((id) => registry.sessionOf(id) === owner.sessionId);
+        return {
+          id: `port:${owner.port}:${owner.pid}`,
+          group: "Port",
+          label: `${owner.port} ${owner.process ? programName(owner.process) : `process ${owner.pid}`}`,
+          hint: paneId ? paneLabel(paneId) : `pid ${owner.pid}`,
+          run: () => setPortDialog(owner),
+        };
+      }),
       ...(config?.claudeSessions ? claudeSessions : []).flatMap((session) => {
         const label = `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`;
         return [
@@ -887,7 +1146,15 @@ export default function App() {
         id: `recent-command:${i}`,
         group: "Recent command",
         label: recent.command,
-        hint: [recent.exitCode !== undefined && recent.exitCode !== 0 ? `✗ ${recent.exitCode}` : "", recent.cwd ?? ""].filter(Boolean).join(" · ") || undefined,
+        hint:
+          [
+            recent.exitCode !== undefined && recent.exitCode !== 0 ? `✗ ${recent.exitCode}` : "",
+            formatClock(recent.at, Date.now()),
+            recent.durationMs !== undefined ? formatDuration(recent.durationMs) : "",
+            recent.cwd ?? "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined,
         // Typed at the prompt, not run: Enter is yours to press.
         run: () => {
           const pane = target();
@@ -919,7 +1186,7 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces]);
+  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -945,6 +1212,14 @@ export default function App() {
     const timer = window.setInterval(() => void poll(), CLAUDE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [claudeFeatures, registry]);
+
+  // A pane's last reply and cache countdown go when Claude Code isn't running there any more.
+  useEffect(() => {
+    const keep = <V,>(current: ReadonlyMap<PaneId, V>) =>
+      [...current.keys()].every((id) => claudeStatus.has(id)) ? current : new Map([...current].filter(([id]) => claudeStatus.has(id)));
+    setReplies(keep);
+    setCaches(keep);
+  }, [claudeStatus]);
 
   // Token use of the Claude sessions running in panes, re-read every few seconds.
   useEffect(() => {
@@ -978,6 +1253,7 @@ export default function App() {
           const statuses = ids.map((id) => claudeStatus.get(id));
           // The focused pane's session if it runs one, else the tab's first.
           const usage = claudeUsages.get(tab.focusedPane) ?? ids.map((id) => claudeUsages.get(id)).find(Boolean);
+          const claudePane = claudeStatus.has(tab.focusedPane) ? tab.focusedPane : ids.find((id) => claudeStatus.has(id));
           return [
             tab.id,
             {
@@ -987,11 +1263,15 @@ export default function App() {
               broadcast: Boolean(tab.broadcast),
               claude: statuses.includes("busy") ? ("busy" as const) : statuses.includes("idle") ? ("idle" as const) : undefined,
               claudeUsage: usage,
+              claudeReply: claudePane ? replies.get(claudePane) : undefined,
+              claudeCache: claudePane ? caches.get(claudePane) : undefined,
+              git: projects.get(tab.focusedPane)?.git ?? undefined,
+              devLinks: [...new Set(ids.flatMap((id) => (devLinks.get(id) ?? []).map((link) => link.url)))],
             },
           ] as const;
         }),
       ),
-    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages],
+    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages, replies, caches, projects, devLinks],
   );
   /** Pane → Claude session running in it, saved with the tabs (see claude_restore). */
   const claudeByPane = useMemo(
@@ -1005,9 +1285,9 @@ export default function App() {
         .flatMap((tab) => paneIds(tab.root))
         .flatMap((paneId) => {
           const alert = attention.get(paneId);
-          return alert && isClaudeAlert(alert.kind) ? [{ paneId, label: paneLabel(paneId), message: alert.message }] : [];
+          return alert && isClaudeAlert(alert.kind) ? [{ paneId, label: paneLabel(paneId), message: alert.message, reply: replies.get(paneId) }] : [];
         }),
-    [workspace.tabs, attention, paneLabel],
+    [workspace.tabs, attention, paneLabel, replies],
   );
   /** Claude sessions running now, for the ✳ menu. */
   const runningClaude = useMemo(
@@ -1050,6 +1330,7 @@ export default function App() {
       onClaudeAttention((alert) => onAlert.current(alert)),
       onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
       onClaudeStatusline((line) => onStatusline.current(line)),
+      onClaudeReply((reply) => onReply.current(reply)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
       onOpenHere((dir) => newTabRef.current(undefined, dir)),
       onQuakeVisibility(({ visible, slideMs }) => {
@@ -1245,8 +1526,8 @@ export default function App() {
     return tab ? `${tab.id}|${tab.zoomed ?? ""}|${JSON.stringify(tab.root)}` : "";
   }, [workspace]);
   useEffect(() => {
-    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen) registry.focus(focusedPane);
-  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen]);
+    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen && !jsonView && !pasteConfirm && !portDialog) registry.focus(focusedPane);
+  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen, jsonView, pasteConfirm, portDialog]);
 
   // Safety net: app shortcuts also work while focus is outside any terminal or field.
   useEffect(() => {
@@ -1365,6 +1646,42 @@ export default function App() {
           onCancel={() => setConfirmClose(undefined)}
         />
       )}
+      {pasteConfirm && (
+        <ConfirmPaste
+          text={pasteConfirm.text}
+          onPaste={() => {
+            setPasteConfirm(undefined);
+            registry.pasteText(pasteConfirm.paneId, pasteConfirm.text);
+          }}
+          onCancel={() => setPasteConfirm(undefined)}
+        />
+      )}
+      {portDialog && (() => {
+        const owner = portDialog;
+        const paneId = owner.sessionId === null ? undefined : Object.keys(workspace.panes).find((id) => registry.sessionOf(id) === owner.sessionId);
+        return (
+          <PortDialog
+            owner={owner}
+            paneLabel={paneId ? paneLabel(paneId) : undefined}
+            onGoToPane={
+              paneId
+                ? () => {
+                    setPortDialog(undefined);
+                    setWorkspace((ws) => focusPane(ws, paneId));
+                  }
+                : undefined
+            }
+            onEnd={() => {
+              setPortDialog(undefined);
+              endPort(owner);
+            }}
+            onCancel={() => setPortDialog(undefined)}
+          />
+        );
+      })()}
+      {jsonView && (
+        <JsonViewer value={jsonView.value} source={jsonView.source} onCopy={(text) => writeText(text)} onClose={() => setJsonView(undefined)} />
+      )}
       {blockMenu && workspace.panes[blockMenu.paneId] && (
         <CommandBlockMenu
           block={blockMenu.block}
@@ -1383,6 +1700,11 @@ export default function App() {
           onRunAgain={() => {
             registry.focus(blockMenu.paneId);
             registry.typeSnippet(blockMenu.paneId, blockMenu.block.command, true);
+          }}
+          onViewJson={() => {
+            const value = findJson(registry.blockOutput(blockMenu.paneId, blockMenu.block.id));
+            if (value === undefined) setNotice("That command's output isn't JSON.");
+            else setJsonView({ value, source: blockMenu.block.command });
           }}
           onClose={() => setBlockMenu(undefined)}
         />
@@ -1496,6 +1818,7 @@ export default function App() {
         onStyle={(tabId, style) => setWorkspace((ws) => setTabStyle(ws, tabId, style))}
         onMove={(tabId, toIndex) => setWorkspace((ws) => moveTab(ws, tabId, toIndex))}
         onOpenSettings={() => setSettingsOpen((open) => !open)}
+        onOpenLink={(url) => void openUrl(url).catch((e) => setNotice(`Could not open it: ${e}`))}
         pinned={pinned}
         onTogglePin={togglePin}
         onHelp={() => setHelpOpen((open) => !open)}
@@ -1509,6 +1832,13 @@ export default function App() {
       <HeightHandle />
     </div>
   );
+}
+
+/** A dev server's address, printed in a pane at `at`. */
+interface DevLink {
+  url: string;
+  port: number;
+  at: number;
 }
 
 /** How many tabs a saved workspace holds (for the palette). */

@@ -1,8 +1,12 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 
+import { CacheCountdown } from "../claude/CacheCountdown";
+import type { CacheState } from "../claude/cache";
 import { ClaudeMenu, type ClaudeMenuProps } from "../claude/ClaudeMenu";
+import { replyPreview } from "../claude/reply";
 import { contextPercent, usageSummary } from "../claude/usage";
-import type { ClaudeAlert, ClaudeUsage, Profile } from "../ipc";
+import type { ClaudeAlert, ClaudeUsage, GitStatus, Profile } from "../ipc";
+import { gitSummary } from "../project/project";
 import type { LayoutDef } from "../workspace/layouts";
 import { tabTitle, type SplitDir, type TabColor, type TabId, type Workspace } from "../workspace/workspace";
 import { TAB_COLOR_VALUES, TabStyleMenu } from "./TabStyleMenu";
@@ -25,6 +29,8 @@ interface Props {
   onStyle(tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): void;
   onMove(tabId: TabId, toIndex: number): void;
   onOpenSettings(): void;
+  /** A dev server's Open button: the address in the browser. */
+  onOpenLink(url: string): void;
   /** Pinned open: clicking elsewhere and the hotkey don't hide the console. */
   pinned: boolean;
   onHelp(): void;
@@ -50,6 +56,14 @@ export interface TabMarkers {
   claudeUsage?: ClaudeUsage;
   /** A pane runs as administrator. */
   admin?: boolean;
+  /** What Claude said last (its Stop hook). */
+  claudeReply?: string;
+  /** Its prompt cache (status line), counted down while Claude is idle. */
+  claudeCache?: CacheState;
+  /** The focused pane's repository. */
+  git?: GitStatus;
+  /** Addresses dev servers in the tab's panes listen on. */
+  devLinks?: readonly string[];
 }
 
 // Mouse-down default is prevented (except in text fields) so clicking the bar never
@@ -100,10 +114,20 @@ export function TabBar(props: Props) {
           const waiting = props.attention.get(tab.id);
           const marks = props.markers.get(tab.id);
           const drop = dropIndex === i ? " drop-before" : dropIndex === i + 1 && i === workspace.tabs.length - 1 ? " drop-after" : "";
-          // The tab's own colour and icon, else those of the profile in its focused pane.
-          const profile = props.profiles.find((p) => p.id === workspace.panes[tab.focusedPane]?.profileId);
-          const color = tab.color ?? profile?.tabColor;
-          const icon = tab.icon ?? profile?.icon;
+          // The tab's own colour and icon, else its focused pane's project's, else its profile's.
+          const pane = workspace.panes[tab.focusedPane];
+          const profile = props.profiles.find((p) => p.id === pane?.profileId);
+          const color = tab.color ?? pane?.project?.color ?? profile?.tabColor;
+          const icon = tab.icon ?? pane?.project?.icon ?? profile?.icon;
+          const tooltip = [
+            waiting && `Claude: ${waiting.message}`,
+            title,
+            marks?.git && `⎇ ${gitSummary(marks.git)}`,
+            marks?.claudeReply && `Claude's last reply:\n${replyPreview(marks.claudeReply)}`,
+            "Double-click to rename, drag to move, right-click for colour and icon",
+          ]
+            .filter(Boolean)
+            .join("\n");
           return (
             <div
               key={tab.id}
@@ -111,7 +135,7 @@ export function TabBar(props: Props) {
               aria-selected={active}
               className={`tab${active ? " active" : ""}${drop}${waiting ? " attention" : ""}${color ? " colored" : ""}`}
               style={color ? ({ "--tab-color": TAB_COLOR_VALUES[color] } as CSSProperties) : undefined}
-              title={`${waiting ? `Claude: ${waiting.message}\n` : ""}${title}\nDouble-click to rename, drag to move, right-click for colour and icon`}
+              title={tooltip}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setStyling({ tabId: tab.id, x: e.clientX, y: e.clientY });
@@ -161,6 +185,22 @@ export function TabBar(props: Props) {
                   {contextPercent(marks.claudeUsage)}%
                 </span>
               )}
+              {marks?.claude === "idle" && marks.claudeCache && <CacheCountdown cache={marks.claudeCache} />}
+              {marks?.devLinks?.map((url) => (
+                <button
+                  key={url}
+                  className="tab-dev"
+                  aria-label={`Open ${url}`}
+                  title={`Open ${url} in the browser`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onOpenLink(url);
+                  }}
+                >
+                  ↗{new URL(url).port}
+                </button>
+              ))}
               {marks?.admin && (
                 <span className="tab-admin" title="Runs as administrator" aria-label="Administrator">
                   admin

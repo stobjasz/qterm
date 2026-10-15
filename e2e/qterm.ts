@@ -7,6 +7,7 @@
 // started, and at the end stopped together with every shell it ran.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -185,6 +186,10 @@ export class Qterm {
   /** Types a command into the pane, as a user would, and presses Enter. */
   async run(paneId: string, command: string): Promise<void> {
     await this.pane(paneId).getByRole("textbox", { name: "Terminal input" }).focus();
+    // xterm ignores inserted text (insertText has no key events) while it thinks a key is
+    // still down: after Ctrl+Shift+P, say, whose key-up went to the palette. Shift alone
+    // types nothing, and its key-up clears that.
+    await this.page.keyboard.press("Shift");
     await this.page.keyboard.insertText(command);
     await this.page.keyboard.press("Enter");
   }
@@ -193,6 +198,33 @@ export class Qterm {
   settingsOnDisk(): string {
     return fs.readFileSync(path.join(CONFIG_DIR, "config.toml"), "utf8");
   }
+}
+
+/**
+ * A command that starts a stand-in for Claude Code in a pane's shell: Node under the
+ * name `claude.exe` (qterm's process check goes by name), in a hidden window below the
+ * shell, printing nothing (idle, like Claude at its prompt) and exiting after a minute.
+ * The copy is kept in one temp folder for all runs. (A renamed Windows tool won't do:
+ * it can't find its message resources and exits at once.)
+ */
+export function startFakeClaude(): string {
+  const dir = path.join(fs.realpathSync.native(os.tmpdir()), "qterm-e2e-fake-claude");
+  const exe = path.join(dir, "claude.exe");
+  if (!fs.existsSync(exe)) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(process.execPath, exe);
+  }
+  return `Start-Process -WindowStyle Hidden '${exe}' '-e "setTimeout(() => {}, 60000)"'`;
+}
+
+/** Puts text on the Windows clipboard, as copying it in another app would. */
+export function copyToClipboard(text: string): void {
+  execFileSync("pwsh", ["-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"], { input: text });
+}
+
+/** The text on the Windows clipboard. */
+export function clipboardText(): string {
+  return execFileSync("pwsh", ["-NoProfile", "-Command", "Get-Clipboard -Raw"], { encoding: "utf8" }).replace(/\r?\n$/, "");
 }
 
 /** The documented defaults, with the given top-level values changed and tables added. */

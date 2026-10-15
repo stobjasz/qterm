@@ -16,6 +16,7 @@ import {
   restoreWorkspace,
   saveWorkspace,
   setPaneCwd,
+  setPaneProject,
   setTabStyle,
   setPaneBackground,
   resizeDivider,
@@ -141,6 +142,19 @@ describe("titles", () => {
   it("keeps the workspace as it is when no Claude title changed", () => {
     const ws = withClaudeTitles(withTabs(1), new Map([["p1", "A"]]));
     expect(withClaudeTitles(ws, new Map([["p1", "A"], ["gone", "B"]]))).toBe(ws);
+  });
+
+  it("names a tab after its pane's project, until renamed, and doesn't save it", () => {
+    let ws = withClaudeTitles(withTabs(1), new Map([["p1", "Fix the login redirect"]]));
+    ws = setPaneProject(ws, "p1", { name: "Web shop", color: "green" });
+    expect(tabTitle(ws, ws.tabs[0])).toBe("Web shop");
+    expect(setPaneProject(ws, "p1", { name: "Web shop", color: "green" })).toBe(ws);
+    const restored = restoreWorkspace(saveWorkspace(ws), [pwsh])!;
+    expect(restored.panes.p1.project).toBeUndefined();
+    // Out of the project again: the Claude title is back.
+    expect(tabTitle(setPaneProject(ws, "p1", undefined), ws.tabs[0])).toBe("Fix the login redirect");
+    const renamed = renameTab(ws, "t1", "mine");
+    expect(tabTitle(renamed, renamed.tabs[0])).toBe("mine");
   });
 
   it("keeps the Claude title across a restart", () => {

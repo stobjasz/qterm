@@ -367,6 +367,56 @@ pub async fn running_programs(sessions: State<'_, SessionManager>, ids: Vec<Sess
     Ok(sessions.programs(&ids))
 }
 
+/// Ends what runs in a pane's shell (the program and everything it started), keeping the shell.
+#[tauri::command]
+pub async fn stop_programs(sessions: State<'_, SessionManager>, id: SessionId) -> Result<Vec<String>, String> {
+    sessions.stop_programs(id)
+}
+
+/// Every listening TCP port with its process, and the pane session it runs under, if any.
+#[tauri::command]
+pub async fn listening_ports(sessions: State<'_, SessionManager>) -> Result<Vec<crate::ports::PortOwner>, String> {
+    let processes = crate::procs::snapshot();
+    Ok(crate::ports::owners(&crate::ports::listeners(), &processes, &sessions.shells()))
+}
+
+/// Ends the process listening on `port` and everything it started, if `pid` still
+/// holds that port (ids get reused); returns the names of what ended.
+#[tauri::command]
+pub async fn end_port_owner(port: u16, pid: u32) -> Result<Vec<String>, String> {
+    if !crate::ports::listeners().iter().any(|l| l.port == port && l.pid == pid) {
+        return Err(format!("nothing with process id {pid} listens on port {port} any more"));
+    }
+    let processes = crate::procs::snapshot();
+    let ended = crate::procs::terminate(&crate::procs::tree_of(&processes, pid));
+    if ended.is_empty() {
+        return Err(format!("Windows didn't let qterm end process {pid} (it may belong to the system or another user)"));
+    }
+    Ok(ended)
+}
+
+/// The project a pane's folder is in: git status, scripts and its `.qterm.toml`.
+#[tauri::command]
+pub async fn project_info(cwd: String) -> crate::project::ProjectInfo {
+    crate::project::info(std::path::Path::new(&cwd))
+}
+
+/// The image on the clipboard, saved as a PNG in the temp folder; None without one.
+/// Async: reading the clipboard must stay off the main thread.
+#[tauri::command]
+pub async fn clipboard_image_file(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let Ok(image) = app.clipboard().read_image() else { return Ok(None) };
+    let path = crate::paste::save_png(&crate::paste::images_dir(), image.rgba(), image.width(), image.height())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// The size toggle: the console fills the work area, or goes back; returns whether it is full.
+#[tauri::command]
+pub fn toggle_console_size(app: AppHandle) -> bool {
+    window::toggle_full(&app)
+}
+
 #[tauri::command]
 pub async fn claude_running(sessions: State<'_, SessionManager>) -> Result<Vec<SessionId>, String> {
     Ok(sessions.running("claude.exe"))

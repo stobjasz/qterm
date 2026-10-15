@@ -1,6 +1,6 @@
 //! Adds or removes qterm's hooks in Claude Code's settings.json: Notification
-//! (Claude is waiting for you), StopFailure (a turn ended on an API error) and
-//! SessionStart (which session and transcript a pane runs, for its token use). Everything else in the file is kept, in its
+//! (Claude is waiting for you), Stop (a turn ended: Claude's last reply, shown on
+//! the tab), StopFailure (a turn ended on an API error) and SessionStart (which session and transcript a pane runs, for its token use). Everything else in the file is kept, in its
 //! original order (serde_json's preserve_order), and the previous file is backed
 //! up before each change.
 
@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::alerts::HOOK_ARG;
 
 /// The hook events qterm listens to, all handled by the same command.
-const EVENTS: [&str; 3] = ["Notification", "SessionStart", "StopFailure"];
+const EVENTS: [&str; 4] = ["Notification", "SessionStart", "Stop", "StopFailure"];
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

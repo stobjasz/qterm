@@ -184,6 +184,19 @@ impl SessionManager {
         all
     }
 
+    /// Ends everything running inside the session's shell, keeping the shell; returns
+    /// the names of what ended.
+    pub fn stop_programs(&self, id: SessionId) -> Result<Vec<String>, String> {
+        let shell = self.sessions.lock().unwrap().get(&id).ok_or("no such session")?.pid.ok_or("the shell's process isn't known")?;
+        let processes = crate::procs::snapshot();
+        Ok(crate::procs::terminate(&crate::procs::tree_below(&processes, shell)))
+    }
+
+    /// Each session and its shell's process id.
+    pub fn shells(&self) -> Vec<(SessionId, u32)> {
+        self.sessions.lock().unwrap().iter().filter_map(|(id, s)| Some((*id, s.pid?))).collect()
+    }
+
     /// Sessions with `program` (e.g. "claude.exe") running inside their shell.
     pub fn running(&self, program: &str) -> Vec<SessionId> {
         let shells: Vec<(SessionId, u32)> = self
@@ -488,6 +501,21 @@ mod tests {
         }
         assert!(!alive(shell), "the shell outlived its owner");
         assert!(!alive(ping), "a program in the shell outlived its owner");
+    }
+
+    #[test]
+    fn stopping_ends_the_program_and_keeps_the_shell() {
+        let manager = SessionManager::default();
+        let (id, probe) = spawn(&manager, &["/q", "/k"]);
+        manager.write(id, "ping -n 60 127.0.0.1\r\n").unwrap();
+        assert!(probe.wait_for_text("127.0.0.1"), "ping did not start: {:?}", probe.text());
+
+        assert_eq!(manager.stop_programs(id).unwrap(), ["ping.exe"]);
+        // The shell is still there and takes the next command.
+        manager.write(id, "set /a 6*7\r\n").unwrap();
+        assert!(probe.wait_for_text("42"), "the shell is gone: {:?}", probe.text());
+        assert!(manager.stop_programs(id).unwrap().is_empty(), "nothing left to stop");
+        manager.kill(id);
     }
 
     #[test]

@@ -9,6 +9,8 @@ export interface RecentCommand {
   exitCode?: number;
   /** Date.now() when it finished. */
   at: number;
+  /** How long it ran. */
+  durationMs?: number;
 }
 
 export interface History {
@@ -58,6 +60,7 @@ export function parseHistory(text: string | null): History {
       at: c.at,
       ...(typeof c.cwd === "string" ? { cwd: c.cwd } : {}),
       ...(typeof c.exitCode === "number" ? { exitCode: c.exitCode } : {}),
+      ...(typeof c.durationMs === "number" && c.durationMs >= 0 ? { durationMs: c.durationMs } : {}),
     }))
     .slice(0, MAX_COMMANDS);
   const folders = (Array.isArray(r?.folders) ? r.folders : []).filter((f): f is string => typeof f === "string").slice(0, MAX_FOLDERS);

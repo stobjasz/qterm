@@ -410,6 +410,12 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
               onChange={(v) => set("rightClickPaste", v)}
             />
             <Toggle
+              label="Ask before pasting several lines into a shell"
+              hint="Each line would run as a command. Not asked in Claude Code or full-screen programs."
+              checked={draft.pasteWarning}
+              onChange={(v) => set("pasteWarning", v)}
+            />
+            <Toggle
               label="Show inline images"
               hint="Pictures that programs print as sixel, iTerm or Kitty graphics (chafa, img2sixel, timg)."
               checked={draft.inlineImages}

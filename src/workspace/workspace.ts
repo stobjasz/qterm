@@ -35,6 +35,15 @@ export interface Pane {
   background?: string;
   /** Title of the last Claude Code session here; names the tab, also after Claude exits. */
   claudeTitle?: string;
+  /** What the project the pane is in sets for its tab (.qterm.toml). Not saved: read again from the folder. */
+  project?: ProjectLook;
+}
+
+/** A project's own tab name, colour and icon. */
+export interface ProjectLook {
+  name?: string;
+  color?: TabColor;
+  icon?: string;
 }
 
 /** A pane background colour as stored: "#rrggbb". */
@@ -279,6 +288,16 @@ export function setPaneBackground(ws: Workspace, paneId: PaneId, color: string |
   return { ...ws, panes: { ...ws.panes, [paneId]: next } };
 }
 
+/** Sets (or, with undefined, clears) what the pane's project sets for its tab; the same workspace if nothing changed. */
+export function setPaneProject(ws: Workspace, paneId: PaneId, project: ProjectLook | undefined): Workspace {
+  const pane = ws.panes[paneId];
+  if (!pane || JSON.stringify(pane.project) === JSON.stringify(project)) return ws;
+  const next: Pane = { ...pane };
+  if (project) next.project = project;
+  else delete next.project;
+  return { ...ws, panes: { ...ws.panes, [paneId]: next } };
+}
+
 export function setPaneCwd(ws: Workspace, paneId: PaneId, cwd: string): Workspace {
   const pane = ws.panes[paneId];
   if (!pane || pane.cwd === cwd) return ws;
@@ -293,13 +312,14 @@ export function activeTab(ws: Workspace): Tab | undefined {
 const EXE_PATH = /^[a-z]:\\.*\.exe$/i;
 
 /**
- * The custom title, else the title of the Claude session in the focused pane, else
- * its shell title, else its profile name.
+ * The custom title, else the name the focused pane's project gives it, else the title
+ * of the Claude session there, else its shell title, else its profile name.
  */
 export function tabTitle(ws: Workspace, tab: Tab): string {
   if (tab.title) return tab.title;
   const pane = ws.panes[tab.focusedPane];
   if (!pane) return "";
+  if (pane.project?.name) return pane.project.name;
   if (pane.claudeTitle) return pane.claudeTitle;
   const title = pane.title.trim();
   return title && !EXE_PATH.test(title) ? title : pane.profileName;

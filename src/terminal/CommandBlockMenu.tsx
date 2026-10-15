@@ -1,6 +1,7 @@
 import { useRef } from "react";
 
 import { useDismiss } from "../tabs/useDismiss";
+import { formatClock, formatDuration } from "./marks";
 import { useFitInViewport } from "../tabs/useFitInViewport";
 import type { CommandBlock } from "./registry";
 
@@ -13,11 +14,12 @@ interface Props {
   onCopyCommand(): void;
   onSelectOutput(): void;
   onRunAgain(): void;
+  onViewJson(): void;
   onClose(): void;
 }
 
 /** A click on a command's ✓/✗ bar: what can be done with that command and its output. */
-export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onSelectOutput, onRunAgain, onClose }: Props) {
+export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onSelectOutput, onRunAgain, onViewJson, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const position = useFitInViewport(ref, x, y);
 
@@ -35,6 +37,11 @@ export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onS
         {status}
         {block.command}
       </div>
+      {block.startedAt !== undefined && block.durationMs !== undefined && (
+        <div className="tab-style-label command-block-when">
+          {formatClock(block.startedAt, Date.now(), true)} · took {formatDuration(block.durationMs)}
+        </div>
+      )}
       <button role="menuitem" disabled={!block.hasOutput} onClick={act(onCopyOutput)}>
         Copy output
       </button>
@@ -46,6 +53,9 @@ export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onS
       </button>
       <button role="menuitem" onClick={act(onRunAgain)}>
         Run again
+      </button>
+      <button role="menuitem" disabled={!block.hasOutput} onClick={act(onViewJson)}>
+        View output as JSON
       </button>
     </div>
   );

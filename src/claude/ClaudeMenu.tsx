@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { listAllClaudeSessions, type ClaudeSession, type ClaudeUsage, type TranscriptSummary } from "../ipc";
 import { Popup } from "../tabs/Popup";
 import { groupSessions, type GroupableSession } from "./groups";
+import { replyPreview } from "./reply";
 import { contextPercent, formatCost, formatTokens, modelName, usageSummary } from "./usage";
 
 /** Above this many sessions the menu offers a filter box. */
@@ -22,6 +23,8 @@ export interface WaitingClaude {
   /** Where the pane is, e.g. "2 · PowerShell". */
   label: string;
   message: string;
+  /** What Claude said last, if its Stop hook told qterm. */
+  reply?: string;
 }
 
 export interface ClaudeMenuProps {
@@ -70,11 +73,11 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
           {waiting.length > 0 && (
             <section className="claude-running" aria-label="Claude is waiting for you">
               <div className="claude-running-title">Waiting for you · Alt+Shift+W goes to the next</div>
-              {waiting.map(({ paneId, label, message }) => (
+              {waiting.map(({ paneId, label, message, reply }) => (
                 <button
                   key={paneId}
                   className="claude-running-row claude-waiting-row"
-                  title={message}
+                  title={reply ? replyPreview(reply, 20, 2000) : message}
                   onClick={() => {
                     close();
                     onFocusPane(paneId);
@@ -82,6 +85,7 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
                 >
                   <span className="claude-running-tab">{label}</span>
                   <span className="claude-waiting-message">{message}</span>
+                  {reply && <span className="claude-waiting-reply">{replyPreview(reply, 3, 240)}</span>}
                 </button>
               ))}
             </section>

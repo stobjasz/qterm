@@ -67,6 +67,8 @@ export interface Config {
   sshProfiles: boolean;
   checkUpdates: boolean;
   explorerMenu: boolean;
+  /** Ask before pasting several lines into a shell. */
+  pasteWarning: boolean;
   font: { family: string; size: number; ligatures: boolean };
   keybindings: Record<string, string>;
   profiles: CustomProfile[];
@@ -357,6 +359,17 @@ export interface PaneClaudeSession {
   transcriptPath: string | null;
 }
 
+/** Claude finished a turn in a pane (its Stop hook): what it said last. */
+export interface ClaudeReply {
+  paneId: string;
+  sessionId: string | null;
+  message: string;
+}
+
+export function onClaudeReply(handler: (reply: ClaudeReply) => void): Promise<UnlistenFn> {
+  return listen<ClaudeReply>("claude-reply", (event) => handler(event.payload));
+}
+
 export function onClaudeSessionStart(handler: (session: PaneClaudeSession) => void): Promise<UnlistenFn> {
   return listen<PaneClaudeSession>("claude-session-start", (event) => handler(event.payload));
 }
@@ -380,6 +393,82 @@ export function openElevatedWindow(profileId: string, cwd: string | undefined): 
 /** Programs running in these sessions' shells ("node.exe"), each once. */
 export function runningPrograms(ids: SessionId[]): Promise<string[]> {
   return invoke("running_programs", { ids });
+}
+
+/** Ends what runs in the session's shell (and everything it started), keeping the shell; the programs that ended. */
+export function stopPrograms(id: SessionId): Promise<string[]> {
+  return invoke("stop_programs", { id });
+}
+
+export interface GitStatus {
+  /** The branch, or the commit when detached. */
+  branch: string;
+  /** Null without an upstream. */
+  ahead: number | null;
+  behind: number | null;
+  changed: number;
+  untracked: number;
+}
+
+/** A script from the project's manifests, e.g. "pnpm run dev" from package.json. */
+export interface ProjectTask {
+  name: string;
+  command: string;
+  source: string;
+}
+
+/** The project's .qterm.toml. */
+export interface ProjectSettings {
+  path: string;
+  name: string | null;
+  tabColor: string | null;
+  icon: string | null;
+  snippets: Snippet[];
+  triggers: TriggerDef[];
+}
+
+/** What a folder's project says (see src-tauri/src/project.rs). */
+export interface ProjectInfo {
+  git: GitStatus | null;
+  /** The scripts of the nearest folder that has any, and that folder. */
+  tasks: { dir: string; tasks: ProjectTask[] } | null;
+  settings: ProjectSettings | null;
+  /** Why the .qterm.toml found isn't used. */
+  settingsError: string | null;
+}
+
+export function projectInfo(cwd: string): Promise<ProjectInfo> {
+  return invoke("project_info", { cwd });
+}
+
+/** A listening TCP port and the process holding it (see src-tauri/src/ports.rs). */
+export interface PortOwner {
+  port: number;
+  pid: number;
+  /** "node.exe"; "" when Windows won't say. */
+  process: string;
+  addresses: string[];
+  /** The pane session whose shell it runs under, if it's one of qterm's. */
+  sessionId: SessionId | null;
+}
+
+export function listeningPorts(): Promise<PortOwner[]> {
+  return invoke("listening_ports");
+}
+
+/** Ends the process on `port` (if `pid` still holds it) and what it started; the programs that ended. */
+export function endPortOwner(port: number, pid: number): Promise<string[]> {
+  return invoke("end_port_owner", { port, pid });
+}
+
+/** The image on the clipboard saved as a PNG file; null when there is none. */
+export function clipboardImageFile(): Promise<string | null> {
+  return invoke("clipboard_image_file");
+}
+
+/** The console fills the screen's work area, or goes back to its size; true when full. */
+export function toggleConsoleSize(): Promise<boolean> {
+  return invoke("toggle_console_size");
 }
 
 /** Sessions with Claude Code running inside their shell. */

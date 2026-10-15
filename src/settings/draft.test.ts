@@ -27,6 +27,7 @@ const config: Config = {
   sshProfiles: true,
   checkUpdates: true,
   explorerMenu: false,
+  pasteWarning: true,
   font: { family: "Cascadia Mono", size: 14, ligatures: false },
   keybindings: {},
   profiles: [],

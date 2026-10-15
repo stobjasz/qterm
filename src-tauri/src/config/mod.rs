@@ -52,6 +52,8 @@ pub struct Config {
     pub check_updates: bool,
     /// "Open in qterm" in Explorer's menu for folders.
     pub explorer_menu: bool,
+    /// Ask before pasting several lines into a shell (they would run one by one).
+    pub paste_warning: bool,
     pub font: Font,
     /// Action name → chord; parsed and checked by the UI, which owns the shortcuts.
     pub keybindings: BTreeMap<String, String>,
@@ -269,6 +271,7 @@ impl Default for Config {
             ssh_profiles: true,
             check_updates: true,
             explorer_menu: false,
+            paste_warning: true,
             font: Font::default(),
             keybindings: BTreeMap::new(),
             profiles: Vec::new(),
@@ -306,14 +309,7 @@ impl Config {
         in_range("slide_ms", self.slide_ms as f64, 0.0, 1000.0)?;
         in_range("font.size", self.font.size, 6.0, 72.0)?;
         in_range("scrollback.lines", f64::from(self.scrollback.lines), 100.0, 10_000.0)?;
-        for trigger in &self.triggers {
-            if trigger.pattern.is_empty() {
-                return Err("[[triggers]] entries need a pattern".into());
-            }
-            if let Some(color) = trigger.color.as_deref().filter(|c| !is_hex_color(c)) {
-                return Err(format!("trigger \"{}\": color = \"{color}\" is not \"#rrggbb\"", trigger.name.as_deref().unwrap_or(&trigger.pattern)));
-            }
-        }
+        check_triggers(&self.triggers)?;
         let mut ids = std::collections::BTreeSet::new();
         for profile in &self.profiles {
             if profile.name.trim().is_empty() {
@@ -357,6 +353,19 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// [[triggers]] need a pattern, and a colour like "#rrggbb" if they give one.
+pub(crate) fn check_triggers(triggers: &[Trigger]) -> Result<(), String> {
+    for trigger in triggers {
+        if trigger.pattern.is_empty() {
+            return Err("[[triggers]] entries need a pattern".into());
+        }
+        if let Some(color) = trigger.color.as_deref().filter(|c| !is_hex_color(c)) {
+            return Err(format!("trigger \"{}\": color = \"{color}\" is not \"#rrggbb\"", trigger.name.as_deref().unwrap_or(&trigger.pattern)));
+        }
+    }
+    Ok(())
 }
 
 /// The console key is a single press: one key name, no modifiers.
@@ -969,6 +978,13 @@ panes = [
         let blocks: Vec<&str> = guide.split("```toml\n").skip(1).map(|rest| rest.split("```").next().unwrap()).collect();
         assert!(blocks.len() >= 8, "found {} examples", blocks.len());
         for block in blocks {
+            // A project's own settings file, not config.toml.
+            if block.starts_with("# .qterm.toml\n") {
+                if let Err(e) = crate::project::parse_settings(block) {
+                    panic!("this .qterm.toml example in docs/user-guide.md isn't valid: {e}\n{block}");
+                }
+                continue;
+            }
             if let Err(e) = Config::parse(block) {
                 panic!("this example in docs/user-guide.md isn't valid: {e}\n{block}");
             }

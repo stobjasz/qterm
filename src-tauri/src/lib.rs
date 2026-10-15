@@ -13,7 +13,10 @@ mod hotkey;
 mod install;
 #[macro_use]
 mod log;
+mod paste;
+mod ports;
 mod procs;
+mod project;
 mod pty;
 mod scrollback;
 mod tray;
@@ -203,6 +206,12 @@ pub fn run() {
             commands::delete_layout,
             commands::list_all_claude_sessions,
             commands::claude_running,
+            commands::stop_programs,
+            commands::project_info,
+            commands::listening_ports,
+            commands::end_port_owner,
+            commands::clipboard_image_file,
+            commands::toggle_console_size,
             commands::running_programs,
             commands::save_scrollback,
             commands::load_scrollback,

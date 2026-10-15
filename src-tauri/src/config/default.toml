@@ -92,6 +92,11 @@ check_updates = true
 # new tab in that folder. On Windows 11 it is under "Show more options".
 explorer_menu = false
 
+# Ask before pasting several lines into a shell (Ctrl+Shift+V, right-click): each
+# line would run as a command. Not asked in Claude Code or full-screen programs,
+# where several lines are normal input.
+paste_warning = true
+
 # Keep each pane's output across restarts (with restore_session): restored panes
 # show their earlier output above a "restored" line. `lines` per pane, 100 - 10000.
 # `profiles` switches it per shell, overriding `restore`, e.g.
@@ -151,6 +156,9 @@ ligatures = false
 #   quick_select     = "alt+shift+s"
 #   toggle_pin       = ""   (none)
 #   show_help        = "ctrl+shift+/"
+#   stop_programs    = ""   (none)
+#   view_json        = ""   (none)
+#   toggle_size      = "f11"
 # Ctrl+Alt+1..9 (go to tab) and Ctrl+Shift+1..9 (new tab with profile N) are fixed.
 [keybindings]
 

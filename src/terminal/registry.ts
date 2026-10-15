@@ -30,7 +30,8 @@ import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "..
 import type { PaneId } from "../workspace/workspace";
 import { hasContent, plainLines } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
-import { parseMark } from "./marks";
+import { formatClock, formatDuration, parseMark } from "./marks";
+import { findDevServerUrl } from "./devServer";
 import { matching, type Trigger } from "./triggers";
 import { findInLines, SEARCH_ALL_LIMIT, type SearchHit, type SearchOptions } from "./searchAll";
 import { findFileLinks } from "./links";
@@ -70,6 +71,14 @@ export interface RegistryEvents {
   onCommandBlock(paneId: PaneId, block: CommandBlock, x: number, y: number): void;
   /** A line matched a mark / notify trigger (at most every TRIGGER_REPEAT_MS per trigger and pane). */
   onTrigger(paneId: PaneId, trigger: Trigger, line: string): void;
+  /**
+   * The user pasted (Ctrl+Shift+V, right-click, the browser's paste) this clipboard
+   * text, "" when it holds none (an image, say). Nothing reaches the pane until the
+   * handler calls pasteText.
+   */
+  onPaste(paneId: PaneId, text: string): void;
+  /** A program printed the local address it serves on (a dev server), once per address until the command ends. */
+  onDevServer(paneId: PaneId, url: string, port: number): void;
 }
 
 /** One trigger in one pane fires at most this often: a chatty build can't flood you. */
@@ -82,6 +91,9 @@ export interface CommandBlock {
   command: string;
   exitCode?: number;
   hasOutput: boolean;
+  /** Date.now() of the Enter that ran it, and how long it ran. */
+  startedAt?: number;
+  durationMs?: number;
 }
 
 export interface FinishedCommand {
@@ -89,6 +101,8 @@ export interface FinishedCommand {
   /** Undefined when the shell doesn't say (cmd). */
   exitCode?: number;
   durationMs: number;
+  /** Date.now() of the Enter that ran it. */
+  startedAt: number;
 }
 
 /** A line on screen (wrapped rows joined) and where each of its characters is. */
@@ -122,6 +136,8 @@ interface CommandMark {
   startedAt?: number;
   /** Where it ended (D): output is between the command line and this. */
   end?: IMarker;
+  /** Date.now() when it ended. */
+  finishedAt?: number;
   exitCode?: number;
   command?: string;
   decoration?: IDecoration;
@@ -180,6 +196,8 @@ interface Entry {
   linesSinceScan: number;
   /** Date.now() each trigger last fired here (by label). */
   triggerTimes: Map<string, number>;
+  /** Dev server addresses reported since the last command ended. */
+  devUrls: Set<string>;
   scanTimer?: number;
   claudeSeen: Set<string>;
   /** In a background tab, and output has been reported since. */
@@ -216,9 +234,18 @@ export class TerminalRegistry {
   private theme: Theme = THEMES.qterm;
   private triggers: readonly Trigger[] = [];
 
+  /** Triggers of the project a pane is in (its .qterm.toml), on top of the settings' own. */
+  private paneTriggers = new Map<PaneId, readonly Trigger[]>();
+
   /** [[triggers]], compiled (triggers.ts). */
   setTriggers(triggers: readonly Trigger[]): void {
     this.triggers = triggers;
+  }
+
+  /** The pane's own extra triggers (none: an empty list). */
+  setPaneTriggers(paneId: PaneId, triggers: readonly Trigger[]): void {
+    if (triggers.length) this.paneTriggers.set(paneId, triggers);
+    else this.paneTriggers.delete(paneId);
   }
 
   private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false, inlineImages: true, ligatures: false };
@@ -260,6 +287,7 @@ export class TerminalRegistry {
     const entry = this.entries.get(paneId);
     if (!entry) return;
     this.entries.delete(paneId);
+    this.paneTriggers.delete(paneId);
     for (const timer of [entry.resizeTimer, entry.ackTimer, entry.copyTimer, entry.scanTimer]) {
       window.clearTimeout(timer);
     }
@@ -472,12 +500,27 @@ export class TerminalRegistry {
 
   /** Copies the output of the last finished command; false when there is none. */
   copyLastOutput(paneId: PaneId): boolean {
-    const entry = this.entries.get(paneId);
-    const mark = entry?.marks.filter((m) => m.end && m.input && m.end.line >= 0 && m.input.line >= 0).pop();
-    const text = entry && mark ? outputOf(entry.term, mark) : "";
+    const text = this.lastCommandOutput(paneId);
     if (!text) return false;
     void writeText(text);
     return true;
+  }
+
+  /** The output of the last finished command ("" when there is none). */
+  lastCommandOutput(paneId: PaneId): string {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks.filter((m) => m.end && m.input && m.end.line >= 0 && m.input.line >= 0).pop();
+    return entry && mark ? outputOf(entry.term, mark) : "";
+  }
+
+  /** The selected text ("" when nothing is selected). */
+  selection(paneId: PaneId): string {
+    return this.entries.get(paneId)?.term.getSelection() ?? "";
+  }
+
+  /** A full-screen program (an editor, a TUI) has the pane: the alternate screen is up. */
+  fullScreen(paneId: PaneId): boolean {
+    return this.entries.get(paneId)?.term.buffer.active.type === "alternate";
   }
 
   /** The output of the command whose prompt marker has this id ("" if gone or none). */
@@ -506,9 +549,11 @@ export class TerminalRegistry {
     return true;
   }
 
+  /** Pastes the clipboard as the user asked for it (see RegistryEvents.onPaste). */
   async paste(paneId: PaneId): Promise<void> {
-    const text = this.entries.has(paneId) && (await readText().catch(() => ""));
-    if (text) this.pasteText(paneId, text);
+    if (!this.entries.has(paneId)) return;
+    const text = await readText().catch(() => "");
+    this.events.onPaste(paneId, text ?? "");
   }
 
   /**
@@ -581,6 +626,7 @@ export class TerminalRegistry {
       pendingAck: 0,
       linesSinceScan: 0,
       triggerTimes: new Map(),
+      devUrls: new Set(),
       claudeSeen: new Set(),
       background: false,
       activityReported: false,
@@ -663,7 +709,10 @@ export class TerminalRegistry {
     });
     term.onLineFeed(() => {
       // Only the shell's own output: not the restored lines written before it started.
-      if (this.triggers.length && entry.sessionId !== undefined) this.checkTriggers(paneId, entry);
+      if (entry.sessionId !== undefined) {
+        if (this.triggers.length || this.paneTriggers.has(paneId)) this.checkTriggers(paneId, entry);
+        this.checkDevServer(paneId, entry);
+      }
       if (!this.behavior.claudeSessions) return;
       entry.linesSinceScan++;
       entry.scanTimer ??= window.setTimeout(() => this.scanForClaude(paneId, entry), CLAUDE_SCAN_DELAY_MS);
@@ -733,17 +782,13 @@ export class TerminalRegistry {
    */
   private checkTriggers(paneId: PaneId, entry: Entry): void {
     const { term } = entry;
-    const buffer = term.buffer.active;
-    if (buffer.type !== "normal") return;
-    const cursor = buffer.baseY + buffer.cursorY;
-    const end = cursor - 1;
-    if (end < 0) return;
-    let start = end;
-    while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
-    let text = "";
-    for (let y = start; y <= end; y++) text += buffer.getLine(y)?.translateToString(true) ?? "";
+    if (term.buffer.active.type !== "normal") return;
+    const line = lastLine(term);
+    if (!line) return;
+    const { text, start, end, cursor } = line;
     const now = Date.now();
-    for (const trigger of matching(this.triggers, text)) {
+    const triggers = [...this.triggers, ...(this.paneTriggers.get(paneId) ?? [])];
+    for (const trigger of matching(triggers, text)) {
       if (trigger.action === "highlight") {
         const marker = term.registerMarker(start - cursor);
         if (marker) term.registerDecoration({ marker, width: term.cols, height: end - start + 1, backgroundColor: trigger.color, layer: "bottom" });
@@ -753,6 +798,16 @@ export class TerminalRegistry {
       entry.triggerTimes.set(trigger.label, now);
       this.events.onTrigger(paneId, trigger, text.trim());
     }
+  }
+
+  /** A local server address in the line that just ended (either screen: dev tools draw dashboards too). */
+  private checkDevServer(paneId: PaneId, entry: Entry): void {
+    const line = lastLine(entry.term);
+    if (!line?.text.includes("://")) return;
+    const found = findDevServerUrl(line.text);
+    if (!found || entry.devUrls.has(found.url)) return;
+    entry.devUrls.add(found.url);
+    this.events.onDevServer(paneId, found.url, found.port);
   }
 
   /** OSC 133: A = prompt, B = typing starts, D = the command ended. */
@@ -791,10 +846,15 @@ export class TerminalRegistry {
         last.end = term.registerMarker(0);
         last.exitCode = mark.exitCode;
         last.command = command;
+        last.finishedAt = Date.now();
+        const startedAt = last.startedAt;
+        const durationMs = last.finishedAt - startedAt;
         last.decoration = decorate(term, last, (x, y) =>
-          this.events.onCommandBlock(paneId, { id: last.prompt.id, command, exitCode: mark.exitCode, hasOutput: outputOf(term, last) !== "" }, x, y),
+          this.events.onCommandBlock(paneId, { id: last.prompt.id, command, exitCode: mark.exitCode, hasOutput: outputOf(term, last) !== "", startedAt, durationMs }, x, y),
         );
-        this.events.onCommandFinished(paneId, { command, exitCode: mark.exitCode, durationMs: Date.now() - last.startedAt });
+        // Its server, if it ran one, has stopped: a later run may announce the same address again.
+        entry.devUrls.clear();
+        this.events.onCommandFinished(paneId, { command, exitCode: mark.exitCode, durationMs, startedAt });
         return;
       }
     }
@@ -802,6 +862,17 @@ export class TerminalRegistry {
 
   private wireClipboard(paneId: PaneId, entry: Entry): void {
     const { term } = entry;
+    // The browser's own paste (into xterm's textarea) goes the same way as Ctrl+Shift+V.
+    // Captured on the wrapper, so it never reaches xterm's handler.
+    entry.wrapper.addEventListener(
+      "paste",
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.events.onPaste(paneId, e.clipboardData?.getData("text/plain") ?? "");
+      },
+      true,
+    );
     // Like Windows Terminal: right-click copies the selection, or pastes without one.
     entry.wrapper.addEventListener("contextmenu", (e) => {
       // Shift+right-click: the pane's own menu (its background) instead.
@@ -985,7 +1056,11 @@ function decorate(term: Terminal, mark: CommandMark, onClick: (x: number, y: num
   decoration?.onRender((el) => {
     const state = mark.exitCode === undefined ? "unknown" : mark.exitCode === 0 ? "ok" : "failed";
     el.classList.add("command-mark", state);
-    el.title = `${mark.command}${mark.exitCode === undefined ? "" : ` (exit ${mark.exitCode})`}\nClick for copy, select and run again`;
+    const when =
+      mark.startedAt !== undefined && mark.finishedAt !== undefined
+        ? `\nRan at ${formatClock(mark.startedAt, Date.now(), true)}, took ${formatDuration(mark.finishedAt - mark.startedAt)}`
+        : "";
+    el.title = `${mark.command}${mark.exitCode === undefined ? "" : ` (exit ${mark.exitCode})`}${when}\nClick for copy, select and run again`;
     el.setAttribute("role", "button");
     el.setAttribute("aria-label", `Command: ${mark.command}`);
     if (el.dataset.wired) return;
@@ -1008,6 +1083,22 @@ function disposeMark(mark: CommandMark): void {
   mark.prompt.dispose();
   mark.input?.dispose();
   mark.end?.dispose();
+}
+
+/**
+ * The line the cursor just left (wrapped rows joined): its text, its first and last row,
+ * and the cursor's row. Undefined at the very top.
+ */
+function lastLine(term: Terminal): { text: string; start: number; end: number; cursor: number } | undefined {
+  const buffer = term.buffer.active;
+  const cursor = buffer.baseY + buffer.cursorY;
+  const end = cursor - 1;
+  if (end < 0) return undefined;
+  let start = end;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  let text = "";
+  for (let y = start; y <= end; y++) text += buffer.getLine(y)?.translateToString(true) ?? "";
+  return { text, start, end, cursor };
 }
 
 /** The text of every line of the pane's normal buffer (scrollback included). */

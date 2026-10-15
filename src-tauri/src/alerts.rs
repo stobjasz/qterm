@@ -55,6 +55,18 @@ pub struct PaneSession {
     pub transcript_path: Option<String>,
 }
 
+/// Claude finished a turn in a pane (its Stop hook): what it said last.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reply {
+    pub pane_id: String,
+    pub session_id: Option<String>,
+    pub message: String,
+}
+
+/// A reply longer than this is cut (the UI shows only its start anyway).
+const MAX_REPLY: usize = 4000;
+
 /// What the hook leaves in the inbox.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -63,6 +75,7 @@ enum InboxMessage {
     Session(PaneSession),
     /// From the status line relay (claude_statusline.rs).
     Usage(crate::claude_statusline::StatuslineUsage),
+    Reply(Reply),
 }
 
 /// The fields of Claude Code's hook input that matter here.
@@ -105,6 +118,14 @@ fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
             session_id: hook.session_id?,
             transcript_path: hook.transcript_path,
         }));
+    }
+    if hook.hook_event_name.as_deref() == Some("Stop") {
+        let message = hook.last_assistant_message.filter(|m| !m.trim().is_empty())?;
+        let message = match message.char_indices().nth(MAX_REPLY) {
+            Some((cut, _)) => format!("{}…", &message[..cut]),
+            None => message,
+        };
+        return Some(InboxMessage::Reply(Reply { pane_id: pane_id.to_string(), session_id: hook.session_id, message }));
     }
     if hook.hook_event_name.as_deref() == Some("StopFailure") {
         let error = hook.error.unwrap_or_else(|| "unknown".into());
@@ -203,8 +224,8 @@ fn take_inbox(inbox: &Path) -> Vec<InboxMessage> {
         .collect()
 }
 
-/// Watches the inbox and emits each alert to the UI as `claude-attention`, and
-/// each session start as `claude-session-start`.
+/// Watches the inbox and emits each alert to the UI as `claude-attention`, each
+/// session start as `claude-session-start`, and each finished turn as `claude-reply`.
 /// Alerts left over from before this start are stale and dropped.
 pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     let inbox = inbox_dir(&app).ok_or_else(|| notify::Error::generic("no local data folder"))?;
@@ -224,6 +245,7 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
                     InboxMessage::Alert(alert) => app.emit("claude-attention", alert),
                     InboxMessage::Session(session) => app.emit("claude-session-start", session),
                     InboxMessage::Usage(usage) => app.emit("claude-statusline", usage),
+                    InboxMessage::Reply(reply) => app.emit("claude-reply", reply),
                 };
             }
         }
@@ -309,6 +331,22 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_turn_brings_claudes_last_reply() {
+        let input = r#"{"session_id":"s1","hook_event_name":"Stop","stop_hook_active":false,
+            "last_assistant_message":"Done: the tests pass.","background_tasks":[],"session_crons":[]}"#;
+        assert_eq!(
+            message_from_hook("pane-3", input),
+            Some(InboxMessage::Reply(Reply { pane_id: "pane-3".into(), session_id: Some("s1".into()), message: "Done: the tests pass.".into() }))
+        );
+        // Nothing said (a turn of tool calls only): nothing to show, and never an alert.
+        assert!(message_from_hook("p", r#"{"hook_event_name":"Stop","last_assistant_message":"  "}"#).is_none());
+        assert!(message_from_hook("p", r#"{"hook_event_name":"Stop"}"#).is_none());
+        let long = format!(r#"{{"hook_event_name":"Stop","last_assistant_message":"{}"}}"#, "é".repeat(MAX_REPLY + 10));
+        let Some(InboxMessage::Reply(reply)) = message_from_hook("p", &long) else { panic!("a reply") };
+        assert_eq!(reply.message.chars().count(), MAX_REPLY + 1, "cut, with an ellipsis");
+    }
+
+    #[test]
     fn reads_claude_codes_hook_input() {
         let input = r#"{"session_id":"abc","cwd":"C:\\x","hook_event_name":"Notification",
             "message":"Claude needs your permission to use Bash","title":"Permission needed",
@@ -364,6 +402,7 @@ mod tests {
                 InboxMessage::Alert(a) => a.message,
                 InboxMessage::Session(s) => s.session_id,
                 InboxMessage::Usage(u) => u.pane_id,
+                InboxMessage::Reply(r) => r.message,
             })
             .collect();
         assert_eq!(taken, ["first", "second"]);
