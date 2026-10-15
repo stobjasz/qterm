@@ -183,3 +183,10 @@ Found by driving the app on a 5120x720 console, outside the roadmap:
 | 74 | **Multi-line paste warning**: pasting several lines into a shell asks first (they would run one by one); off for Claude Code panes, where multi-line input is normal. | S | ✅ asks with a preview (`paste_warning`, on); not in Claude Code or full-screen programs; E2E R28 |
 | 75 | **Paste an image as a file**: an image on the clipboard is saved to a temp file and its path typed, for Claude Code and other tools that read images from paths. | S | ✅ PNG in `%TEMP%\qterm-images` (a week), its path typed for the pane's shell; E2E R29 |
 | 76 | **JSON viewer**: select JSON in the output (or a command's whole output) and see it formatted and foldable, with copy of any value. | M | ✅ selection or last output (`view_json`), or a command's bar → View output as JSON; JSON Lines and log prefixes too; E2E R30 |
+
+## Round 6 (proposed 2026-10-15)
+
+| # | Feature | Effort | Status |
+|---|---|---|---|
+| 78 | **Different shells in one tab**: split with a chosen shell (▾ menu, palette, a key with a picker), the folder carried over between Windows, Git Bash and WSL; switch a pane to another shell; panes name their shell when a tab mixes them. | S–M | ✅ Ctrl+Alt+Shift+= / -, ▾ split buttons, palette; Switch shell… in the pane menu; labels in mixed tabs; E2E R35 |
+

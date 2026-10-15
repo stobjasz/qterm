@@ -59,6 +59,7 @@ unit tests can't reproduce. One spec per risk.
 | R32 | A dev server's address gives its tab an Open button, which goes as soon as the server stops. | `dev-server-link.spec.ts` |
 | R33 | The palette names who listens on a port and in which pane; ending it frees the port and keeps the shell. | `port-owner.spec.ts` |
 | R34 | A command's bar and the palette's recent commands say when it ran and how long it took. | `command-timing.spec.ts` |
+| R35 | A pane split with another shell runs it in the same folder, panes name their shells while a tab mixes them, and switching a pane's shell keeps its place and folder. | `mixed-shells.spec.ts` |
 
 Claude Code itself isn't needed for R23 and R24: its hook and status line input is piped
 in by hand, and a copy of Node named `claude.exe` (see `startFakeClaude` in `qterm.ts`)

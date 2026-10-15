@@ -133,6 +133,19 @@ hides it. A restart unpins it.
 
 - **Split right:** Alt+Shift+= (or the button in the tab bar). **Split down:**
   Alt+Shift+-. The new pane runs the same shell in the same folder.
+- **Split with another shell:** Ctrl+Alt+Shift+= (right) or Ctrl+Alt+Shift+- (down) asks
+  which shell; press its number, or pick it with the arrows and Enter. The ▾ menu has two
+  split buttons next to each shell, and the palette has "Split right with" / "Split down
+  with" (type, say, "split right wsl"). The new pane opens in the same folder, written the
+  way its shell needs: `C:\work` becomes `/mnt/c/work` in WSL, a WSL folder opens in
+  PowerShell as `\\wsl.localhost\<distro>\...`. Command Prompt can't start in a WSL
+  folder, so it opens in your home folder, and qterm says so.
+- **Switch a pane to another shell:** Shift+right-click the pane → **Switch shell…**, or
+  "Switch this pane to" in the palette. The new shell takes the pane's place and folder;
+  if a program still runs there, qterm asks first. Picking the same shell starts it afresh.
+- **Which pane runs what:** in a tab whose panes run different shells, each pane shows its
+  shell's name in its top-right corner (in the shell's colour, if it has one); hover it
+  for the folder.
 - **Move between panes:** Alt+arrow keys, or click.
 - **Resize:** drag the gap between panes, or Alt+Shift+arrow keys. Alt+Shift+0 makes
   them equal again.
@@ -678,6 +691,9 @@ toggle_broadcast = ""                                 # off
 | `stop_programs` | Stop what runs in this pane (keeps the shell) | (none) |
 | `view_json` | View the selection or last output as JSON | (none) |
 | `toggle_size` | Full size console / back | `f11` |
+| `split_right_with` | Split right with another shell… | `ctrl+alt+shift+=` |
+| `split_down_with` | Split down with another shell… | `ctrl+alt+shift+-` |
+| `switch_shell` | Switch this pane to another shell… | (none) |
 
 **Your own shells** (`[[profiles]]`): the full set of options. `command` is the program and
 its arguments; double quotes keep words with spaces together, so put the whole command in
@@ -742,6 +758,7 @@ All of these can be changed in Settings → Keyboard shortcuts, or in the settin
 | Go to tab 1…9 | Ctrl+Alt+1…9 |
 | Close pane | Ctrl+Shift+W |
 | Split right / down | Alt+Shift+= / Alt+Shift+- |
+| Split right / down with another shell | Ctrl+Alt+Shift+= / Ctrl+Alt+Shift+- |
 | Move to the pane left/right/up/down | Alt+arrow keys |
 | Resize the pane | Alt+Shift+arrow keys |
 | Make panes equal | Alt+Shift+0 |
@@ -756,7 +773,7 @@ All of these can be changed in Settings → Keyboard shortcuts, or in the settin
 | Shortcuts and tips (also the ? button) | Ctrl+Shift+/ |
 | Full size console / back | F11 |
 | Pane background (also Shift+right-click on a pane) | (palette; no shortcut by default) |
-| Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console, stop what runs in a pane, view JSON | (palette; no shortcut by default) |
+| Swap panes, clear pane history, copy last command's output, save / open pane output, pin the console, stop what runs in a pane, view JSON, switch a pane's shell | (palette; no shortcut by default) |
 
 Ctrl+Shift+1…9 and Ctrl+Alt+1…9 are fixed. On keyboards where Ctrl+Alt (AltGr) types
 characters, qterm leaves AltGr combinations to the shell.

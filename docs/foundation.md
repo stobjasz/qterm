@@ -1342,3 +1342,38 @@ ASP.NET, 0.0.0.0, `[::1]`, *.localhost; not network addresses), `formatClock`,
 sub-second durations and history durations. While writing them, the harness's `run()`
 got a Shift press before typing: xterm drops inserted text while it believes a key is
 down, which happened whenever the palette took Ctrl+Shift+P's key-up.
+
+## 34. Different shells in one tab (#78, 2026-10-15)
+
+**Split with a shell.** `split(pane, dir, { profileId })` takes another profile than the
+pane's own; the ▾ menu's split buttons per shell, the palette's "Split right with" /
+"Split down with" (search-only groups) and `split_right_with` / `split_down_with`
+(Ctrl+Alt+Shift+= / -, through `ShellPicker`: digits pick, arrows and Enter, Esc) all
+end there. Layouts, workspaces and session restore already kept a profile per pane.
+
+**The folder carries over.** `startFolder(cwd, from, to)` (`shellCwd.ts`) reads the
+pane's folder as a Windows folder or a folder in a distro: Git Bash's `/c/...`, WSL's
+`/mnt/<drive>/...` and `\\wsl$` / `\\wsl.localhost` paths are Windows-side, other
+`/...` paths of a `wsl:<distro>` pane belong to that distro. It then writes it for the
+target: `/mnt/<drive>/...` for WSL (a distro's own folders only for the same distro),
+`\\wsl.localhost\<distro>\...` for PowerShell and Git Bash, nothing for cmd (it can't
+start in a network folder). Nothing found where there was a folder: the shell starts at
+home and a notice says why. The same profile keeps its folders untouched (Rust already
+translates Git Bash's).
+
+**Switching a pane's shell.** `replacePane` puts a new pane id in the old one's leaf
+(`swapLeaves` with an id not in the tree), keeping focus, zoom and a chosen background;
+the old terminal is disposed like a closed pane. `askToClose(..., "switch")` asks first
+when programs run there (`ConfirmClose` with `verb: "switch"`). Entry points: the
+Shift+right-click pane menu (Switch shell…), the palette, `switch_shell` (unbound).
+
+**Labels.** In a tab whose panes run more than one profile, `PaneView` renders the
+shell's name in the pane's corner (`role="note"`, the profile's tab colour if set); the
+title has the folder. `.pane` is `position: relative` for it.
+
+**Verified:** E2E R35 (a PowerShell pane split with Command Prompt from the palette:
+cmd runs there in the same folder, both panes are labelled; switching the cmd pane back to
+PowerShell keeps its folder and the labels go), red under deliberate breaks; unit tests
+for every folder translation and `replacePane`. The doc guard caught the three new
+actions.
+
