@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
 
 PackageIdentifier: stobjasz.qterm
-PackageVersion: 0.2.1
+PackageVersion: 0.2.6
 PackageLocale: en-US
 Publisher: Sebastian Tobjasz
 PublisherUrl: https://github.com/stobjasz
@@ -24,6 +24,6 @@ Tags:
 - drop-down
 - quake
 - terminal
-ReleaseNotesUrl: https://github.com/stobjasz/qterm/releases/tag/v0.2.1
+ReleaseNotesUrl: https://github.com/stobjasz/qterm/releases/tag/v0.2.6
 ManifestType: defaultLocale
 ManifestVersion: 1.10.0

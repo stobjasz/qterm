@@ -52,7 +52,7 @@ Status: ⬜ open, 🚧 in progress. Effort: S = small, M = medium, L = large.
 
 | # | Feature | Effort | Status |
 |---|---|---|---|
-| 30 | **Publish to winget** (after #13). | S | 🚧 manifests for 0.2.1 validated (`winget/`, `stobjasz.qterm`); later releases submitted by `release.yml` once `WINGET_TOKEN` is set; first submission pending |
+| 30 | **Publish to winget** (after #13). | S | 🚧 manifests for 0.2.6 validated (`winget/`, `stobjasz.qterm`); later releases submitted by `release.yml` once `WINGET_TOKEN` is set; first submission pending |
 | 34 | **Code signing** (e.g. Azure Trusted Signing) in `release.yml`, so SmartScreen stops warning on first run. | S + cost | ⬜ |
 | 38 | **ARM64 build** next to x64 (Windows on Snapdragon). | S–M | ⬜ |
 | 61 | **Fully portable mode**: a marker file next to the exe keeps settings and data in that folder (USB stick). | M | ⬜ |
@@ -63,5 +63,5 @@ Status: ⬜ open, 🚧 in progress. Effort: S = small, M = medium, L = large.
 - Small Claude Code wins: #55 (tasks and subagents per tab) and #16 ("Ask Claude about
   this").
 - For developers: #68 (problems list from every pane's output) and #72 (run on change).
-- #30 (winget): the 0.2.1 manifests are ready; it needs the first submission and the
+- #30 (winget): the 0.2.6 manifests are ready; it needs the first submission and the
   `WINGET_TOKEN` secret.
