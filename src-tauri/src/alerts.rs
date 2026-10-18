@@ -300,8 +300,10 @@ fn registered_app_id(app: &AppHandle) -> String {
 fn register_app_id(app: &AppHandle) -> Result<(), String> {
     use tauri::Manager;
     let icon = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("qterm.png");
-    if !icon.exists() {
-        std::fs::write(&icon, include_bytes!("../icons/128x128.png")).map_err(|e| e.to_string())?;
+    // Rewritten when the bundled icon changed, so an upgrade doesn't keep the old one.
+    let png: &[u8] = include_bytes!("../icons/128x128.png");
+    if std::fs::read(&icon).ok().as_deref() != Some(png) {
+        std::fs::write(&icon, png).map_err(|e| e.to_string())?;
     }
     let key = windows_registry::CURRENT_USER
         .create(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))
