@@ -41,6 +41,10 @@ tauri-plugin-updater = "2.13.3"
 png = "0.18.1"
 
 
+# Dependencies' debug info is most of target/'s size; qterm's own code keeps it.
+[profile.dev.package."*"]
+debug = false
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1
