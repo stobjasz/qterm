@@ -31,6 +31,7 @@ export interface Pane {
   elevated?: boolean;
   /** Claude Code session that ran here before the restart (see saveWorkspace). */
   claudeSession?: string;
+  codexSession?: string;
   /** Chosen for this pane ("#rrggbb"); wins over its shell's background. */
   background?: string;
   /** Title of the last Claude Code session here; names the tab, also after Claude exits. */
@@ -377,7 +378,7 @@ interface SavedSession {
   version: 1;
   activeTab?: TabId;
   tabs: { id: TabId; title?: string; color?: TabColor; icon?: string; root: LayoutNode; focusedPane: PaneId }[];
-  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; background?: string; claudeTitle?: string }>;
+  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; codex?: string; background?: string; claudeTitle?: string }>;
 }
 
 /**
@@ -385,7 +386,7 @@ interface SavedSession {
  * icons, and which Claude Code session runs in each pane (`claude`, pane → session
  * id), for resuming them on start. Shell titles are not kept.
  */
-export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string> = new Map()): string {
+export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string> = new Map(), codex: ReadonlyMap<PaneId, string> = new Map()): string {
   const saved: SavedSession = {
     version: 1,
     activeTab: ws.activeTab,
@@ -393,7 +394,7 @@ export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string>
     panes: Object.fromEntries(
       Object.values(ws.panes).map((p) => [
         p.id,
-        { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), background: p.background, claudeTitle: p.claudeTitle },
+        { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), codex: codex.get(p.id), background: p.background, claudeTitle: p.claudeTitle },
       ]),
     ),
   };
@@ -434,6 +435,7 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
         title: "",
         cwd,
         ...(claudeSession ? { claudeSession } : {}),
+        ...(typeof savedPane.codex === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(savedPane.codex) ? { codexSession: savedPane.codex } : {}),
         ...(isPaneColor(savedPane.background) ? { background: savedPane.background } : {}),
         ...(typeof savedPane.claudeTitle === "string" && savedPane.claudeTitle.trim() && savedPane.claudeTitle.length <= MAX_CLAUDE_TITLE
           ? { claudeTitle: savedPane.claudeTitle }
@@ -466,7 +468,7 @@ export function appendWorkspace(ws: Workspace, add: Workspace, nextId: (kind: "t
   const panes = { ...ws.panes };
   for (const pane of Object.values(add.panes)) {
     const id = paneIdMap.get(pane.id)!;
-    const { claudeSession: _resume, ...rest } = pane;
+    const { claudeSession: _resume, codexSession: _codexResume, ...rest } = pane;
     panes[id] = { ...rest, id, title: "" };
   }
   const tabs = add.tabs.map((tab) => {

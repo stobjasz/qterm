@@ -380,6 +380,16 @@ describe("tab style and Claude sessions across restarts", () => {
     expect(restored.tabs[0].icon).toBeUndefined();
   });
 
+  it("restores Codex UUIDs independently and rejects injected resume commands", () => {
+    const id = "01a1690c-c7b7-7e80-9864-e6971b91db16";
+    const text = saveWorkspace(base(), new Map(), new Map([["p1", id]]));
+    const restored = restoreWorkspace(text, profiles)!;
+    expect(restored.panes.p1.codexSession).toBe(id);
+    expect(restored.panes.p1.claudeSession).toBeUndefined();
+    const bad = saveWorkspace(base(), new Map(), new Map([["p1", "x; calc"]]));
+    expect(restoreWorkspace(bad, profiles)!.panes.p1.codexSession).toBeUndefined();
+  });
+
   it("remembers which Claude session ran in a pane, if it looks like one", () => {
     const text = saveWorkspace(base(), new Map([["p1", "4c766d1a-f139-42df-90f0-a04fe20d3056"]]));
     expect(restoreWorkspace(text, profiles)!.panes.p1.claudeSession).toBe("4c766d1a-f139-42df-90f0-a04fe20d3056");

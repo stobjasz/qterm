@@ -61,10 +61,16 @@ checks off.
   session's title; Alt+Shift+W jumps to the next pane where Claude waits. Optionally,
   your plan's 5-hour / 7-day usage (warnings at 80% and 95%) through Claude Code's status
   line, and an alert when Claude stops on an API error (rate limit, overload).
+- Codex CLI: browse and remember sessions in the ⬡ menu, resume in a new or current
+  tab, and optionally restore running sessions on startup. Per-tab working/idle,
+  context usage, last replies and session titles; optional permission/completion
+  notifications, plan usage in the menu and tray, and warnings at 80% and 95%.
+  Configure in Settings → Codex CLI, then review and trust its optional hooks in
+  Codex with `/hooks`. [Codex setup and feature details](docs/codex-support.md).
 - Ctrl+click web links, and file references like `src/app.ts:42` to open them in your
   editor (VS Code by default)
 - Command palette (Ctrl+Shift+P) for every action, tab, profile, layout, theme and
-  Claude session
+  Claude or Codex session
 - Pane tools: zoom a pane, swap panes, type into all panes of a tab at once; dots and
   bells on background tabs that printed something
 - Your own profiles (`[[profiles]]`: SSH hosts, dev servers, each with its own look; or

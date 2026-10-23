@@ -7,8 +7,9 @@ import { shellPath, shellQuote } from "../terminal/drop";
  * What to type (without Enter), or undefined when this shell can't do it: a custom
  * program (ssh, python), or a folder on the other side of WSL.
  */
-export function resumeHereCommand(sessionId: string, cwd: string | null, shell: ShellKind): string | undefined {
-  const resume = `claude --resume ${sessionId}`;
+export function resumeHereCommand(sessionId: string, cwd: string | null, shell: ShellKind, provider: "claude" | "codex" = "claude"): string | undefined {
+  if (provider === "codex" && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(sessionId)) return undefined;
+  const resume = provider === "codex" ? `codex --no-daemon resume ${sessionId}` : `claude --resume ${sessionId}`;
   if (shell === "other") return undefined;
   if (!cwd) return resume;
   // A session started in WSL lives in WSL's Claude Code, and the other way round.

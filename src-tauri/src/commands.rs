@@ -564,3 +564,59 @@ pub fn open_logs(app: AppHandle) -> Result<(), String> {
 pub fn quit_now(app: AppHandle) {
     app.exit(0);
 }
+
+
+#[tauri::command]
+pub fn list_codex_sessions(store: State<'_, crate::codex::Store>) -> Vec<ClaudeSession> { store.list() }
+
+#[tauri::command]
+pub async fn codex_session_seen(app: AppHandle, store: State<'_, crate::codex::Store>, index: State<'_, crate::codex::Index>,
+    id: String, profile_id: String, pane_cwd: Option<String>) -> Result<Vec<ClaudeSession>, String> {
+    let sessions = store.remember(&index, &id, &profile_id, pane_cwd)?;
+    let _ = app.emit("codex-sessions-changed", &sessions);
+    Ok(sessions)
+}
+
+#[tauri::command]
+pub fn forget_codex_sessions(app: AppHandle, store: State<'_, crate::codex::Store>, ids: Vec<String>) -> Result<Vec<ClaudeSession>, String> {
+    let sessions = store.forget(&ids)?;
+    let _ = app.emit("codex-sessions-changed", &sessions); Ok(sessions)
+}
+
+#[tauri::command]
+pub async fn list_all_codex_sessions(index: State<'_, crate::codex::Index>) -> Result<Vec<crate::claude::TranscriptSummary>, String> {
+    Ok(crate::codex::home().map(|h| index.scan(&h)).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn codex_running(sessions: State<'_, SessionManager>) -> Result<Vec<SessionId>, String> { Ok(sessions.running("codex.exe")) }
+
+#[tauri::command]
+pub async fn codex_usage(index: State<'_, crate::codex::Index>, id: String) -> Result<Option<crate::codex::Usage>, String> {
+    if !crate::codex::valid_id(&id) { return Err("invalid Codex session id".into()) }
+    Ok(crate::codex::home().and_then(|h| index.usage(&h, &id)))
+}
+
+#[tauri::command]
+pub fn set_codex_plan_summary(app: AppHandle, summary: Option<String>) {
+    crate::tray::set_codex_plan(&app, summary);
+}
+
+fn codex_hook_paths() -> Result<(std::path::PathBuf, String), String> {
+    let home = crate::codex::home().ok_or("no home folder for Codex")?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok((crate::codex_hook::settings_path(&home), crate::codex_hook::command_for(&exe)))
+}
+
+#[tauri::command]
+pub fn codex_hook_status() -> Result<crate::codex_hook::HookStatus, String> {
+    let (path, command) = codex_hook_paths()?; crate::codex_hook::status(&path, &command)
+}
+#[tauri::command]
+pub fn install_codex_hook() -> Result<crate::codex_hook::HookStatus, String> {
+    let (path, command) = codex_hook_paths()?; crate::codex_hook::install(&path, &command)?; crate::codex_hook::status(&path, &command)
+}
+#[tauri::command]
+pub fn remove_codex_hook() -> Result<crate::codex_hook::HookStatus, String> {
+    let (path, command) = codex_hook_paths()?; crate::codex_hook::remove(&path)?; crate::codex_hook::status(&path, &command)
+}

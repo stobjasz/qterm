@@ -1,3 +1,4 @@
+import { codexHookStatus, installCodexHook, removeCodexHook } from "../ipc";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useEscape } from "../tabs/useDismiss";
@@ -119,6 +120,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
 
   useEffect(() => void getAutostart().then(setAutostartState), []);
   useEffect(() => void claudeHookStatus().then(setHook, (e) => setError(String(e))), []);
+  const [codexHook, setCodexHook] = useState<HookStatus>();
+  useEffect(() => void codexHookStatus().then(setCodexHook, (e) => setError(String(e))), []);
+  const changeCodexHook = (action: () => Promise<HookStatus>) => void action().then(setCodexHook, (e) => setError(String(e)));
   const changeHook = (action: () => Promise<HookStatus>) => void action().then(setHook, (e) => setError(String(e)));
   /** Import from Windows Terminal: the shells offered, and which are ticked. */
   const [wt, setWt] = useState<{ profiles: WtProfile[]; chosen: ReadonlySet<string> }>();
@@ -580,6 +584,27 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
                 )}
                 {statusline?.installed && <button className="now" title="Applies right away, no Save needed" onClick={() => changeStatusline(removeClaudeStatusline)}>Remove</button>}
               </div>
+            </div>
+          </Group>
+
+          <Group title="Codex CLI">
+            <Toggle label="Remember Codex sessions" hint='Keep sessions printed as "codex resume <id>" in the ⬡ menu, grouped by folder.' checked={draft.codexSessions} onChange={(v) => set("codexSessions", v)} />
+            <Toggle label="Alert me when Codex is waiting" hint="Mark the tab and show a Windows notification for permission requests and completed replies. Requires the optional hooks below." checked={draft.codexAlerts} onChange={(v) => set("codexAlerts", v)} />
+            <Toggle label="Resume Codex sessions on start" hint="Resume sessions in restored panes. Requires reopening tabs and layout; hooks identify the session in each pane." checked={draft.codexRestore} onChange={(v) => set("codexRestore", v)} />
+            <div className="settings-field">
+              <span className="settings-label">Codex hooks</span>
+              <span className="settings-hint">
+                Optional hooks in {codexHook?.settingsPath ?? "Codex's hooks.json"} identify sessions, permission requests and last replies.
+                After setup or an update, review and trust them using /hooks in Codex. Start a new session afterwards.
+                Sessions opened by qterm use --no-daemon so hooks inherit the correct pane. For manually launched sessions, use codex --no-daemon.
+                Other user hooks are preserved; the previous file is backed up. Hooks do nothing outside qterm.
+              </span>
+              <div className="settings-actions">
+                <span>{codexHook === undefined ? "Checking…" : codexHook.current ? "Configured · trust in /hooks" : codexHook.installed ? "Set up for another qterm location" : "Not set up"}</span>
+                {codexHook && !codexHook.current && <button className="now" onClick={() => changeCodexHook(installCodexHook)}>{codexHook.installed ? "Update" : "Set up Codex hooks"}</button>}
+                {codexHook?.installed && <button className="now" onClick={() => changeCodexHook(removeCodexHook)}>Remove</button>}
+              </div>
+              <span className="settings-hint">Model, context and plan limits are read from local Codex records when available. Codex does not report a cache expiry time or subscription cost per session.</span>
             </div>
           </Group>
 

@@ -60,6 +60,9 @@ export interface Config {
   claudeSessions: boolean;
   claudeAlerts: boolean;
   claudeRestore: boolean;
+  codexSessions: boolean;
+  codexAlerts: boolean;
+  codexRestore: boolean;
   editor: string;
   /** Seconds; 0 = off. */
   longCommandAlert: number;
@@ -736,3 +739,33 @@ export function onFileDrag(handler: (drag: FileDrag) => void): Promise<UnlistenF
     handler(payload.type === "drop" ? { type: "drop", x, y, paths: payload.paths } : { type: "over", x, y });
   });
 }
+
+
+export type CodexSession = ClaudeSession;
+export interface CodexUsage {
+  sessionId: string;
+  model: string | null;
+  contextTokens: number;
+  contextLimit: number | null;
+  outputTokens: number;
+  title: string | null;
+  rateLimits: { primary?: CodexLimit | null; secondary?: CodexLimit | null } | null;
+}
+export interface CodexLimit { used_percent: number; window_minutes?: number; resets_at?: number }
+export interface CodexActivity { paneId: string; sessionId: string | null; busy: boolean }
+export const listCodexSessions = (): Promise<CodexSession[]> => invoke("list_codex_sessions");
+export const listAllCodexSessions = (): Promise<TranscriptSummary[]> => invoke("list_all_codex_sessions");
+export const codexSessionSeen = (id: string, profileId: string, paneCwd?: string): Promise<CodexSession[]> => invoke("codex_session_seen", { id, profileId, paneCwd });
+export const forgetCodexSessions = (ids: string[]): Promise<CodexSession[]> => invoke("forget_codex_sessions", { ids });
+export const codexRunning = (): Promise<SessionId[]> => invoke("codex_running");
+export const codexUsage = (id: string): Promise<CodexUsage | null> => invoke("codex_usage", { id });
+export const codexHookStatus = (): Promise<HookStatus> => invoke("codex_hook_status");
+export const installCodexHook = (): Promise<HookStatus> => invoke("install_codex_hook");
+export const removeCodexHook = (): Promise<HookStatus> => invoke("remove_codex_hook");
+export const onCodexSessionsChanged = (handler: (sessions: CodexSession[]) => void) => listen<CodexSession[]>("codex-sessions-changed", (e) => handler(e.payload));
+export const onCodexSessionStart = (handler: (session: PaneClaudeSession) => void) => listen<PaneClaudeSession>("codex-session-start", (e) => handler(e.payload));
+export const onCodexAttention = (handler: (alert: ClaudeAlert) => void) => listen<ClaudeAlert>("codex-attention", (e) => handler(e.payload));
+export const onCodexReply = (handler: (reply: ClaudeReply) => void) => listen<ClaudeReply>("codex-reply", (e) => handler(e.payload));
+export const onCodexActivity = (handler: (activity: CodexActivity) => void) => listen<CodexActivity>("codex-activity", (e) => handler(e.payload));
+
+export const setCodexPlanSummary = (summary: string | null): Promise<void> => invoke("set_codex_plan_summary", { summary });

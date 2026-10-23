@@ -18,6 +18,12 @@ static ATTENTION: AtomicUsize = AtomicUsize::new(0);
 
 /// "Claude plan: 5-hour 23% · 7-day 41%", from the status line relay (the UI sends it).
 static PLAN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static CODEX_PLAN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_codex_plan(app: &AppHandle, summary: Option<String>) {
+    *CODEX_PLAN.lock().unwrap() = summary;
+    refresh(app);
+}
 
 pub fn set_plan(app: &AppHandle, summary: Option<String>) {
     *PLAN.lock().unwrap() = summary;
@@ -131,13 +137,16 @@ pub fn refresh(app: &AppHandle) {
     if let Some(plan) = PLAN.lock().unwrap().as_deref() {
         tooltip.push_str(&format!("\nClaude plan: {plan}"));
     }
+    if let Some(plan) = CODEX_PLAN.lock().unwrap().as_deref() {
+        tooltip.push_str(&format!("\nCodex plan: {plan}"));
+    }
     if window::is_pinned(app) {
         tooltip.push_str("\npinned open");
     }
     match ATTENTION.load(Ordering::Relaxed) {
         0 => {}
-        1 => tooltip.push_str("\nClaude is waiting for you in 1 pane"),
-        n => tooltip.push_str(&format!("\nClaude is waiting for you in {n} panes")),
+        1 => tooltip.push_str("\nA coding agent is waiting for you in 1 pane"),
+        n => tooltip.push_str(&format!("\nCoding agents are waiting for you in {n} panes")),
     }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(tooltip));

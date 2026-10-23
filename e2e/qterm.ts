@@ -25,6 +25,8 @@ const DEFAULT_SETTINGS = fs.readFileSync(path.join(ROOT, "src-tauri", "src", "co
 
 /** Top-level settings to change (TOML values, e.g. `"1"` or `'"mica"'`) and extra tables to add. */
 export interface Settings {
+  /** Per-app environment for isolated provider data in integration tests. */
+  env?: Record<string, string>;
   values?: Record<string, string>;
   extra?: string;
   /** Other files to put in the app's config folder before it starts (name → contents). */
@@ -58,6 +60,7 @@ declare global {
 
 export class Qterm {
   private process?: ChildProcess;
+  private environment: Record<string, string> = {};
   private browser?: Browser;
   page!: Page;
 
@@ -68,6 +71,7 @@ export class Qterm {
     fs.writeFileSync(path.join(CONFIG_DIR, "config.toml"), settingsFile(settings));
     for (const [name, contents] of Object.entries(settings.files ?? {})) fs.writeFileSync(path.join(CONFIG_DIR, name), contents);
     const qterm = new Qterm();
+    qterm.environment = settings.env ?? {};
     await qterm.start();
     return qterm;
   }
@@ -78,7 +82,7 @@ export class Qterm {
     const logFd = fs.openSync(APP_LOG, "a");
     fs.writeSync(logFd, `\n--- qterm started ${new Date().toISOString()}\n`);
     const child = spawn(EXE, [], {
-      env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}` },
+      env: { ...process.env, ...this.environment, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}` },
       stdio: ["ignore", logFd, logFd],
     });
     fs.closeSync(logFd);

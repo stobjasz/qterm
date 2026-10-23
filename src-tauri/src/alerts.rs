@@ -76,7 +76,15 @@ enum InboxMessage {
     /// From the status line relay (claude_statusline.rs).
     Usage(crate::claude_statusline::StatuslineUsage),
     Reply(Reply),
+    CodexAlert(Alert),
+    CodexSession(PaneSession),
+    CodexReply(Reply),
+    CodexActivity(CodexActivity),
 }
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexActivity { pub pane_id: String, pub session_id: Option<String>, pub busy: bool }
 
 /// The fields of Claude Code's hook input that matter here.
 #[derive(Deserialize)]
@@ -95,7 +103,14 @@ struct HookInput {
 
 /// Hook mode: never fails loudly, since a failing hook would bother Claude Code.
 /// Outside qterm (no `QTERM_PANE`) it does nothing at all.
-pub fn run_hook() {
+pub fn run_hook() { run_provider_hook(false) }
+
+pub fn run_codex_hook() {
+    run_provider_hook(true);
+    println!("{{}}");
+}
+
+fn run_provider_hook(codex: bool) {
     let Ok(pane_id) = std::env::var(PANE_ENV) else { return };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -104,9 +119,32 @@ pub fn run_hook() {
         let _ = tx.send(ok.then_some(input));
     });
     let Ok(Some(input)) = rx.recv_timeout(INPUT_TIMEOUT) else { return };
-    let Some(message) = message_from_hook(&pane_id, &input) else { return };
+    let message = if codex { message_from_codex_hook(&pane_id, &input) } else { message_from_hook(&pane_id, &input) };
+    let Some(message) = message else { return };
     if let Some(inbox) = hook_inbox() {
         let _ = deliver(&inbox, &message);
+    }
+}
+
+fn message_from_codex_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
+    let hook: HookInput = serde_json::from_str(input).ok()?;
+    let session_id = hook.session_id.filter(|id| crate::codex::valid_id(id));
+    match hook.hook_event_name.as_deref()? {
+        "SessionStart" => Some(InboxMessage::CodexSession(PaneSession {
+            pane_id: pane_id.into(), session_id: session_id?, transcript_path: None,
+        })),
+        "UserPromptSubmit" | "PostToolUse" | "Interrupt" => Some(InboxMessage::CodexActivity(CodexActivity {
+            pane_id: pane_id.into(), session_id, busy: hook.hook_event_name.as_deref() != Some("Interrupt"),
+        })),
+        "PermissionRequest" => Some(InboxMessage::CodexAlert(Alert {
+            pane_id: pane_id.into(), session_id, title: Some("Codex needs permission".into()),
+            message: "Codex is waiting for you to review a permission request.".into(), kind: Some("codex:permission".into()),
+        })),
+        "Stop" => Some(InboxMessage::CodexReply(Reply {
+            pane_id: pane_id.into(), session_id,
+            message: hook.last_assistant_message.unwrap_or_default().chars().take(MAX_REPLY).collect(),
+        })),
+        _ => None,
     }
 }
 
@@ -246,6 +284,10 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
                     InboxMessage::Session(session) => app.emit("claude-session-start", session),
                     InboxMessage::Usage(usage) => app.emit("claude-statusline", usage),
                     InboxMessage::Reply(reply) => app.emit("claude-reply", reply),
+                    InboxMessage::CodexAlert(alert) => app.emit("codex-attention", alert),
+                    InboxMessage::CodexSession(session) => app.emit("codex-session-start", session),
+                    InboxMessage::CodexReply(reply) => app.emit("codex-reply", reply),
+                    InboxMessage::CodexActivity(activity) => app.emit("codex-activity", activity),
                 };
             }
         }
@@ -315,6 +357,20 @@ fn register_app_id(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn codex_events_use_separate_provider_messages() {
+        let id = "01a1690c-c7b7-7e80-9864-e6971b91db16";
+        let input = |event: &str| serde_json::json!({"hook_event_name":event,"session_id":id,"last_assistant_message":"Done."}).to_string();
+        assert!(matches!(message_from_codex_hook("p", &input("SessionStart")), Some(InboxMessage::CodexSession(_))));
+        assert!(matches!(message_from_codex_hook("p", &input("Stop")), Some(InboxMessage::CodexReply(Reply { message, .. })) if message == "Done."));
+        assert!(matches!(message_from_codex_hook("p", &input("PermissionRequest")), Some(InboxMessage::CodexAlert(Alert { kind: Some(kind), .. })) if kind == "codex:permission"));
+        assert!(matches!(message_from_codex_hook("p", &input("UserPromptSubmit")), Some(InboxMessage::CodexActivity(CodexActivity { busy: true, .. }))));
+        assert!(matches!(message_from_codex_hook("p", &input("Interrupt")), Some(InboxMessage::CodexActivity(CodexActivity { busy: false, .. }))));
+        assert!(message_from_codex_hook("p", &input("SubagentStop")).is_none());
+        assert!(message_from_codex_hook("p", "{broken").is_none());
+        assert!(message_from_codex_hook("p", r#"{"hook_event_name":"SessionStart","session_id":"x;calc"}"#).is_none());
+    }
+
     use super::*;
 
     #[test]
@@ -405,6 +461,7 @@ mod tests {
                 InboxMessage::Session(s) => s.session_id,
                 InboxMessage::Usage(u) => u.pane_id,
                 InboxMessage::Reply(r) => r.message,
+                other => panic!("unexpected inbox message: {other:?}"),
             })
             .collect();
         assert_eq!(taken, ["first", "second"]);

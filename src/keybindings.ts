@@ -123,7 +123,7 @@ const LABELS: Record<Action, string> = {
   copy_last_output: "Copy last command's output",
   search_all: "Search all panes",
   pane_background: "Pane background…",
-  next_waiting: "Go to the next pane where Claude waits",
+  next_waiting: "Go to the next pane where a coding agent waits",
   save_output: "Save pane output…",
   open_output: "Open pane output in editor",
   quick_select: "Quick select (copy or open what's on screen)",

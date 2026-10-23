@@ -1,5 +1,8 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 
+import { CodexMenu, type CodexMenuProps } from "../codex/CodexMenu";
+import { contextPercent as codexPercent, usageSummary as codexSummary } from "../codex/usage";
+import type { CodexUsage } from "../ipc";
 import { CacheCountdown } from "../claude/CacheCountdown";
 import type { CacheState } from "../claude/cache";
 import { ClaudeMenu, type ClaudeMenuProps } from "../claude/ClaudeMenu";
@@ -20,6 +23,7 @@ interface Props {
   profiles: Profile[];
   /** Present when remembering Claude sessions is switched on. */
   claude?: ClaudeMenuProps;
+  codex?: CodexMenuProps;
   onActivate(tabId: TabId): void;
   onClose(tabId: TabId): void;
   onNewTab(profileId?: string): void;
@@ -54,6 +58,9 @@ export interface TabMarkers {
   broadcast: boolean;
   /** Claude Code in one of the tab's panes: working, or idle at its prompt. */
   claude?: "busy" | "idle";
+  codex?: "busy" | "idle";
+  codexUsage?: CodexUsage;
+  codexReply?: string;
   /** Its token use, when its transcript was found. */
   claudeUsage?: ClaudeUsage;
   /** A pane runs as administrator. */
@@ -122,9 +129,10 @@ export function TabBar(props: Props) {
           const color = tab.color ?? pane?.project?.color ?? profile?.tabColor;
           const icon = tab.icon ?? pane?.project?.icon ?? profile?.icon;
           const tooltip = [
-            waiting && `Claude: ${waiting.message}`,
+            waiting && `${waiting.kind?.startsWith("codex:") ? "Codex" : "Claude"}: ${waiting.message}`,
             title,
             marks?.git && `⎇ ${gitSummary(marks.git)}`,
+            marks?.codexReply && `Codex's last reply:\n${replyPreview(marks.codexReply)}`,
             marks?.claudeReply && `Claude's last reply:\n${replyPreview(marks.claudeReply)}`,
             "Double-click to rename, drag to move, right-click for colour and icon",
           ]
@@ -167,6 +175,14 @@ export function TabBar(props: Props) {
                   )}
                   <span className="tab-title">{title}</span>
                 </>
+              )}
+              {marks?.codex && !waiting && (
+                <span className={`tab-claude ${marks.codex}`} role="status" aria-label={marks.codex === "busy" ? "Codex is working" : "Codex is idle"} title={marks.codexUsage ? codexSummary(marks.codexUsage) : `Codex is ${marks.codex}`}>
+                  ⬡
+                </span>
+              )}
+              {marks?.codexUsage && codexPercent(marks.codexUsage) !== undefined && (
+                <span className={`tab-context${codexPercent(marks.codexUsage)! >= 80 ? " full" : ""}`} title={codexSummary(marks.codexUsage)} aria-label={`Codex context ${codexPercent(marks.codexUsage)}% full`}>{codexPercent(marks.codexUsage)}%</span>
               )}
               {marks?.claude && !waiting && (
                 <span
@@ -230,7 +246,7 @@ export function TabBar(props: Props) {
                 <span
                   className={`tab-attention ${waiting.kind ?? ""}`}
                   role="status"
-                  aria-label={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : `Claude is waiting: ${waiting.message}`}
+                  aria-label={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : `${waiting.kind?.startsWith("codex:") ? "Codex" : "Claude"} is waiting: ${waiting.message}`}
                   title={titled(waiting.kind) ? `${waiting.title}: ${waiting.message}` : undefined}
                 >
                   {waiting.kind === "command_done"
@@ -241,7 +257,7 @@ export function TabBar(props: Props) {
                         ? "⚑"
                         : waiting.kind?.startsWith("stop_failure")
                           ? "!"
-                          : "✳"}
+                          : waiting.kind?.startsWith("codex:") ? "⬡" : "✳"}
                 </span>
               )}
               <button
@@ -325,6 +341,7 @@ export function TabBar(props: Props) {
         )}
       </Popup>
       {claude && <ClaudeMenu {...claude} />}
+      {props.codex && <CodexMenu {...props.codex} />}
       {styling && (
         <TabStyleMenu
           key={styling.tabId}
@@ -363,7 +380,7 @@ export function TabBar(props: Props) {
 
 /** Alerts that say what happened in their title: a long command's end, Claude stopping on an error, a trigger. */
 function titled(kind: string | null | undefined): boolean {
-  return Boolean(kind?.startsWith("command_") || kind?.startsWith("stop_failure") || kind === "trigger");
+  return Boolean(kind?.startsWith("codex:") || kind?.startsWith("command_") || kind?.startsWith("stop_failure") || kind === "trigger");
 }
 
 function RenameField({ initial, onDone }: { initial: string; onDone(value?: string): void }) {

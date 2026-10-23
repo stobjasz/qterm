@@ -64,6 +64,12 @@ claude_alerts = true
 # session runs where.
 claude_restore = false
 
+# Codex CLI equivalents: sessions menu, attention alerts, and automatic resume.
+# Optional hooks are set up in Settings; review and trust them with /hooks in Codex.
+codex_sessions = false
+codex_alerts = true
+codex_restore = false
+
 # Ctrl+click a file reference like src/app.ts:42 to open it with this command.
 # {file}, {line} and {col} are filled in; double quotes keep a program path with
 # spaces together, e.g.

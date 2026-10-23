@@ -3,7 +3,7 @@
 qterm is a drop-down terminal for Windows 11. Press **~** (the key left of 1) and a
 translucent console slides down from the top of the screen; press it again and it slides
 away. It runs PowerShell, Command Prompt, Git Bash and WSL in tabs and split panes, and
-it has extras for working with Claude Code.
+it has extras for working with Claude Code and Codex CLI.
 
 - [Getting started](#getting-started)
 - [Updates](#updates)
@@ -14,6 +14,7 @@ it has extras for working with Claude Code.
 - [Picking up where you left off](#picking-up-where-you-left-off)
 - [Notifications](#notifications)
 - [Claude Code](#claude-code)
+- [Codex CLI](#codex-cli)
 - [Administrator tabs](#administrator-tabs)
 - [Settings](#settings)
 - [The settings file](#the-settings-file)
@@ -485,6 +486,37 @@ message.
   session's folder first). If that tab is busy, a new tab is used instead.
 - **All on this PC:** every Claude Code session on this computer, grouped by folder,
   with a **+** per folder to start a new session there.
+
+## Codex CLI
+
+Enable **Remember Codex sessions** in **Settings → Codex CLI** to show the **⬡**
+menu. It offers remembered sessions and all active local Codex sessions grouped by
+folder, with search, branch and prompt counts. Start a fresh session in a folder,
+resume in a new tab, or choose **here** to resume in the current pane. A busy pane
+opens the session in a new tab. The palette also offers remembered sessions.
+
+For permission alerts, last replies and reliable session identification, choose
+**Set up Codex hooks**, then review and trust them using `/hooks` in Codex. Start a
+new Codex session afterwards. The setup preserves other hooks and backs up
+`hooks.json`; removing it removes only qterm's entries. Hooks act only inside qterm.
+Sessions launched by qterm use `codex --no-daemon`; use that command for manual
+launches too, so hook processes inherit the correct pane information.
+
+The tab's ⬡ spins while Codex works and dims while idle. When available, its context
+percentage appears beside it; hovering shows the model, context, output tokens and
+reported plan limits. Tabs take the session's first prompt as a title and show the
+last reply in their tooltip. Permission requests and completed turns mark background
+tabs and can show Windows notifications. **Alt+Shift+W** visits waiting Claude or
+Codex panes. Plan limits appear in the menu and tray, with warnings at 80% and 95%.
+
+Enable **Resume Codex sessions on start** together with **Reopen tabs and layout on
+start** to resume each identified session in its restored pane. This is independent
+of Claude's restore setting. Codex data comes from `CODEX_HOME`, or `~/.codex`.
+
+Codex does not provide Claude's cache-expiry countdown, session billing figure or
+`StopFailure` hook. Local rollout records can change format, so missing usage stays
+unavailable. See [Codex setup and feature details](codex-support.md) for the parity
+matrix and current limits.
 
 ## Administrator tabs
 

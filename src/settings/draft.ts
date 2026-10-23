@@ -21,6 +21,9 @@ export interface Draft {
   claudeSessions: boolean;
   claudeAlerts: boolean;
   claudeRestore: boolean;
+  codexSessions: boolean;
+  codexAlerts: boolean;
+  codexRestore: boolean;
   editor: string;
   longCommandAlert: number;
   inlineImages: boolean;
@@ -58,6 +61,9 @@ const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, s
   claudeSessions: "claude_sessions",
   claudeAlerts: "claude_alerts",
   claudeRestore: "claude_restore",
+  codexSessions: "codex_sessions",
+  codexAlerts: "codex_alerts",
+  codexRestore: "codex_restore",
   editor: "editor",
   longCommandAlert: "long_command_alert",
   inlineImages: "inline_images",
@@ -91,6 +97,9 @@ export function toDraft(config: Config): Draft {
     claudeSessions: config.claudeSessions,
     claudeAlerts: config.claudeAlerts,
     claudeRestore: config.claudeRestore,
+    codexSessions: config.codexSessions,
+    codexAlerts: config.codexAlerts,
+    codexRestore: config.codexRestore,
     editor: config.editor,
     longCommandAlert: config.longCommandAlert,
     inlineImages: config.inlineImages,

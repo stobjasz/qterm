@@ -86,6 +86,7 @@ import { isMultiLine } from "./terminal/paste";
 import { ConfirmPaste } from "./terminal/ConfirmPaste";
 import { findJson, type Json } from "./terminal/json";
 import { JsonViewer } from "./terminal/JsonViewer";
+import { useCodex } from "./codex/useCodex";
 import type { CacheState } from "./claude/cache";
 import { gitSummary, projectLook } from "./project/project";
 import { resumeHereCommand } from "./claude/resume";
@@ -280,6 +281,7 @@ export default function App() {
         onExit: (...args) => handlers.current.onExit(...args),
         onCwd: (...args) => handlers.current.onCwd(...args),
         onClaudeSession: (...args) => handlers.current.onClaudeSession(...args),
+        onCodexSession: (...args) => handlers.current.onCodexSession?.(...args),
         onSearchResults: (...args) => handlers.current.onSearchResults(...args),
         onActivity: (...args) => handlers.current.onActivity(...args),
         onBell: (...args) => handlers.current.onBell(...args),
@@ -308,6 +310,7 @@ export default function App() {
       copyOnSelect: config.copyOnSelect,
       rightClickPaste: config.rightClickPaste,
       claudeSessions: config.claudeSessions,
+      codexSessions: config.codexSessions,
       inlineImages: config.inlineImages,
       ligatures: config.font.ligatures,
     });
@@ -500,6 +503,7 @@ export default function App() {
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
   const claudeStatusRef = useRef<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
+  const codexStatusRef = useRef<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
   /**
    * Resumes a session in the focused pane: its folder, then `claude --resume`. A new
    * tab instead when that pane is busy (Claude or another command running) or its
@@ -512,7 +516,7 @@ export default function App() {
       const pane = paneId ? ws.panes[paneId] : undefined;
       const kind = profilesRef.current?.find((p) => p.id === pane?.profileId)?.kind ?? "other";
       const command = resumeHereCommand(session.id, session.cwd, kind);
-      const busy = paneId && (claudeStatusRef.current.has(paneId) || registry.commandRunning(paneId));
+      const busy = paneId && (claudeStatusRef.current.has(paneId) || codexStatusRef.current.has(paneId) || registry.commandRunning(paneId));
       if (!paneId || !command || busy) {
         setNotice(
           busy
@@ -697,7 +701,7 @@ export default function App() {
           const waiting = [...attentionRef.current].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([id]) => id);
           const next = nextWaiting(order, new Set(waiting), paneId);
           if (next) setWorkspace((w) => focusPane(w, next));
-          else setNotice("Claude isn't waiting for you in any pane.");
+          else setNotice("No coding agent is waiting for you in any pane.");
           break;
         }
         case "stopPrograms": {
@@ -744,6 +748,7 @@ export default function App() {
       setWorkspace((ws) => setPaneCwd(ws, paneId, cwd));
       setHistory((h) => rememberFolder(h, cwd));
     },
+    onCodexSession: (paneId, id) => codex.seen(paneId, id, false),
     onClaudeSession: (paneId, id) => {
       const pane = workspaceRef.current.panes[paneId];
       if (pane) void claudeSessionSeen(id, pane.profileId, pane.cwd);
@@ -766,7 +771,7 @@ export default function App() {
       // No text: maybe an image (a screenshot), typed as the path of a file holding it.
       if (!text) return void pasteImage(paneId);
       // Several lines would run one by one in a shell; Claude Code and full-screen programs take them as input.
-      const ask = configRef.current?.pasteWarning !== false && isMultiLine(text) && !claudeStatusRef.current.has(paneId) && !registry.fullScreen(paneId);
+      const ask = configRef.current?.pasteWarning !== false && isMultiLine(text) && !claudeStatusRef.current.has(paneId) && !codexStatusRef.current.has(paneId) && !registry.fullScreen(paneId);
       if (ask) setPasteConfirm({ paneId, text });
       else registry.pasteText(paneId, text);
     },
@@ -962,6 +967,21 @@ export default function App() {
     },
     [registry],
   );
+
+  const codex = useCodex({
+    config, workspace, profiles, defaultProfile, registry, newTab,
+    startupInput: startupInput.current, attention,
+    raiseAlert: (alert) => raiseAlert(alert),
+    focusPane: (paneId) => setWorkspace((ws) => focusPane(ws, paneId)),
+    label: paneLabel, notice: setNotice,
+    agentRunning: (paneId) => claudeStatusRef.current.has(paneId),
+    refreshProject: (paneId) => refreshProject.current(paneId),
+  });
+  codexStatusRef.current = codex.status;
+  useEffect(() => {
+    const titles = new Map([...codex.usages].flatMap(([id, u]) => u.title ? [[id, u.title] as const] : []));
+    if (titles.size) setWorkspace((ws) => withClaudeTitles(ws, titles));
+  }, [codex.usages]);
 
   // --- Claude Code's status line: exact figures and plan usage ------------------------
   const onStatusline = useRef<(line: StatuslineUsage) => void>(null!);
@@ -1200,6 +1220,10 @@ export default function App() {
           run: () => setPortDialog(owner),
         };
       }),
+      ...(config?.codexSessions ? codex.sessions : []).flatMap((session) => [
+        { id: `codex:${session.id}`, group: "Resume Codex", label: session.title ?? session.id, run: () => codex.resume(session) },
+        { id: `codex-here:${session.id}`, group: "Resume Codex here", label: session.title ?? session.id, run: () => codex.resumeHere(session) },
+      ]),
       ...(config?.claudeSessions ? claudeSessions : []).flatMap((session) => {
         const label = `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`;
         return [
@@ -1209,7 +1233,7 @@ export default function App() {
       }),
       ...[...attention].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([paneId, alert]) => ({
         id: `waiting:${paneId}`,
-        group: "Claude waits",
+        group: "Agent waits",
         label: paneLabel(paneId),
         hint: alert.message.length > 40 ? `${alert.message.slice(0, 39)}…` : alert.message,
         run: () => setWorkspace((ws) => focusPane(ws, paneId)),
@@ -1258,7 +1282,7 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry, switchShell]);
+  }, [config, workspace, profiles, claudeSessions, codex.sessions, codex.resume, codex.resumeHere, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry, switchShell]);
 
   claudeStatusRef.current = claudeStatus;
   // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
@@ -1323,6 +1347,8 @@ export default function App() {
         workspace.tabs.map((tab) => {
           const ids = paneIds(tab.root);
           const statuses = ids.map((id) => claudeStatus.get(id));
+          const codexPane = codex.status.has(tab.focusedPane) ? tab.focusedPane : ids.find((id) => codex.status.has(id));
+          const codexStatuses = ids.map((id) => codex.status.get(id));
           // The focused pane's session if it runs one, else the tab's first.
           const usage = claudeUsages.get(tab.focusedPane) ?? ids.map((id) => claudeUsages.get(id)).find(Boolean);
           const claudePane = claudeStatus.has(tab.focusedPane) ? tab.focusedPane : ids.find((id) => claudeStatus.has(id));
@@ -1334,6 +1360,9 @@ export default function App() {
               zoomed: Boolean(tab.zoomed),
               broadcast: Boolean(tab.broadcast),
               claude: statuses.includes("busy") ? ("busy" as const) : statuses.includes("idle") ? ("idle" as const) : undefined,
+              codex: codexStatuses.includes("busy") ? ("busy" as const) : codexStatuses.includes("idle") ? ("idle" as const) : undefined,
+              codexUsage: codexPane ? codex.usages.get(codexPane) : undefined,
+              codexReply: codexPane ? codex.replies.get(codexPane) : undefined,
               claudeUsage: usage,
               claudeReply: claudePane ? replies.get(claudePane) : undefined,
               claudeCache: claudePane ? caches.get(claudePane) : undefined,
@@ -1343,7 +1372,7 @@ export default function App() {
           ] as const;
         }),
       ),
-    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages, replies, caches, projects, devLinks],
+    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages, codex.status, codex.usages, codex.replies, replies, caches, projects, devLinks],
   );
   /** Pane → Claude session running in it, saved with the tabs (see claude_restore). */
   const claudeByPane = useMemo(
@@ -1357,7 +1386,7 @@ export default function App() {
         .flatMap((tab) => paneIds(tab.root))
         .flatMap((paneId) => {
           const alert = attention.get(paneId);
-          return alert && isClaudeAlert(alert.kind) ? [{ paneId, label: paneLabel(paneId), message: alert.message, reply: replies.get(paneId) }] : [];
+          return alert && isClaudeAlert(alert.kind) && !alert.kind?.startsWith("codex:") ? [{ paneId, label: paneLabel(paneId), message: alert.message, reply: replies.get(paneId) }] : [];
         }),
     [workspace.tabs, attention, paneLabel, replies],
   );
@@ -1491,6 +1520,11 @@ export default function App() {
           }),
       );
       // Claude Code sessions that ran in panes come back too, if asked for.
+      if (config.codexRestore) {
+        for (const pane of Object.values(restored.panes)) {
+          if (pane.codexSession) startupInput.current.set(pane.id, `codex --no-daemon resume ${pane.codexSession}\r`);
+        }
+      }
       if (config.claudeRestore) {
         for (const pane of Object.values(restored.panes)) {
           if (pane.claudeSession) startupInput.current.set(pane.id, `claude --resume ${pane.claudeSession}\r`);
@@ -1543,13 +1577,15 @@ export default function App() {
   }, [shown, saveScrollbacks]);
   // Save the layout shortly after it changes (shell titles alone don't count).
   const lastSaved = useRef<string>(undefined);
+  const codexByPaneRef = useRef(codex.byPane);
+  codexByPaneRef.current = codex.byPane;
   const claudeByPaneRef = useRef(claudeByPane);
   claudeByPaneRef.current = claudeByPane;
   /** Writes the tabs now if they changed since the last save. */
   const flushSession = useCallback(async () => {
     const ws = workspaceRef.current;
     if (startup.current !== "done" || ws.tabs.length === 0) return;
-    const text = saveWorkspace(ws, claudeByPaneRef.current);
+    const text = saveWorkspace(ws, claudeByPaneRef.current, codexByPaneRef.current);
     if (text === lastSaved.current) return;
     lastSaved.current = text;
     await saveSession(text).catch(() => {});
@@ -1557,7 +1593,7 @@ export default function App() {
   useEffect(() => {
     const timer = window.setTimeout(() => void flushSession(), SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [workspace, claudeByPane, flushSession]);
+  }, [workspace, claudeByPane, codex.byPane, flushSession]);
 
 
   // Recent commands and folders: loaded once, saved shortly after they change.
@@ -1899,6 +1935,7 @@ export default function App() {
       <TabBar
         workspace={workspace}
         profiles={profiles ?? []}
+        codex={config?.codexSessions ? codex.menu : undefined}
         claude={
           config?.claudeSessions
             ? {

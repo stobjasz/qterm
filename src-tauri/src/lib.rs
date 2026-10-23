@@ -3,6 +3,8 @@ mod claude;
 mod claude_hook;
 mod claude_statusline;
 mod claude_usage;
+mod codex;
+mod codex_hook;
 mod commands;
 mod config;
 mod diagnostics;
@@ -34,6 +36,8 @@ use config::{ConfigState, Reload};
 
 pub use alerts::{run_hook as run_claude_hook, HOOK_ARG};
 pub use updater::wait_for_previous;
+pub use alerts::run_codex_hook;
+pub use codex_hook::HOOK_ARG as CODEX_HOOK_ARG;
 pub use claude_statusline::STATUSLINE_ARG;
 
 /// `--claude-statusline`: Claude Code's status line command (see claude_statusline.rs).
@@ -103,6 +107,7 @@ pub fn run() {
         .manage(pty::SessionManager::default())
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
+        .manage(codex::Index::default())
         .manage(claude::TranscriptIndex::default())
         .manage(claude_usage::UsageIndex::default())
         .setup(|app| {
@@ -124,6 +129,7 @@ pub fn run() {
                 qlog!("{error}");
             }
             app.manage(config);
+            app.manage(codex::Store::load(&config_dir));
             app.manage(claude::ClaudeStore::load(&config_dir, claude::claude_home()));
             app.manage(scrollback::ScrollbackStore::new(app.path().app_local_data_dir()?.join("scrollback")));
 
@@ -175,6 +181,16 @@ pub fn run() {
             commands::save_history,
             commands::load_workspaces,
             commands::save_workspaces,
+            commands::list_codex_sessions,
+            commands::codex_session_seen,
+            commands::forget_codex_sessions,
+            commands::list_all_codex_sessions,
+            commands::codex_running,
+            commands::codex_usage,
+            commands::set_codex_plan_summary,
+            commands::codex_hook_status,
+            commands::install_codex_hook,
+            commands::remove_codex_hook,
             commands::list_claude_sessions,
             commands::claude_session_seen,
             commands::forget_claude_sessions,

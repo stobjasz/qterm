@@ -40,6 +40,9 @@ pub struct Config {
     pub claude_alerts: bool,
     /// Reopen the Claude Code sessions that ran in panes, when tabs are restored.
     pub claude_restore: bool,
+    pub codex_sessions: bool,
+    pub codex_alerts: bool,
+    pub codex_restore: bool,
     /// Command that opens a file at a line; {file}, {line}, {col} are filled in.
     pub editor: String,
     /// Notify when a command that ran this many seconds ends while you aren't looking; 0 = off.
@@ -265,6 +268,9 @@ impl Default for Config {
             claude_sessions: false,
             claude_alerts: true,
             claude_restore: false,
+            codex_sessions: false,
+            codex_alerts: true,
+            codex_restore: false,
             editor: "code --goto {file}:{line}:{col}".into(),
             long_command_alert: 30,
             inline_images: true,

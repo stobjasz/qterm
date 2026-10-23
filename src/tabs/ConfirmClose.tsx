@@ -47,5 +47,5 @@ export function ConfirmClose({ what, programs, verb = "close", onClose, onCancel
 /** "claude.exe" → "Claude Code", "node.exe" → "node". */
 export function programName(exe: string): string {
   const name = exe.replace(/\.exe$/i, "");
-  return name.toLowerCase() === "claude" ? "Claude Code" : name;
+  return name.toLowerCase() === "claude" ? "Claude Code" : name.toLowerCase() === "codex" ? "Codex CLI" : name;
 }

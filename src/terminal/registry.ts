@@ -14,6 +14,7 @@ import { LigaturesAddon } from "@xterm/addon-ligatures";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import "@xterm/xterm/css/xterm.css";
 
+import { findCodexResumeIds } from "../codex/detect";
 import { findResumeIds } from "../claude/detect";
 import {
   onPtyExit,
@@ -59,6 +60,7 @@ export interface RegistryEvents {
   onCwd(paneId: PaneId, cwd: string): void;
   /** The terminal printed "claude --resume <id>" (only while detection is on). */
   onClaudeSession(paneId: PaneId, sessionId: string): void;
+  onCodexSession?(paneId: PaneId, sessionId: string): void;
   onSearchResults(paneId: PaneId, results: { index: number; count: number }): void;
   /** First output since the pane went into the background (see setBackground). */
   onActivity(paneId: PaneId): void;
@@ -163,6 +165,7 @@ export interface Behavior {
   copyOnSelect: boolean;
   rightClickPaste: boolean;
   claudeSessions: boolean;
+  codexSessions?: boolean;
   /** Sixel, iTerm (IIP) and Kitty images. */
   inlineImages: boolean;
   /** Needs a font with ligatures (Cascadia Code, Fira Code, ...). */
@@ -422,7 +425,7 @@ export class TerminalRegistry {
   }
 
   setBehavior(behavior: Behavior): void {
-    const enablingClaude = behavior.claudeSessions && !this.behavior.claudeSessions;
+    const enablingClaude = (behavior.claudeSessions && !this.behavior.claudeSessions) || (behavior.codexSessions && !this.behavior.codexSessions);
     const previous = this.behavior;
     this.behavior = behavior;
     for (const entry of this.entries.values()) {
@@ -713,7 +716,7 @@ export class TerminalRegistry {
         if (this.triggers.length || this.paneTriggers.has(paneId)) this.checkTriggers(paneId, entry);
         this.checkDevServer(paneId, entry);
       }
-      if (!this.behavior.claudeSessions) return;
+      if (!this.behavior.claudeSessions && !this.behavior.codexSessions) return;
       entry.linesSinceScan++;
       entry.scanTimer ??= window.setTimeout(() => this.scanForClaude(paneId, entry), CLAUDE_SCAN_DELAY_MS);
     });
@@ -955,10 +958,16 @@ export class TerminalRegistry {
       const line = buffer.getLine(y);
       if (line) text += (line.isWrapped ? "" : "\n") + line.translateToString(true);
     }
-    for (const id of findResumeIds(text)) {
+    for (const id of this.behavior.claudeSessions ? findResumeIds(text) : []) {
       if (entry.claudeSeen.has(id)) continue;
       entry.claudeSeen.add(id);
       this.events.onClaudeSession(paneId, id);
+    }
+    for (const id of this.behavior.codexSessions ? findCodexResumeIds(text) : []) {
+      const key = `codex:${id}`;
+      if (entry.claudeSeen.has(key)) continue;
+      entry.claudeSeen.add(key);
+      this.events.onCodexSession?.(paneId, id);
     }
   }
 }
