@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
 pub const HOOK_ARG: &str = "--codex-notify";
 
@@ -29,12 +30,14 @@ pub fn settings_path(codex_home: &Path) -> PathBuf {
     codex_home.join("hooks.json")
 }
 
-/// The hook command for this exe. Forward slashes work in both bash and cmd.
+/// Codex runs Windows hooks through a shell. An explicit PowerShell invocation
+/// works from PowerShell, cmd and bash; encoded input keeps paths literal even
+/// when they contain spaces, apostrophes, dollar signs or shell metacharacters.
 pub fn command_for(exe: &Path) -> String {
-    format!(
-        "\"{}\" {HOOK_ARG}",
-        exe.to_string_lossy().replace('\\', "/")
-    )
+    let path = exe.to_string_lossy().replace('\\', "/").replace('\'', "''");
+    let script = format!("& '{path}' {HOOK_ARG}");
+    let encoded = BASE64.encode(script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>());
+    format!("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}")
 }
 
 /// Installed: any of qterm's hooks is there. Current: every event has this exe's
@@ -84,7 +87,17 @@ pub fn remove(settings: &Path) -> Result<(), String> {
 }
 
 fn is_ours(command: &str) -> bool {
-    command.contains(HOOK_ARG)
+    if command.contains(HOOK_ARG) {
+        return true;
+    }
+    let Some(encoded) = command.strip_prefix("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ") else {
+        return false;
+    };
+    let Ok(bytes) = BASE64.decode(encoded) else { return false };
+    let (pairs, remainder) = bytes.as_chunks::<2>();
+    if !remainder.is_empty() { return false; }
+    let units = pairs.iter().map(|b| u16::from_le_bytes(*b)).collect::<Vec<_>>();
+    String::from_utf16(&units).is_ok_and(|script| script.starts_with("& '") && script.ends_with(&format!("' {HOOK_ARG}")))
 }
 
 fn qterm_commands(doc: &Value, event: &str) -> Vec<String> {
@@ -174,6 +187,15 @@ pub(crate) fn write(settings: &Path, doc: &Value) -> Result<(), String> {
 mod tests {
     use super::*;
     const CMD: &str = "\"C:/apps/qterm.exe\" --codex-notify";
+    #[test]
+    fn command_quotes_the_executable_for_powershell_without_outer_shell_expansion() {
+        let command = command_for(Path::new("C:\\apps $work\\it's qterm\\qterm.exe"));
+        let encoded = command.split("-EncodedCommand ").nth(1).unwrap().split_whitespace().next().unwrap();
+        let bytes = BASE64.decode(encoded).unwrap();
+        let units = bytes.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect::<Vec<_>>();
+        assert_eq!(String::from_utf16(&units).unwrap(), "& 'C:/apps $work/it''s qterm/qterm.exe' --codex-notify");
+        assert!(is_ours(&command));
+    }
     fn fixture(name: &str, contents: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("qterm-codex-hook-{name}-{}", std::process::id()));

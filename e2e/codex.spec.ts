@@ -13,7 +13,8 @@ test.beforeAll(() => {
   fs.mkdirSync(sessions, { recursive: true });
   fs.writeFileSync(path.join(sessions, `rollout-test-${ID}.jsonl`), [
     { type: "session_meta", payload: { id: ID, cwd: home, git: { branch: "codex-test" } } },
-    { type: "event_msg", payload: { type: "user_message", message: "Fix the Codex integration" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<environment_context>Test context</environment_context>" }] } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Fix the Codex integration" }] } },
     { type: "turn_context", payload: { model: "example-model" } },
     { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 25000 }, total_token_usage: { output_tokens: 500 }, model_context_window: 100000 }, rate_limits: { primary: { used_percent: 23, window_minutes: 300 } } } },
   ].map((r) => JSON.stringify(r)).join("\n"));
@@ -26,7 +27,11 @@ test.afterAll(() => fs.rmSync(home, { recursive: true, force: true }));
 function input(event: string, extra: object = {}): string {
   const file = path.join(home, `${event}.json`);
   fs.writeFileSync(file, JSON.stringify({ hook_event_name: event, session_id: ID, ...extra }));
-  return `Get-Content ${quote(file)} -Raw | & ${quote(EXE)} --codex-notify`;
+  const hooks = path.join(home, "hooks.json");
+  const command = fs.existsSync(hooks)
+    ? JSON.parse(fs.readFileSync(hooks, "utf8")).hooks[event][0].hooks[0].command as string
+    : `& ${quote(EXE)} --codex-notify`;
+  return `Get-Content ${quote(file)} -Raw | ${command}`;
 }
 
 test("Codex history is separate from Claude and can resume in the current shell", async ({ qterm }) => {
@@ -46,11 +51,25 @@ test("Codex history is separate from Claude and can resume in the current shell"
   await qterm.run(pane, `Write-Output 'codex resume ${ID}'`);
   await expect.poll(async () => (await qterm.invoke<{ id: string }[]>("list_codex_sessions")).map((s) => s.id)).toContain(ID);
   expect((await qterm.invoke<{ id: string }[]>("list_claude_sessions")).some((s) => s.id === ID)).toBe(false);
+  await qterm.page.getByRole("button", { name: "Codex sessions", exact: true }).click();
+  await expect(qterm.page.getByRole("tab", { name: "Remembered", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toBeVisible();
+  await qterm.page.getByRole("tab", { name: "All on this PC", exact: true }).click();
+  await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toBeVisible();
+  await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toContainText("1 prompt");
 });
 
 test("Codex hooks deliver context, plan usage, activity and the last reply to its tab", async ({ qterm }) => {
   const pane = await qterm.activePane();
   await qterm.waitForPrompt(pane);
+  // Exercise the command installed by Settings through the real Windows shell.
+  // Calling the exe directly would miss shell syntax failures in hooks.json.
+  await qterm.page.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = qterm.page.getByRole("dialog", { name: "Settings", exact: true });
+  await settings.getByRole("searchbox", { name: "Search settings", exact: true }).fill("Codex");
+  await settings.getByRole("button", { name: /Set up Codex hooks$/ }).click();
+  await expect(settings.getByRole("button", { name: /Remove$/ }).last()).toBeVisible();
+  await settings.getByRole("button", { name: "Cancel", exact: true }).click();
   await qterm.run(pane, `Start-Process -WindowStyle Hidden ${quote(fakeExe)} '-e "setTimeout(() => {}, 60000)"'`);
   const tab = qterm.page.getByRole("tab").first();
   await expect(tab.getByRole("status", { name: "Codex is idle", exact: true })).toBeVisible({ timeout: 30000 });

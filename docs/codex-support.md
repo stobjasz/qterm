@@ -50,6 +50,12 @@ checked against Codex CLI 0.164.0.
 - The session browser reads active `sessions/**/*.jsonl` rollouts. Archived
   sessions are excluded. Forgetting a remembered session removes only qterm's
   entry, leaving Codex's data intact.
+- User prompts are read from `event_msg.user_message` or, when those events are
+  absent, `response_item` user messages. Known injected environment/instruction
+  messages are excluded, and dual-format rollouts are not counted twice.
+- On Windows, generated hook commands explicitly invoke PowerShell with an
+  encoded, literal executable call so the parent shell cannot reinterpret the
+  executable path. Older hook definitions need updating and renewed `/hooks` trust.
 - qterm caches summaries until a rollout's modification time or size changes.
   Unknown records and malformed lines are skipped. Rollouts are an unstable
   implementation format; unavailable fields are not a guarantee of zero usage.

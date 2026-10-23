@@ -64,6 +64,11 @@ fn parse(path: &Path) -> Option<Rollout> {
         title: None,
         rate_limits: None,
     };
+    // Some Codex versions only persist user turns as response items. Keep a
+    // separate summary so versions writing both formats never double-count.
+    let mut response_prompts = 0;
+    let mut response_title = None;
+    let mut response_last_prompt = None;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -80,6 +85,25 @@ fn parse(path: &Path) -> Option<Rollout> {
             }
             Some("turn_context") => {
                 usage.model = p["model"].as_str().map(str::to_owned).or(usage.model)
+            }
+            Some("response_item") if p["type"] == "message" && p["role"] == "user" => {
+                if let Some(content) = p["content"].as_array() {
+                    let text = content.iter()
+                        .filter(|part| part["type"] == "input_text")
+                        .filter_map(|part| part["text"].as_str())
+                        .filter(|text| {
+                            let text = text.trim_start();
+                            !text.starts_with("<environment_context>")
+                                && !text.starts_with("# AGENTS.md instructions")
+                                && !text.starts_with("<INSTRUCTIONS>")
+                        })
+                        .collect::<Vec<_>>().join("\n");
+                    if !text.trim().is_empty() {
+                        response_prompts += 1;
+                        response_title.get_or_insert_with(|| crate::claude::shorten(text.trim(), 80));
+                        response_last_prompt = Some(crate::claude::shorten(text.trim(), 160));
+                    }
+                }
             }
             Some("event_msg") if p["type"] == "user_message" => {
                 if let Some(text) = p["message"].as_str().filter(|t| !t.trim().is_empty()) {
@@ -114,6 +138,11 @@ fn parse(path: &Path) -> Option<Rollout> {
             }
             _ => {}
         }
+    }
+    if summary.prompts == 0 {
+        summary.prompts = response_prompts;
+        summary.title = response_title;
+        summary.last_prompt = response_last_prompt;
     }
     if !valid_id(&summary.id) {
         return None;
@@ -277,6 +306,35 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn response_item_history_is_visible_without_counting_context_or_duplicate_events() {
+        let dir = std::env::temp_dir().join(format!("qterm-codex-response-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sessions")).unwrap();
+        let path = dir.join("sessions/rollout.jsonl");
+        let records = concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"01a1690c-c7b7-7e80-9864-e6971b91db16\",\"cwd\":\"C:/work\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>context</environment_context>\"}]}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# AGENTS.md instructions for C:/work\"}]}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Assistant reply\"}]}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Fix login\"},{\"type\":\"input_text\",\"text\":\"Keep tests\"}]}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Now test it\"}]}}\n",
+            "malformed tail\n"
+        );
+        std::fs::write(&path, records).unwrap();
+        let index = Index::default();
+        let all = index.scan(&dir);
+        assert_eq!(all.len(), 1, "response-only sessions must appear in All on this PC");
+        assert_eq!(all[0].prompts, 2);
+        assert_eq!(all[0].title.as_deref(), Some("Fix login"));
+        assert_eq!(all[0].last_prompt.as_deref(), Some("Now test it"));
+        // Older versions can emit both representations of a turn.
+        std::fs::write(&path, format!("{records}{}", concat!(
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Fix login\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Now test it\"}}\n"
+        ))).unwrap();
+        assert_eq!(index.scan(&dir)[0].prompts, 2, "do not count a prompt twice");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn reads_rollouts_and_keeps_usage_when_rate_limit_only_records_arrive() {
         let dir = std::env::temp_dir().join(format!("qterm-codex-{}", std::process::id()));

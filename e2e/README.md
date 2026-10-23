@@ -60,6 +60,8 @@ unit tests can't reproduce. One spec per risk.
 | R33 | The palette names who listens on a port and in which pane; ending it frees the port and keeps the shell. | `port-owner.spec.ts` |
 | R34 | A command's bar and the palette's recent commands say when it ran and how long it took. | `command-timing.spec.ts` |
 | R35 | A pane split with another shell runs it in the same folder, panes name their shells while a tab mixes them, and switching a pane's shell keeps its place and folder. | `mixed-shells.spec.ts` |
+| R36 | Codex response-item history appears in both All on this PC and Remembered, separate from Claude, and resumes in the current shell. | `codex.spec.ts` |
+| R37 | Codex hook commands installed from Settings run in PowerShell and deliver context, plan usage, activity and replies. | `codex.spec.ts` |
 
 Claude Code itself isn't needed for R23 and R24: its hook and status line input is piped
 in by hand, and a copy of Node named `claude.exe` (see `startFakeClaude` in `qterm.ts`)
