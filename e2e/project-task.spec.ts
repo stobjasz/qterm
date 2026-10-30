@@ -4,8 +4,23 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { expect, test } from "./qterm";
+
+// Exercise project tasks with the test runner's Node toolchain. Personal shell
+// profiles can replace npm or change PATH and are unrelated to this risk.
+const pwsh = execFileSync("where.exe", ["pwsh.exe"], { encoding: "utf8" }).trim().split(/\r?\n/)[0];
+test.use({ settings: {
+  values: { default_profile: '"custom:E2E project tasks"' },
+  extra: [
+    '[[profiles]]', 'name = "E2E project tasks"',
+    `command = ${JSON.stringify(`"${pwsh}" -NoLogo -NoProfile`)}`,
+    // portable-pty refreshes Windows environment from the registry; a profile's
+    // explicit PATH preserves the toolchain selected by this test runner.
+    `env = { PATH = ${JSON.stringify(process.env.PATH ?? process.env.Path ?? "")} }`,
+  ].join("\n"),
+} });
 
 test("a package.json script picked from the palette runs in a new pane in its folder", async ({ qterm }) => {
   const marker = Date.now() % 100_000;
@@ -17,6 +32,8 @@ test("a package.json script picked from the palette runs in a new pane in its fo
   try {
     const pane = await qterm.activePane();
     await qterm.waitForPrompt(pane);
+    await qterm.run(pane, "Write-Output ('npm-toolchain:' + (Get-Command npm).Source)");
+    await expect.poll(() => qterm.terminalText(pane)).toContain(`npm-toolchain:${path.dirname(process.execPath)}`);
     // In a folder inside the project, as you'd usually be.
     await qterm.run(pane, `Set-Location '${path.join(project, "src")}'`);
     await expect.poll(async () => (await qterm.workspace()).panes[pane].cwd).toBe(path.join(project, "src"));

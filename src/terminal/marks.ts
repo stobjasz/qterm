@@ -14,7 +14,7 @@ export function parseMark(data: string): Mark | undefined {
       return { kind };
     case "D": {
       const code = params[0] === undefined || params[0] === "" ? undefined : Number(params[0]);
-      return { kind: "D", exitCode: code === undefined || Number.isNaN(code) ? undefined : code };
+      return { kind: "D", exitCode: code !== undefined && Number.isSafeInteger(code) && code >= -2_147_483_648 && code <= 4_294_967_295 ? code : undefined };
     }
     default:
       return undefined;

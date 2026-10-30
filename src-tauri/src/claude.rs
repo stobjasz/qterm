@@ -21,6 +21,8 @@ pub(crate) const TITLE_MAX_CHARS: usize = 80;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeSession {
+    #[serde(default)]
+    pub environment:Option<String>,
     pub id: String,
     /// Where to resume: from the transcript, else the folder the pane reported.
     pub cwd: Option<String>,
@@ -53,18 +55,22 @@ impl ClaudeStore {
     }
 
     /// Records a sighting (again moving it to the top) and returns the new list.
-    pub fn remember(&self, id: &str, profile_id: &str, pane_cwd: Option<String>) -> Result<Vec<ClaudeSession>, String> {
+    #[cfg(test)]
+    pub fn remember(&self,id:&str,profile_id:&str,pane_cwd:Option<String>)->Result<Vec<ClaudeSession>,String>{self.remember_scoped(id,profile_id,pane_cwd,None)}
+    pub fn remember_scoped(&self, id: &str, profile_id: &str, pane_cwd: Option<String>,environment:Option<String>) -> Result<Vec<ClaudeSession>, String> {
         if !is_session_id(id) {
             return Err(format!("not a Claude session id: {id:?}"));
         }
         let id = id.to_ascii_lowercase();
-        let summary = self
+        let environment=crate::session_library::sighting_environment(profile_id,pane_cwd.as_deref(),environment)?;
+        let summary = (environment=="native").then(|| self
             .claude_home
             .as_deref()
             .and_then(|home| find_transcript(home, &id))
-            .map(|path| summarize(&path, &id));
+            .map(|path| summarize(&path, &id))).flatten();
         let (cwd, title) = summary.map(|s| (s.cwd, s.title)).unwrap_or_default();
         let session = ClaudeSession {
+            environment:Some(environment.clone()),
             cwd: cwd.or(pane_cwd),
             title,
             profile_id: profile_id.to_string(),
@@ -73,7 +79,7 @@ impl ClaudeStore {
         };
 
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|s| s.id != session.id);
+        sessions.retain(|s| s.id != session.id || crate::session_library::session_environment(s)!=environment);
         sessions.insert(0, session);
         sessions.truncate(MAX_SESSIONS);
         self.save(&sessions)?;
@@ -82,9 +88,14 @@ impl ClaudeStore {
 
     /// Forgets several at once (e.g. a whole folder) with a single write.
     pub fn forget(&self, ids: &[String]) -> Result<Vec<ClaudeSession>, String> {
+        self.forget_scoped(&ids.iter().map(|id|crate::session_library::Reference{id:id.to_ascii_lowercase(),environment:"native".into()}).collect::<Vec<_>>())
+    }
+    pub fn forget_scoped(&self,references:&[crate::session_library::Reference])->Result<Vec<ClaudeSession>,String>{
+        for reference in references{reference.validate()?;}
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|s| !ids.contains(&s.id));
-        self.save(&sessions)?;
+        let next:Vec<_>=sessions.iter().filter(|session|!references.iter().any(|reference|reference.matches(session))).cloned().collect();
+        self.save(&next)?;
+        *sessions=next;
         Ok(sessions.clone())
     }
 
@@ -148,7 +159,7 @@ fn summarize(path: &Path, id: &str) -> TranscriptSummary {
     let mut ai_title = None;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         let wants_cwd = summary.cwd.is_none() && line.contains("\"cwd\"");
-        let is_user = line.contains("\"type\":\"user\"");
+        let is_user = line.contains("\"user\"");
         let wanted = wants_cwd
             || is_user
             || line.contains("\"aiTitle\"")
@@ -165,11 +176,16 @@ fn summarize(path: &Path, id: &str) -> TranscriptSummary {
         ai_title = text("aiTitle").or(ai_title);
         summary.last_prompt = text("lastPrompt").or(summary.last_prompt.take());
         summary.git_branch = text("gitBranch").filter(|b| !b.is_empty()).or(summary.git_branch.take());
-        let typed = is_user
-            && record.get("isMeta").and_then(|v| v.as_bool()) != Some(true)
-            && record.pointer("/message/content").is_some_and(|c| c.is_string());
-        if typed {
+        let typed = if record.get("type").and_then(|v|v.as_str())==Some("user") && record.get("isMeta").and_then(|v|v.as_bool())!=Some(true) {
+            match record.pointer("/message/content") {
+                Some(serde_json::Value::String(text))=>Some(shorten(text.trim(),TITLE_MAX_CHARS*2)),
+                Some(serde_json::Value::Array(blocks))=>{let text=blocks.iter().filter(|block|block.get("type").and_then(|v|v.as_str())==Some("text")).filter_map(|block|block.get("text").and_then(|v|v.as_str())).take(8).map(|text|shorten(text,TITLE_MAX_CHARS*2)).collect::<Vec<_>>().join("\n");(!text.trim().is_empty()).then(||shorten(text.trim(),TITLE_MAX_CHARS*2))},
+                _=>None,
+            }
+        }else{None};
+        if let Some(prompt)=typed {
             summary.prompts += 1;
+            summary.last_prompt=Some(prompt);
         }
     }
     summary.last_prompt = summary.last_prompt.map(|p| shorten(p.trim(), TITLE_MAX_CHARS * 2));
@@ -199,17 +215,28 @@ pub struct TranscriptIndex {
 impl TranscriptIndex {
     /// Newest first; sessions without a typed message (aborted starts) are left out.
     pub fn scan(&self, claude_home: &Path) -> Vec<TranscriptSummary> {
-        let Ok(projects) = std::fs::read_dir(claude_home.join("projects")) else { return Vec::new() };
+        self.scan_with_diagnostics(claude_home).0
+    }
+    pub fn scan_with_diagnostics(&self, claude_home: &Path) -> (Vec<TranscriptSummary>,Vec<String>) {
+        let mut errors=Vec::new();
+        let mut error=|path:&Path,reason:String|{if errors.len()<10{errors.push(format!("{}: {reason}",path.display()));}};
+        let projects=match std::fs::read_dir(claude_home.join("projects")){Ok(p)=>p,Err(e)=>return (vec![],vec![format!("{}: {e}",claude_home.join("projects").display())])};
         let mut cache = self.cache.lock().unwrap();
         let mut found = Vec::new();
-        for project in projects.flatten() {
-            let Ok(files) = std::fs::read_dir(project.path()) else { continue };
-            for file in files.flatten() {
+        let mut live=std::collections::HashSet::new();
+        for project in projects {
+            let project=match project {Ok(p)=>p,Err(e)=>{error(claude_home,e.to_string());continue;}};
+            if !project.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
+            let files=match std::fs::read_dir(project.path()){Ok(p)=>p,Err(e)=>{error(&project.path(),e.to_string());continue;}};
+            for file in files {
+                let file=match file {Ok(f)=>f,Err(e)=>{error(&project.path(),e.to_string());continue;}};
                 let path = file.path();
                 let Some(id) = path.file_stem().and_then(|s| s.to_str()).filter(|s| is_session_id(s)) else { continue };
                 if path.extension().is_none_or(|e| e != "jsonl") {
                     continue;
                 }
+                if let Err(e)=std::fs::File::open(&path){error(&path,e.to_string());continue;}
+                live.insert(path.clone());
                 let (modified, size) = (modified_ms(&path), file.metadata().map(|m| m.len()).unwrap_or_default());
                 let summary = match cache.get(&path) {
                     Some((m, s, summary)) if *m == modified && *s == size => summary.clone(),
@@ -222,9 +249,10 @@ impl TranscriptIndex {
                 found.push(summary);
             }
         }
+        cache.retain(|path,_|live.contains(path));
         found.retain(|s| s.prompts > 0);
         found.sort_by_key(|s| std::cmp::Reverse(s.modified));
-        found
+        (found,errors)
     }
 }
 
@@ -300,6 +328,14 @@ mod tests {
         assert_eq!(list[0].cwd.as_deref(), Some(r"C:\work\app"));
         assert_eq!(list[0].title.as_deref(), Some("Fix the login flow"));
         assert_eq!(list[0].profile_id, "pwsh");
+    }
+
+    #[test]
+    fn custom_wsl_sightings_keep_captured_identity_and_never_read_matching_native_transcripts(){
+        let fx=Fixture::new("custom-wsl-scope");fx.transcript(ID,&[r#"{"type":"user","cwd":"C:\\native","message":{"content":"native secret"}}"#,r#"{"type":"ai-title","aiTitle":"Native title"}"#]);
+        let store=fx.store();let sessions=store.remember_scoped(ID,"custom:Linux",Some("/c/Case".into()),Some("wsl:Ubuntu".into())).unwrap();
+        assert_eq!(sessions[0].cwd.as_deref(),Some("/c/Case"));assert_eq!(sessions[0].title,None);assert_eq!(sessions[0].environment.as_deref(),Some("wsl:ubuntu"));
+        store.remember_scoped(ID,"custom:Other Linux",Some("/c/Case".into()),Some("wsl:Debian".into())).unwrap();assert_eq!(fx.store().list().len(),2);
     }
 
     #[test]
@@ -380,5 +416,15 @@ mod tests {
     fn shortens_long_titles_on_a_char_boundary() {
         assert_eq!(shorten("żółw".repeat(30).as_str(), 5), "żółwż…");
         assert_eq!(shorten("short", 80), "short");
+    }
+
+    #[test]
+    fn latest_typed_prompt_is_available_without_a_last_prompt_metadata_record() {
+        let fx=Fixture::new("typed-prompt");fx.transcript(ID,&[
+            r#"{ "type": "user", "cwd": "C:\\work", "message": {"role":"user","content":"First prompt"} }"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Latest prompt"},{"type":"image","source":{}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"not a typed prompt"}]}}"#,
+            r#"{"type":"user","isMeta":true,"message":{"content":"not user context"}}"#,
+        ]);let summary=TranscriptIndex::default().scan(&fx.root.join("claude")).remove(0);assert_eq!(summary.prompts,2);assert_eq!(summary.last_prompt.as_deref(),Some("Latest prompt"));
     }
 }

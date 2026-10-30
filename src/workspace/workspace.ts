@@ -23,6 +23,8 @@ export interface Pane {
   id: PaneId;
   profileId: string;
   profileName: string;
+  /** Captured at creation; profile edits must not move a saved cwd to another environment. */
+  environment?: string;
   /** Last title the shell set; empty until it sets one. */
   title: string;
   /** Last folder the shell reported (shell integration), or where it was started. */
@@ -86,6 +88,12 @@ export interface Workspace {
 export interface ProfileRef {
   id: string;
   name: string;
+  distribution?: string | null;
+}
+
+export function profileEnvironment(profile: ProfileRef): string {
+  const distribution=profile.distribution??(profile.id.startsWith("wsl:")?profile.id.slice(4):undefined);
+  return distribution?`wsl:${distribution.toLowerCase()}`:"native";
 }
 
 export function emptyWorkspace(): Workspace {
@@ -369,7 +377,7 @@ function replaceTab(ws: Workspace, tab: Tab): Workspace {
 }
 
 function withPane(panes: Record<PaneId, Pane>, id: PaneId, profile: ProfileRef, cwd?: string): Record<PaneId, Pane> {
-  return { ...panes, [id]: { id, profileId: profile.id, profileName: profile.name, title: "", cwd } };
+  return { ...panes, [id]: { id, profileId: profile.id, profileName: profile.name, environment:profileEnvironment(profile), title: "", cwd } };
 }
 
 // --- Saving and restoring the layout across restarts --------------------------
@@ -378,7 +386,7 @@ interface SavedSession {
   version: 1;
   activeTab?: TabId;
   tabs: { id: TabId; title?: string; color?: TabColor; icon?: string; root: LayoutNode; focusedPane: PaneId }[];
-  panes: Record<PaneId, { profileId: string; cwd?: string; claude?: string; codex?: string; background?: string; claudeTitle?: string }>;
+  panes: Record<PaneId, { profileId: string; environment?: string; cwd?: string; claude?: string; codex?: string; background?: string; claudeTitle?: string }>;
 }
 
 /**
@@ -394,7 +402,7 @@ export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string>
     panes: Object.fromEntries(
       Object.values(ws.panes).map((p) => [
         p.id,
-        { profileId: p.profileId, cwd: p.cwd, claude: claude.get(p.id), codex: codex.get(p.id), background: p.background, claudeTitle: p.claudeTitle },
+        { profileId: p.profileId, environment:p.environment, cwd: p.cwd, claude: claude.get(p.id), codex: codex.get(p.id), background: p.background, claudeTitle: p.claudeTitle },
       ]),
     ),
   };
@@ -402,8 +410,9 @@ export function saveWorkspace(ws: Workspace, claude: ReadonlyMap<PaneId, string>
 }
 
 /**
- * Rebuilds a saved workspace. Panes whose profile is gone get the default (first)
- * profile. Anything malformed means no restore at all rather than half a layout.
+ * Rebuilds a saved workspace. Captured environments keep their profile identity,
+ * including a missing profile, so native launch can reject mismatches. Legacy
+ * unscoped panes retain the old default-profile fallback. Malformed data aborts restore.
  */
 export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspace | undefined {
   if (profiles.length === 0) return undefined;
@@ -424,7 +433,9 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
     for (const id of ids) {
       const savedPane = saved.panes[id];
       if (typeof savedPane?.profileId !== "string") return undefined;
-      const profile = profiles.find((p) => p.id === savedPane.profileId) ?? profiles[0];
+      if(savedPane.environment!==undefined&&(typeof savedPane.environment!=="string"||!(savedPane.environment==="native"||/^wsl:[^\x00-\x1f\x7f/\\:<>"|?*]{1,128}$/u.test(savedPane.environment))))return undefined;
+      const environment=savedPane.environment??(savedPane.profileId.startsWith("wsl:")?`wsl:${savedPane.profileId.slice(4).toLowerCase()}`:undefined);
+      const profile = profiles.find((p) => p.id === savedPane.profileId) ?? (environment?{id:savedPane.profileId,name:savedPane.profileId}:profiles[0]);
       const cwd = typeof savedPane.cwd === "string" ? savedPane.cwd : undefined;
       // Typed into a shell later, so only something shaped like a session id.
       const claudeSession = typeof savedPane.claude === "string" && /^[\w-]{1,64}$/.test(savedPane.claude) ? savedPane.claude : undefined;
@@ -432,6 +443,7 @@ export function restoreWorkspace(text: string, profiles: ProfileRef[]): Workspac
         id,
         profileId: profile.id,
         profileName: profile.name,
+        environment:environment??profileEnvironment(profile),
         title: "",
         cwd,
         ...(claudeSession ? { claudeSession } : {}),

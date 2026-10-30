@@ -13,6 +13,9 @@ const session = (cwd: string | null, seenAt: number, title: string | null = null
 });
 
 describe("groupSessions", () => {
+  it("separates colliding distribution identities and literal Linux backslashes",()=>{
+    const a={...session("/c/Case\\",3),environment:"wsl:alpha"},b={...a,environment:"wsl:beta"},c={...a,cwd:"/c/Case"};const groups=groupSessions([a,b,c]);expect(groups).toHaveLength(3);expect(groups[0].label).toBe("Case\\");expect(groupSessions([a,b],"wsl:beta")[0].sessions).toEqual([b]);
+  });
   it("groups by folder, newest folder first, newest session first", () => {
     const a1 = session("C:\\work\\api", 100);
     const b1 = session("C:\\work\\web", 300);

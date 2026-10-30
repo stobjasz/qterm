@@ -43,6 +43,7 @@ pub struct Config {
     pub codex_sessions: bool,
     pub codex_alerts: bool,
     pub codex_restore: bool,
+    pub wsl_sources: Vec<WslSource>,
     /// Command that opens a file at a line; {file}, {line}, {col} are filled in.
     pub editor: String,
     /// Notify when a command that ran this many seconds ends while you aren't looking; 0 = off.
@@ -70,6 +71,15 @@ pub struct Config {
     pub triggers: Vec<Trigger>,
     /// Keeping each pane's output across restarts ([scrollback]).
     pub scrollback: ScrollbackSettings,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default,deny_unknown_fields,rename_all(deserialize="snake_case",serialize="camelCase"))]
+pub struct WslSource {
+    pub distribution:String,
+    pub enabled:bool,
+    pub claude_home:String,
+    pub codex_home:String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -271,6 +281,7 @@ impl Default for Config {
             codex_sessions: false,
             codex_alerts: true,
             codex_restore: false,
+            wsl_sources:vec![],
             editor: "code --goto {file}:{line}:{col}".into(),
             long_command_alert: 30,
             inline_images: true,
@@ -316,6 +327,12 @@ impl Config {
         in_range("font.size", self.font.size, 6.0, 72.0)?;
         in_range("scrollback.lines", f64::from(self.scrollback.lines), 100.0, 10_000.0)?;
         check_triggers(&self.triggers)?;
+        if self.wsl_sources.len()>16{return Err("At most 16 WSL session sources are allowed".into());}
+        let mut distributions=std::collections::HashSet::new();
+        for source in &self.wsl_sources {
+            if !crate::wsl::valid_distribution(&source.distribution)||!distributions.insert(source.distribution.to_lowercase()){return Err("WSL sources need valid, distinct distribution names".into());}
+            for home in [&source.claude_home,&source.codex_home]{if !home.is_empty()&&(!home.starts_with('/')||home.len()>4096||home.chars().any(char::is_control)){return Err("WSL source homes must be absolute Linux paths or empty for the distro default".into());}}
+        }
         let mut ids = std::collections::BTreeSet::new();
         for profile in &self.profiles {
             if profile.name.trim().is_empty() {
@@ -633,15 +650,8 @@ fn apply_changes(text: &str, changes: &serde_json::Map<String, serde_json::Value
 /// Replaces a value but keeps what surrounds it: the comment lines above belong to
 /// the key and a trailing `# comment` to the value, so both are carried over.
 fn set_value(table: &mut dyn toml_edit::TableLike, key: &str, value: &serde_json::Value) -> Result<(), String> {
-    let mut new = match value {
-        serde_json::Value::Bool(b) => toml_edit::Value::from(*b),
-        serde_json::Value::String(s) => toml_edit::Value::from(s.as_str()),
-        serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) => toml_edit::Value::from(i),
-            None => toml_edit::Value::from(n.as_f64().ok_or("number out of range")?),
-        },
-        other => return Err(format!("{key}: unsupported value {other}")),
-    };
+    // Settings must retain an explicit empty array when the last source is removed.
+    let mut new=if value.as_array().is_some_and(Vec::is_empty){toml_edit::Value::Array(toml_edit::Array::new())}else{toml_value(value)?.ok_or_else(||format!("{key}: unsupported value {value}"))?};
     match table.get_mut(key) {
         Some(item) => {
             if let Some(old) = item.as_value() {
@@ -804,6 +814,21 @@ fn read(path: &Path) -> Result<Config, String> {
 mod tests {
     use super::*;
     use tauri_plugin_global_shortcut::Modifiers;
+
+    #[test]
+    fn wsl_sources_require_explicit_distinct_scope_and_absolute_homes(){
+        let parsed=Config::parse("[[wsl_sources]]\ndistribution='Ubuntu'\nclaude_home='/isolated/claude'").unwrap();assert!(!parsed.wsl_sources[0].enabled);
+        assert!(Config::parse("[[wsl_sources]]\ndistribution='Ubuntu'\ncodex_home='C:\\native'").is_err());
+        assert!(Config::parse("[[wsl_sources]]\ndistribution='Ubuntu'\n[[wsl_sources]]\ndistribution='ubuntu'").is_err());
+        assert!(Config::parse("[[wsl_sources]]\ndistribution='../other'").is_err());
+    }
+    #[test]
+    fn source_edits_roundtrip_tables_and_explicit_empty_arrays_without_changing_other_settings(){
+        let text="# Keep this\nheight=0.7\nwsl_sources=[] # Sources\n";
+        let changes=serde_json::json!({"wsl_sources":[{"distribution":"Ubuntu","enabled":true,"claude_home":"/home/user/it's $data","codex_home":""}]}).as_object().unwrap().clone();
+        let updated=apply_changes(text,&changes).unwrap();let parsed=Config::parse(&updated).unwrap();assert_eq!(parsed.height,0.7);assert!(updated.contains("# Keep this"));assert!(updated.contains("# Sources"));assert_eq!(parsed.wsl_sources[0].claude_home,"/home/user/it's $data");
+        let empty=apply_changes(&updated,serde_json::json!({"wsl_sources":[]}).as_object().unwrap()).unwrap();assert!(Config::parse(&empty).unwrap().wsl_sources.is_empty());
+    }
 
     #[test]
     fn the_documented_default_file_matches_the_defaults() {

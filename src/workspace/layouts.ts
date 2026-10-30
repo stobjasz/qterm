@@ -1,6 +1,7 @@
 // Named layouts ([[layouts]] in config.toml) ⇄ tabs. Pure functions.
 import type { LayoutNode, PaneId, SplitDir } from "./layout";
 import type { Pane, ProfileRef, Tab, Workspace } from "./workspace";
+import { profileEnvironment } from "./workspace";
 
 /** One pane, or (with `panes`) a split. Mirrors the TOML; null and absent mean the same. */
 export interface LayoutPane {
@@ -55,7 +56,7 @@ export function buildLayout(
       if (found) profile = found;
       else unknownProfiles.push(node.profile);
     }
-    panes.push({ id, profileId: profile.id, profileName: profile.name, title: "", cwd: node.cwd ?? undefined });
+    panes.push({ id, profileId: profile.id, profileName: profile.name, environment:profileEnvironment(profile), title: "", cwd: node.cwd ?? undefined });
     if (node.command) commands.set(id, node.command);
     return { kind: "leaf", pane: id };
   };

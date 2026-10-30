@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { listAllClaudeSessions, type ClaudeSession, type ClaudeUsage, type TranscriptSummary } from "../ipc";
+import { listAllClaudeSessions, type ClaudeSession, type ClaudeUsage, type TranscriptSummary,type SessionReference } from "../ipc";
+import {sessionEnvironment,sessionReference} from "../agents/environments";
+import {environmentLabel} from "../agents/library";
 import { Popup } from "../tabs/Popup";
 import { groupSessions, type GroupableSession } from "./groups";
 import { replyPreview } from "./reply";
 import { contextPercent, formatCost, formatTokens, modelName, usageSummary } from "./usage";
+import { agentStateText, observationDetail, type AgentObservation, type AgentStatus } from "../agents/status";
 
 /** Above this many sessions the menu offers a filter box. */
 const FILTER_FROM = 6;
@@ -14,7 +17,9 @@ export interface RunningClaude {
   paneId: string;
   /** Where the pane is, e.g. "2 · PowerShell". */
   label: string;
-  usage: ClaudeUsage;
+  usage?: ClaudeUsage;
+  state: AgentStatus;
+  observation?: AgentObservation;
 }
 
 /** A pane where Claude Code waits for you. */
@@ -32,9 +37,9 @@ export interface ClaudeMenuProps {
   onResume(session: ClaudeSession): void;
   /** Resumes it in the focused pane instead of a new tab. */
   onResumeHere(session: ClaudeSession): void;
-  onForget(ids: string[]): void;
+  onForget(references: SessionReference[]): void;
   /** Starts a fresh Claude Code session in this folder. */
-  onNewSession(cwd: string): void;
+  onNewSession(cwd: string,environment:string): void;
   running: RunningClaude[];
   /** Panes where Claude waits for you, in tab order. */
   waiting: WaitingClaude[];
@@ -93,26 +98,26 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
           {running.length > 0 && (
             <section className="claude-running" aria-label="Claude running now">
               <div className="claude-running-title">Running now</div>
-              {running.map(({ paneId, label, usage }) => {
-                const percent = contextPercent(usage);
+              {running.map(({ paneId, label, usage, state, observation }) => {
+                const percent = usage ? contextPercent(usage) : undefined;
                 return (
                   <button
                     key={paneId}
                     className="claude-running-row"
-                    title={usageSummary(usage)}
+                    title={`${observationDetail(observation, state)}${usage ? `\n${usageSummary(usage)}` : ""}`}
                     onClick={() => {
                       close();
                       onFocusPane(paneId);
                     }}
                   >
                     <span className="claude-running-tab">{label}</span>
-                    <span className="claude-running-model">{modelName(usage.model)}</span>
+                    <span className="claude-running-model">{usage ? modelName(usage.model) : "Claude"}<span className="agent-state"> · {agentStateText(state)}</span></span>
                     <span className="claude-running-context">
                       {percent !== undefined && <meter min={0} max={100} low={60} high={80} optimum={0} value={percent} />}
-                      {formatTokens(usage.contextTokens)}
+                      {usage ? formatTokens(usage.contextTokens) : "Usage unavailable"}
                       {percent !== undefined && ` (${percent}%)`}
                     </span>
-                    <span className="claude-running-cost">{formatCost(usage) ?? ""}</span>
+                    <span className="claude-running-cost">{usage ? formatCost(usage) ?? "" : ""}</span>
                   </button>
                 );
               })}
@@ -130,9 +135,9 @@ export function ClaudeMenu({ sessions, onResume, onResumeHere, onForget, onNewSe
               onResumeHere(session);
             }}
             onForget={onForget}
-            onNewSession={(cwd) => {
+            onNewSession={(cwd,environment) => {
               close();
-              onNewSession(cwd);
+              onNewSession(cwd,environment);
             }}
           />
         </>
@@ -150,29 +155,31 @@ function SessionList({
 }: Pick<Props, "sessions" | "onResume" | "onResumeHere" | "onForget" | "onNewSession">) {
   const [view, setView] = useState<"remembered" | "all">(sessions.length > 0 ? "remembered" : "all");
   const [all, setAll] = useState<TranscriptSummary[]>();
+  const [error,setError]=useState<string>(),[refresh,setRefresh]=useState(0),[loading,setLoading]=useState(false);
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
-    if (view === "all" && !all) void listAllClaudeSessions().then(setAll, () => setAll([]));
-  }, [view, all]);
+    if(view!=="all")return;let disposed=false;setLoading(true);setError(undefined);void listAllClaudeSessions().then(rows=>{if(!disposed)setAll(rows);},error=>{if(!disposed)setError(String(error));}).finally(()=>{if(!disposed)setLoading(false);});return()=>{disposed=true;};
+  }, [view, refresh]);
 
   const rows = useMemo((): Row[] => {
     if (view === "remembered") {
-      return sessions.map((s) => ({ ...s, meta: timeAgo(s.seenAt), remembered: true }));
+      return sessions.map((s) => ({ ...s,environment:sessionEnvironment(s), meta: timeAgo(s.seenAt), remembered: true }));
     }
     return (all ?? []).map((t) => ({
       id: t.id,
+      environment:"native",
       cwd: t.cwd,
       title: t.title,
       seenAt: t.modified,
-      profileId: sessions.find((s) => s.id === t.id)?.profileId ?? "",
+      profileId: sessions.find((s) => s.id === t.id&&sessionEnvironment(s)==="native")?.profileId ?? "",
       meta: [t.gitBranch, `${t.prompts} prompt${t.prompts === 1 ? "" : "s"}`, timeAgo(t.modified)].filter(Boolean).join(" · "),
-      remembered: sessions.some((s) => s.id === t.id),
+      remembered: sessions.some((s) => s.id === t.id&&sessionEnvironment(s)==="native"),
     }));
   }, [view, sessions, all]);
   const groups = useMemo(() => groupSessions(rows, filter), [rows, filter]);
-  const asSession = (row: Row): ClaudeSession => ({ id: row.id, cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
+  const asSession = (row: Row): ClaudeSession => ({ id: row.id,environment:sessionEnvironment(row), cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
   const resume = (row: Row) => onResume(asSession(row));
 
   const toggle = (key: string) =>
@@ -191,7 +198,7 @@ function SessionList({
             Remembered
           </button>
           <button role="tab" aria-selected={view === "all"} onClick={() => setView("all")}>
-            All on this PC
+            Native Windows
           </button>
         </div>
         {rows.length >= FILTER_FROM && (
@@ -209,11 +216,14 @@ function SessionList({
         </span>
       </div>
       <div className="claude-groups">
-        {view === "all" && !all && <p className="menu-empty">Reading Claude Code's sessions…</p>}
+        {view==="all"&&<p className="menu-empty">Native Windows transcripts only. Use Session library for enabled WSL sources.</p>}
+        {view==="all"&&<button disabled={loading} onClick={()=>setRefresh(value=>value+1)}>{loading?"Refreshing…":"Refresh Claude sessions"}</button>}
+        {view==="all"&&error&&<p role="alert">Could not refresh Claude sessions: {error}{all?" · Showing previous results.":""}</p>}
+        {view === "all" && loading&&!all && <p className="menu-empty">Reading Claude Code's sessions…</p>}
         {view === "remembered" && sessions.length === 0 && (
           <p className="menu-empty">
             Nothing remembered yet. Sessions appear here when a terminal prints <code>claude --resume &lt;id&gt;</code>,
-            as Claude Code does when you quit it. "All on this PC" lists every session.
+            as Claude Code does when you quit it. "Native Windows" reads local Windows transcripts.
           </p>
         )}
         {rows.length > 0 && groups.length === 0 && <p className="menu-empty">No session matches “{filter}”.</p>}
@@ -221,7 +231,7 @@ function SessionList({
           // While filtering, every match stays visible.
           const open = filter.trim() !== "" || !collapsed.has(group.key);
           return (
-            <section key={group.key} className="claude-group" aria-label={`Sessions in ${group.label}`}>
+            <section key={group.key} className="claude-group" aria-label={`Sessions in ${group.label} · ${environmentLabel(group.environment)}`}>
               <div className="claude-group-header">
                 <button
                   className="claude-group-toggle"
@@ -234,6 +244,7 @@ function SessionList({
                   </span>
                   <span className="claude-group-name">{group.label}</span>
                   <span className="claude-group-path">{group.cwd}</span>
+                  <span className="claude-meta">{environmentLabel(group.environment)}</span>
                   <span className="claude-group-count">{group.sessions.length}</span>
                 </button>
                 {group.cwd && (
@@ -241,7 +252,8 @@ function SessionList({
                     className="tab-close claude-new"
                     aria-label={`New Claude session in ${group.label}`}
                     title={`Start claude in ${group.cwd}`}
-                    onClick={() => onNewSession(group.cwd!)}
+                    disabled={group.environment==="unknown"}
+                    onClick={() => onNewSession(group.cwd!,group.environment)}
                   >
                     +
                   </button>
@@ -251,7 +263,7 @@ function SessionList({
                     className="tab-close"
                     aria-label={`Forget all sessions in ${group.label}`}
                     title={`Forget all ${group.sessions.length} in ${group.label}`}
-                    onClick={() => onForget(group.sessions.map((s) => s.id))}
+                    onClick={() => onForget(group.sessions.map(sessionReference))}
                   >
                     ×
                   </button>
@@ -272,7 +284,7 @@ function SessionList({
                     </button>
                     <button
                       className="claude-here"
-                      title="Resume in the current tab (goes to its folder first)"
+                      title="Resume in the current tab (agent starts in its verified folder)"
                       aria-label={`Resume ${session.title ?? session.id} in the current tab`}
                       onClick={() => onResumeHere(asSession(session))}
                     >
@@ -282,7 +294,7 @@ function SessionList({
                       <button
                         className="tab-close"
                         aria-label={`Forget ${session.title ?? session.id}`}
-                        onClick={() => onForget([session.id])}
+                        onClick={() => onForget([sessionReference(session)])}
                       >
                         ×
                       </button>

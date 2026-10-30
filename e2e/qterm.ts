@@ -38,7 +38,7 @@ interface Hook {
   workspace(): {
     activeTab?: string;
     tabs: { id: string; focusedPane: string; root: unknown }[];
-    panes: Record<string, { id: string; cwd?: string; profileId: string }>;
+    panes: Record<string, { id: string; cwd?: string; profileId: string; environment?: string }>;
   };
   registry: {
     entries: Map<
@@ -252,7 +252,23 @@ function settingsFile({ values = {}, extra = "" }: Settings): string {
 /** Removes what an earlier run saved; WebView2's cache and the extracted ConPTY stay. */
 function wipeState(): void {
   fs.rmSync(CONFIG_DIR, { recursive: true, force: true });
-  for (const dir of ["scrollback", "alerts"]) fs.rmSync(path.join(LOCAL_DIR, dir), { recursive: true, force: true });
+  for (const dir of ["scrollback", "alerts", "agent-briefs"]) fs.rmSync(path.join(LOCAL_DIR, dir), { recursive: true, force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "agent-inbox.json"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "agent-inbox.partial"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "notification-attempts.jsonl"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "command-runs.json"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "command-runs.partial"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "worktree-tasks.json"), { force: true });
+  fs.rmSync(path.join(LOCAL_DIR, "worktree-tasks.partial"), { force: true });
+  const pins=path.join(LOCAL_DIR,"session-pins.json");
+  if(fs.existsSync(pins)&&fs.lstatSync(pins).isDirectory())fs.rmdirSync(pins);else fs.rmSync(pins,{force:true});
+  fs.rmSync(path.join(LOCAL_DIR,"session-pins.partial"),{force:true});
+  if (fs.existsSync(LOCAL_DIR)) for (const name of fs.readdirSync(LOCAL_DIR)) {
+    if (/^agent-inbox\.backup-[\d-]+\.json$/.test(name)) fs.rmSync(path.join(LOCAL_DIR, name), { force: true });
+    if (/^command-runs\.backup-[\d-]+\.json$/.test(name)) fs.rmSync(path.join(LOCAL_DIR, name), { force: true });
+    if (/^worktree-tasks\.backup-[\d-]+\.json$/.test(name)) fs.rmSync(path.join(LOCAL_DIR, name), { force: true });
+    if (/^session-pins\.backup-[0-9a-f]+\.json$/.test(name)) fs.rmSync(path.join(LOCAL_DIR,name),{force:true});
+  }
 }
 
 /** The WebView2 processes running now and their arguments: did the port flag reach them? */

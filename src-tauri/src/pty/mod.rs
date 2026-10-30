@@ -9,6 +9,7 @@ mod flow;
 mod profiles;
 
 pub use profiles::{merge as merge_profiles, split_command, ssh_profiles, Profile};
+pub(crate) use profiles::parse_wsl_list;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -31,6 +32,11 @@ const FLUSH_BYTES: usize = 16 * 1024;
 const FLUSH_INTERVAL: Duration = Duration::from_millis(5);
 
 struct Session {
+    // Drop the lifetime before the PTY handles: closing a console can block while
+    // its Linux tree is alive and still holding output handles.
+    wsl_owner: Option<crate::wsl_owner::Owner>,
+    binding: Option<(String, String)>,
+    shell_proxy: Option<std::path::PathBuf>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -47,6 +53,9 @@ type Sessions = Arc<Mutex<HashMap<SessionId, Session>>>;
 pub struct SpawnRequest {
     /// `None` means the default profile.
     pub profile_id: Option<String>,
+    /// Captured pane identity. Never launch its saved cwd in an edited environment.
+    pub expected_environment: Option<String>,
+    pub expected_kind: Option<String>,
     /// Start here when the folder exists (else the profile's home).
     pub cwd: Option<String>,
     /// Exported to the shell as QTERM_PANE, so tools in it (Claude Code's
@@ -87,7 +96,10 @@ impl SessionManager {
             Some(id) => profiles.iter().find(|p| &p.id == id).ok_or_else(|| format!("unknown profile {id}"))?,
             None => profiles.first().ok_or("no shell profiles found")?,
         };
-        let mut cmd = profile.command(request.cwd.as_deref(), integrate);
+        profile.check_environment(request.expected_environment.as_deref())?;
+        profile.check_kind(request.expected_kind.as_deref())?;
+        let owner=profile.distribution.as_ref().map(|_|crate::wsl_owner::Owner::new()).transpose()?;
+        let mut cmd = if let Some(owner)=&owner{profile.owned_command(request.cwd.as_deref(),integrate,owner)?}else{profile.command(request.cwd.as_deref(), integrate)};
         if let Some(pane_id) = &request.pane_id {
             cmd.env(crate::alerts::PANE_ENV, pane_id);
         }
@@ -100,7 +112,10 @@ impl SessionManager {
             }
             crate::elevation::elevate(&mut cmd);
         }
-        self.spawn(cmd, request.cols, request.rows, on_output, on_exit)
+        let id = self.spawn(cmd, request.cols, request.rows, on_output, on_exit)?;
+        if let Some(session)=self.sessions.lock().unwrap().get_mut(&id) { session.shell_proxy=profile.shell_proxy();session.wsl_owner=owner; }
+        if !request.elevated && integrate && let (Some(pane), Some(key)) = (&request.pane_id, profile.automation_key()) && let Some(session) = self.sessions.lock().unwrap().get_mut(&id) { session.binding = Some((pane.clone(), key)); }
+        Ok(id)
     }
 
     /// `on_output` receives batched bytes and returns `false` once nobody is listening;
@@ -114,6 +129,7 @@ impl SessionManager {
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
+        crate::process_owner::ensure()?;
         allow_ctrl_c_in_children();
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
@@ -130,7 +146,7 @@ impl SessionManager {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         self.sessions.lock().unwrap().insert(
             id,
-            Session { master: pair.master, writer, killer, flow: Arc::clone(&flow), pid },
+            Session { wsl_owner:None,binding: None, shell_proxy: None, master: pair.master, writer, killer, flow: Arc::clone(&flow), pid },
         );
 
         pump_output(reader, flow, on_output);
@@ -157,6 +173,10 @@ impl SessionManager {
             .map_err(|e| e.to_string())
     }
 
+    pub fn automation_binding(&self, id: SessionId) -> Option<(String, String)> {
+        self.sessions.lock().unwrap().get(&id)?.binding.clone()
+    }
+
     pub fn resize(&self, id: SessionId, cols: u16, rows: u16) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
         let session = sessions.get(&id).ok_or("no such session")?;
@@ -165,16 +185,17 @@ impl SessionManager {
 
     /// What runs inside these sessions' shells (closing them would end it).
     pub fn programs(&self, ids: &[SessionId]) -> Vec<String> {
-        let shells: Vec<u32> = {
+        let shells: Vec<(u32, Option<std::path::PathBuf>)> = {
             let sessions = self.sessions.lock().unwrap();
-            ids.iter().filter_map(|id| sessions.get(id)?.pid).collect()
+            ids.iter().filter_map(|id| { let session=sessions.get(id)?; Some((session.pid?,session.shell_proxy.clone())) }).collect()
         };
         if shells.is_empty() {
             return Vec::new();
         }
         let processes = crate::procs::snapshot();
         let mut all: Vec<String> = Vec::new();
-        for shell in shells {
+        for (shell,proxy) in shells {
+            let shell=crate::procs::interactive_shell(&processes,shell,proxy.as_deref());
             for name in crate::procs::programs_below(&processes, shell) {
                 if !all.contains(&name) {
                     all.push(name);
@@ -187,8 +208,9 @@ impl SessionManager {
     /// Ends everything running inside the session's shell, keeping the shell; returns
     /// the names of what ended.
     pub fn stop_programs(&self, id: SessionId) -> Result<Vec<String>, String> {
-        let shell = self.sessions.lock().unwrap().get(&id).ok_or("no such session")?.pid.ok_or("the shell's process isn't known")?;
+        let (shell,proxy)={ let sessions=self.sessions.lock().unwrap(); let session=sessions.get(&id).ok_or("no such session")?; (session.pid.ok_or("the shell's process isn't known")?,session.shell_proxy.clone()) };
         let processes = crate::procs::snapshot();
+        let shell=crate::procs::interactive_shell(&processes,shell,proxy.as_deref());
         Ok(crate::procs::terminate(&crate::procs::tree_below(&processes, shell)))
     }
 
@@ -405,7 +427,14 @@ mod tests {
         let line = "x".repeat(100);
         let (id, probe) = spawn(&manager, &["/c", &format!("for /L %i in (1,1,60000) do @echo %i {line}")]);
 
-        thread::sleep(Duration::from_secs(2));
+        // Slow or busy hosts can take more than two seconds to fill the pipe.
+        // Wait for actual backpressure and delivery, not assumed throughput.
+        let flow = Arc::clone(&manager.sessions.lock().unwrap().get(&id).unwrap().flow);
+        let fill_deadline = Instant::now() + TIMEOUT;
+        while !flow.is_paused() || probe.output.lock().unwrap().len() < flow::HIGH_WATER {
+            assert!(Instant::now() < fill_deadline, "output never reached backpressure");
+            thread::sleep(Duration::from_millis(10));
+        }
         let received = probe.output.lock().unwrap().len();
         assert!(received >= flow::HIGH_WATER, "paused too early: {received} bytes");
         assert!(received < flow::HIGH_WATER + 512 * 1024, "did not pause: {received} bytes");
@@ -457,13 +486,15 @@ mod tests {
         thread::sleep(Duration::from_secs(60));
     }
 
-    /// Why qterm needs no Job Object: when the process that owns a pseudoconsole dies
-    /// (crash, Task Manager), the console host goes with it and Windows ends every
-    /// process attached to that console: the shell and the programs running in it.
+    /// A crash must terminate both the shell and programs it started. ConPTY alone
+    /// does not guarantee the latter, so ownership is enforced by a Windows job.
     #[test]
     fn a_crash_takes_the_shell_and_its_programs_with_it() {
         use std::io::BufRead;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
         use std::process::{Command, Stdio};
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
 
         let mut helper = Command::new(std::env::current_exe().unwrap())
             .args(["--ignored", "--exact", "pty::tests::crash_helper_owns_a_session", "--nocapture", "--test-threads=1"])
@@ -491,16 +522,23 @@ mod tests {
             thread::sleep(Duration::from_millis(100));
         };
 
+        // Pin the actual processes before terminating their owner. A PID snapshot
+        // can include terminated objects or a recycled PID from another test.
+        let observe = |pid| {
+            // SAFETY: non-inheritable synchronization-only handle, owned until drop.
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            assert!(!handle.is_null(), "could not observe test process {pid}");
+            unsafe { OwnedHandle::from_raw_handle(handle) }
+        };
+        let shell_handle = observe(shell);
+        let ping_handle = observe(ping);
         helper.kill().unwrap(); // TerminateProcess, as a crash would end it
         helper.wait().unwrap();
 
-        let alive = |pid: u32| crate::procs::snapshot().iter().any(|p| p.pid == pid);
-        let deadline = Instant::now() + TIMEOUT;
-        while (alive(shell) || alive(ping)) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(100));
-        }
-        assert!(!alive(shell), "the shell outlived its owner");
-        assert!(!alive(ping), "a program in the shell outlived its owner");
+        // SAFETY: these handles stay valid for the waits, even after termination.
+        let wait = |handle: &OwnedHandle| unsafe { WaitForSingleObject(handle.as_raw_handle(), TIMEOUT.as_millis() as u32) };
+        assert_eq!(wait(&shell_handle), WAIT_OBJECT_0, "the shell outlived its owner");
+        assert_eq!(wait(&ping_handle), WAIT_OBJECT_0, "a program in the shell outlived its owner");
     }
 
     #[test]

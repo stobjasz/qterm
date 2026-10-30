@@ -13,7 +13,7 @@ describe("dropped files", () => {
     expect(dropText([path], "powershell")).toBe("'C:\\My Files\\it''s.txt' ");
     expect(dropText([path], "cmd")).toBe('"C:\\My Files\\it\'s.txt" ');
     expect(dropText([path], "bash")).toBe("'/c/My Files/it'\\''s.txt' ");
-    expect(dropText([path], "wsl")).toBe("'/mnt/c/My Files/it'\\''s.txt' ");
+    expect(dropText(["/actual-drive/My Files/it's.txt"], "wsl")).toBe("'/actual-drive/My Files/it'\\''s.txt' ");
     expect(dropText([path], "other")).toBe('"C:\\My Files\\it\'s.txt" ');
   });
 
@@ -31,13 +31,13 @@ describe("dropped files", () => {
     expect(dropText(["C:\\Zdjęcia\\łódź.png"], "powershell")).toBe("C:\\Zdjęcia\\łódź.png ");
   });
 
-  it("translates Windows paths for Git Bash and WSL", () => {
+  it("translates Git Bash paths and requires explicit distro translation before WSL quoting", () => {
     expect(shellPath("C:\\Users\\me", "bash")).toBe("/c/Users/me");
     expect(shellPath("D:\\", "bash")).toBe("/d");
     expect(shellPath("\\\\server\\share\\x", "bash")).toBe("//server/share/x");
-    expect(shellPath("C:\\Users\\me", "wsl")).toBe("/mnt/c/Users/me");
-    expect(shellPath("\\\\wsl.localhost\\Ubuntu\\home\\me\\a.txt", "wsl")).toBe("/home/me/a.txt");
-    expect(shellPath("\\\\wsl$\\Ubuntu", "wsl")).toBe("/");
+    expect(()=>shellPath("C:\\Users\\me", "wsl")).toThrow("selected WSL distribution");
+    expect(()=>shellPath("\\\\wsl.localhost\\Ubuntu\\home\\me\\a.txt", "wsl")).toThrow();
+    expect(shellPath("/c/Case/file.py", "wsl")).toBe("/c/Case/file.py");
     expect(shellPath("C:\\Users\\me", "powershell")).toBe("C:\\Users\\me");
   });
 });

@@ -24,6 +24,7 @@ export interface Draft {
   codexSessions: boolean;
   codexAlerts: boolean;
   codexRestore: boolean;
+  wslSources:NonNullable<Config["wslSources"]>;
   editor: string;
   longCommandAlert: number;
   inlineImages: boolean;
@@ -43,7 +44,7 @@ export interface Draft {
 }
 
 /** Draft field → config.toml key, for everything except the shortcuts. */
-const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles">, string> = {
+const TOML_KEYS: Record<Exclude<keyof Draft, "chords" | "scrollbackProfiles"|"wslSources">, string> = {
   hotkey: "hotkey",
   height: "height",
   width: "width",
@@ -100,6 +101,7 @@ export function toDraft(config: Config): Draft {
     codexSessions: config.codexSessions,
     codexAlerts: config.codexAlerts,
     codexRestore: config.codexRestore,
+    wslSources:(config.wslSources??[]).map(source=>({...source})),
     editor: config.editor,
     longCommandAlert: config.longCommandAlert,
     inlineImages: config.inlineImages,
@@ -135,6 +137,7 @@ export function changes(config: Config, draft: Draft): Record<string, unknown> {
     if (draft[field] !== original[field]) out[key] = draft[field];
   }
   const wanted = overrides(draft);
+  if(JSON.stringify(draft.wslSources)!==JSON.stringify(original.wslSources))out.wsl_sources=draft.wslSources.map(source=>({distribution:source.distribution,enabled:source.enabled,claude_home:source.claudeHome,codex_home:source.codexHome}));
   if (!sameTable(wanted, config.keybindings)) out.keybindings = wanted;
   if (!sameTable(draft.scrollbackProfiles, config.scrollback.profiles)) out["scrollback.profiles"] = draft.scrollbackProfiles;
   return out;

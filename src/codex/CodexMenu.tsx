@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { listAllCodexSessions, type CodexSession, type CodexUsage, type TranscriptSummary } from "../ipc";
+import { scanCodexSessions, type CodexScan, type CodexSession, type CodexUsage,type SessionReference } from "../ipc";
+import {sessionEnvironment,sessionReference} from "../agents/environments";
+import {environmentLabel} from "../agents/library";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Popup } from "../tabs/Popup";
 import { groupSessions, type GroupableSession } from "../claude/groups";
 import { replyPreview } from "../claude/reply";
 import { planSummary, contextPercent, formatTokens, modelName, usageSummary } from "./usage";
+import { agentStateText, agentStatusLabel, observationDetail, type AgentObservation, type AgentStatus } from "../agents/status";
 
 /** Above this many sessions the menu offers a filter box. */
 const FILTER_FROM = 6;
@@ -15,7 +19,8 @@ export interface RunningCodex {
   /** Where the pane is, e.g. "2 · PowerShell". */
   label: string;
   usage?: CodexUsage;
-  state: "busy" | "idle";
+  state: AgentStatus;
+  observation?: AgentObservation;
 }
 
 /** A pane where Codex CLI waits for you. */
@@ -33,9 +38,9 @@ export interface CodexMenuProps {
   onResume(session: CodexSession): void;
   /** Resumes it in the focused pane instead of a new tab. */
   onResumeHere(session: CodexSession): void;
-  onForget(ids: string[]): void;
+  onForget(references: SessionReference[]): void;
   /** Starts a fresh Codex CLI session in this folder. */
-  onNewSession(cwd: string): void;
+  onNewSession(cwd: string,environment:string): void;
   running: RunningCodex[];
   /** Panes where Codex waits for you, in tab order. */
   waiting: WaitingCodex[];
@@ -94,20 +99,22 @@ export function CodexMenu({ sessions, onResume, onResumeHere, onForget, onNewSes
           {running.length > 0 && (
             <section className="claude-running" aria-label="Codex running now">
               <div className="claude-running-title">Running now</div>
-              {running.map(({ paneId, label, usage, state }) => {
+              {running.map(({ paneId, label, usage, state, observation }) => {
                 const percent = usage ? contextPercent(usage) : undefined;
                 return (
                   <button
                     key={paneId}
                     className="claude-running-row"
-                    title={usage ? usageSummary(usage) : `Codex is ${state}`}
+                    title={`${agentStatusLabel("Codex", state)}\n${observationDetail(observation, state)}${usage ? `\n${usageSummary(usage)}` : ""}`}
                     onClick={() => {
                       close();
                       onFocusPane(paneId);
                     }}
                   >
                     <span className="claude-running-tab">{label}</span>
-                    <span className="claude-running-model">{usage ? modelName(usage.model) : "Codex"}</span>
+                    <span className="claude-running-model">{usage ? modelName(usage.model) : "Codex"}
+                      <span className="agent-state"> · {agentStateText(state)}</span>
+                    </span>
                     <span className="claude-running-context">
                       {percent !== undefined && <meter min={0} max={100} low={60} high={80} optimum={0} value={percent} />}
                       {usage ? formatTokens(usage.contextTokens) : "Usage unavailable"}
@@ -131,9 +138,9 @@ export function CodexMenu({ sessions, onResume, onResumeHere, onForget, onNewSes
               onResumeHere(session);
             }}
             onForget={onForget}
-            onNewSession={(cwd) => {
+            onNewSession={(cwd,environment) => {
               close();
-              onNewSession(cwd);
+              onNewSession(cwd,environment);
             }}
           />
         </>
@@ -150,31 +157,44 @@ function SessionList({
   onNewSession,
 }: Pick<Props, "sessions" | "onResume" | "onResumeHere" | "onForget" | "onNewSession">) {
   const [view, setView] = useState<"remembered" | "all">(sessions.length > 0 ? "remembered" : "all");
-  const [all, setAll] = useState<TranscriptSummary[]>();
+  const [scan, setScan] = useState<CodexScan>();
+  const all = scan?.sessions;
   const [error, setError] = useState<string>();
+  const [copyError, setCopyError] = useState<string>();
+  const [loading, setLoading] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
-    if (view === "all" && !all) void listAllCodexSessions().then(setAll, (e) => { setError(String(e)); setAll([]); });
-  }, [view, all]);
+    if (view !== "all") return;
+    let disposed = false;
+    setLoading(true);
+    setError(undefined);
+    void scanCodexSessions().then(
+      (result) => { if (!disposed) setScan(result); },
+      (e) => { if (!disposed) setError(String(e)); },
+    ).finally(() => { if (!disposed) setLoading(false); });
+    return () => { disposed = true; };
+  }, [view, refresh]);
 
   const rows = useMemo((): Row[] => {
     if (view === "remembered") {
-      return sessions.map((s) => ({ ...s, meta: timeAgo(s.seenAt), remembered: true }));
+      return sessions.map((s) => ({ ...s,environment:sessionEnvironment(s), meta: timeAgo(s.seenAt), remembered: true }));
     }
     return (all ?? []).map((t) => ({
       id: t.id,
+      environment:"native",
       cwd: t.cwd,
       title: t.title,
       seenAt: t.modified,
-      profileId: sessions.find((s) => s.id === t.id)?.profileId ?? "",
+      profileId: sessions.find((s) => s.id === t.id&&sessionEnvironment(s)==="native")?.profileId ?? "",
       meta: [t.gitBranch, `${t.prompts} prompt${t.prompts === 1 ? "" : "s"}`, timeAgo(t.modified)].filter(Boolean).join(" · "),
-      remembered: sessions.some((s) => s.id === t.id),
+      remembered: sessions.some((s) => s.id === t.id&&sessionEnvironment(s)==="native"),
     }));
   }, [view, sessions, all]);
   const groups = useMemo(() => groupSessions(rows, filter), [rows, filter]);
-  const asSession = (row: Row): CodexSession => ({ id: row.id, cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
+  const asSession = (row: Row): CodexSession => ({ id: row.id,environment:sessionEnvironment(row), cwd: row.cwd, title: row.title, profileId: row.profileId, seenAt: row.seenAt });
   const resume = (row: Row) => onResume(asSession(row));
 
   const toggle = (key: string) =>
@@ -187,13 +207,13 @@ function SessionList({
 
   return (
     <>
-      <div className="claude-menu-header">
+      <div className="claude-menu-header codex-menu-header">
         <div className="claude-views" role="tablist" aria-label="Which sessions">
           <button role="tab" aria-selected={view === "remembered"} onClick={() => setView("remembered")}>
             Remembered
           </button>
           <button role="tab" aria-selected={view === "all"} onClick={() => setView("all")}>
-            All on this PC
+            Native Windows
           </button>
         </div>
         {rows.length >= FILTER_FROM && (
@@ -206,17 +226,38 @@ function SessionList({
             onChange={(e) => setFilter(e.target.value)}
           />
         )}
-        <span className="claude-count">
+        {(view === "remembered" || scan) && <span className="claude-count">
+          {view === "all" && scan?.diagnostics.errors.length && scan.diagnostics.filesScanned === 0 ? "Session count unavailable" : <>
           {shown} session{shown === 1 ? "" : "s"} in {groups.length} folder{groups.length === 1 ? "" : "s"}
-        </span>
+          {view === "all" && Boolean(scan?.diagnostics.errors.length) ? " · incomplete scan" : ""}
+          </>}
+          {view === "all" && loading ? " · refreshing" : view === "all" && error ? " · previous scan" : ""}
+        </span>}
+        {view === "all" && <button aria-label="Refresh Codex sessions" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh</button>}
       </div>
+      {view === "all" && <section className="codex-scan" aria-label="Codex session scan">
+        <p>Native Windows sessions only; WSL and archived sessions are excluded.</p>
+        {scan && <>
+          <p className="codex-scan-path" title={scan.sessionsPath}>Codex home: {scan.home}</p>
+          <button onClick={() => void writeText(scan.home).then(() => setCopyError(undefined), (e) => setCopyError(String(e)))}>Copy Codex home</button>
+          {copyError && <p role="status">Could not copy Codex home: {copyError}</p>}
+          <p>{scan.diagnostics.filesScanned} rollout files scanned; {scan.diagnostics.unrecognizedFiles} unrecognized.</p>
+          {scan.diagnostics.missingSessionsFolder && <p>No sessions folder exists at {scan.sessionsPath}. Check your native Windows Codex installation or CODEX_HOME.</p>}
+          {scan.diagnostics.errors.length > 0 && <div role="alert">
+            <p>Some session data could not be read. Results may be incomplete.</p>
+            <ul>{scan.diagnostics.errors.map((message, index) => <li key={index}>{message}</li>)}</ul>
+          </div>}
+          {!loading && !error && !scan.diagnostics.missingSessionsFolder && scan.sessions.length === 0 && scan.diagnostics.errors.length === 0 && <p>No sessions containing user prompts were recognized. Unrecognized files may use an unsupported or incomplete format.</p>}
+        </>}
+      </section>}
       <div className="claude-groups">
+        {view==="all"&&<p className="menu-empty">Native Windows transcripts only. Use Session library for enabled WSL sources.</p>}
         {error && <p className="menu-empty">Could not read Codex sessions: {error}</p>}
-        {view === "all" && !all && <p className="menu-empty">Reading Codex CLI's sessions…</p>}
+        {view === "all" && loading && !all && <p className="menu-empty">Reading Codex CLI's sessions…</p>}
         {view === "remembered" && sessions.length === 0 && (
           <p className="menu-empty">
             Nothing remembered yet. Sessions appear here when a terminal prints <code>codex resume &lt;id&gt;</code>,
-            as Codex CLI does when you quit it. "All on this PC" lists every session.
+            as Codex CLI does when you quit it. "Native Windows" reads local Windows transcripts.
           </p>
         )}
         {rows.length > 0 && groups.length === 0 && <p className="menu-empty">No session matches “{filter}”.</p>}
@@ -224,7 +265,7 @@ function SessionList({
           // While filtering, every match stays visible.
           const open = filter.trim() !== "" || !collapsed.has(group.key);
           return (
-            <section key={group.key} className="claude-group" aria-label={`Sessions in ${group.label}`}>
+            <section key={group.key} className="claude-group" aria-label={`Sessions in ${group.label} · ${environmentLabel(group.environment)}`}>
               <div className="claude-group-header">
                 <button
                   className="claude-group-toggle"
@@ -237,6 +278,7 @@ function SessionList({
                   </span>
                   <span className="claude-group-name">{group.label}</span>
                   <span className="claude-group-path">{group.cwd}</span>
+                  <span className="claude-meta">{environmentLabel(group.environment)}</span>
                   <span className="claude-group-count">{group.sessions.length}</span>
                 </button>
                 {group.cwd && (
@@ -244,7 +286,8 @@ function SessionList({
                     className="tab-close claude-new"
                     aria-label={`New Codex session in ${group.label}`}
                     title={`Start codex in ${group.cwd}`}
-                    onClick={() => onNewSession(group.cwd!)}
+                    disabled={group.environment==="unknown"}
+                    onClick={() => onNewSession(group.cwd!,group.environment)}
                   >
                     +
                   </button>
@@ -254,7 +297,7 @@ function SessionList({
                     className="tab-close"
                     aria-label={`Forget all sessions in ${group.label}`}
                     title={`Forget all ${group.sessions.length} in ${group.label}`}
-                    onClick={() => onForget(group.sessions.map((s) => s.id))}
+                    onClick={() => onForget(group.sessions.map(sessionReference))}
                   >
                     ×
                   </button>
@@ -275,7 +318,7 @@ function SessionList({
                     </button>
                     <button
                       className="claude-here"
-                      title="Resume in the current tab (goes to its folder first)"
+                      title="Resume in the current tab (agent starts in its verified folder)"
                       aria-label={`Resume ${session.title ?? session.id} in the current tab`}
                       onClick={() => onResumeHere(asSession(session))}
                     >
@@ -285,7 +328,7 @@ function SessionList({
                       <button
                         className="tab-close"
                         aria-label={`Forget ${session.title ?? session.id}`}
-                        onClick={() => onForget([session.id])}
+                        onClick={() => onForget([sessionReference(session)])}
                       >
                         ×
                       </button>

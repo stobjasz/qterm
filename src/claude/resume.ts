@@ -15,6 +15,7 @@ export function resumeHereCommand(sessionId: string, cwd: string | null, shell: 
   // A session started in WSL lives in WSL's Claude Code, and the other way round.
   const windowsFolder = /^[A-Za-z]:[\\/]/.test(cwd);
   if (windowsFolder === (shell === "wsl")) return undefined;
+  if(shell==="wsl"&&!cwd.startsWith("/"))return undefined;
   const folder = shellQuote(shellPath(cwd, shell), shell);
   switch (shell) {
     case "powershell":

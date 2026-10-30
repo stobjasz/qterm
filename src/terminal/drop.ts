@@ -18,13 +18,7 @@ export function shellPath(path: string, shell: ShellKind): string {
     if (drive) return `/${drive[1].toLowerCase()}/${slashes(drive[2])}`.replace(/\/$/, "") || "/";
     return slashes(path);
   }
-  if (shell === "wsl") {
-    const drive = /^([A-Za-z]):[\\/]?(.*)$/.exec(path);
-    if (drive) return `/mnt/${drive[1].toLowerCase()}/${slashes(drive[2])}`.replace(/\/$/, "");
-    // A file inside a distro, as Explorer shows it.
-    const distro = /^\\\\wsl(?:\$|\.localhost)\\[^\\]+(\\.*)?$/i.exec(path);
-    if (distro) return slashes(distro[1] ?? "") || "/";
-  }
+  if (shell === "wsl" && !path.startsWith("/")) throw new Error("Translate this path in the selected WSL distribution first");
   return path;
 }
 

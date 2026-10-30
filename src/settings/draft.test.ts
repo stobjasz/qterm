@@ -41,6 +41,11 @@ const config: Config = {
 };
 
 describe("settings draft", () => {
+  it("saves explicit WSL source choices without inventing opt-in or mutating the loaded settings",()=>{
+    const draft=toDraft(config);expect(draft.wslSources).toEqual([]);draft.wslSources.push({distribution:"Ubuntu",enabled:false,claudeHome:"/isolated/claude",codexHome:""});
+    expect(changes(config,draft)).toEqual({wsl_sources:[{distribution:"Ubuntu",enabled:false,claude_home:"/isolated/claude",codex_home:""}]});expect(config.wslSources).toBeUndefined();
+    const loaded={...config,wslSources:draft.wslSources};expect(changes(loaded,toDraft(loaded))).toEqual({});
+  });
   it("has nothing to save when untouched", () => {
     expect(changes(config, toDraft(config))).toEqual({});
   });

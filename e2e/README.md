@@ -62,6 +62,55 @@ unit tests can't reproduce. One spec per risk.
 | R35 | A pane split with another shell runs it in the same folder, panes name their shells while a tab mixes them, and switching a pane's shell keeps its place and folder. | `mixed-shells.spec.ts` |
 | R36 | Codex response-item history appears in both All on this PC and Remembered, separate from Claude, and resumes in the current shell. | `codex.spec.ts` |
 | R37 | Codex hook commands installed from Settings run in PowerShell and deliver context, plan usage, activity and replies. | `codex.spec.ts` |
+| R38 | A quiet Claude/Codex process without lifecycle events shows unknown status, rather than idle; reported cache expiry remains visible. | `codex.spec.ts`, `claude-cache-countdown.spec.ts` |
+| R39 | A failed workspace save stays visibly pending and retries the unchanged layout after the filesystem recovers. | `persistence-recovery.spec.ts` |
+| R40 | The Codex session browser identifies unrecognized files and discovers a new session when refreshed. | `codex.spec.ts` |
+| R41 | Local delivery probes for both providers reach the real inbox watcher without creating provider events, and health identifies the pane of a real hook. | `agent-health.spec.ts` |
+| R42 | A Codex Stop shows completed, approval routing is explicitly unconfirmed input, and a subsequent submitted input invalidates that state; tooltips show the event source. | `codex.spec.ts` |
+| R43 | A reviewed command-output brief opens either provider in the command's original folder; shell expressions in the request/output remain literal data. | `agent-handoff.spec.ts` |
+| R44 | Reusing a busy source shell for an agent handoff is rejected without typing into its running program. | `agent-handoff.spec.ts` |
+| R45 | A new agent handoff waits for an empty shell prompt rather than typing into a profile's startup program. | `agent-handoff.spec.ts` |
+| R46 | Keyboard focus stays in the handoff preview, and Escape cancels without starting an agent. | `agent-handoff.spec.ts` |
+| R47 | Provider attention remains separate by event; viewing does not resolve it, closing its pane does not remove it, and a restart retains it with its project and prior-run context. | `agent-inbox.spec.ts` |
+| R48 | A failed inbox save visibly retries after the filesystem recovers without losing the event; unreadable saved history is preserved before recovery. | `agent-inbox-recovery.spec.ts` |
+| R49 | Real TypeScript and Rust compiler failures appear with their source locations; editor links use the run's original folder, and a successful rerun supersedes only that command's older problems. | `problems.spec.ts` |
+| R50 | Codex approval routing never creates a false unanswered question or desktop toast; repeated completion notifications are deduplicated, and test builds record attempted notifications without touching Windows notifications. | `codex-notifications.spec.ts` |
+| R51 | A reviewed tracked check records before-run repository evidence, survives restart, and becomes stale when source changes. | `verification-staleness.spec.ts` |
+| R52 | Source changes during a tracked check invalidate it even if the original bytes are restored before it ends. | `verification-during-run.spec.ts` |
+| R53 | Failed command-history writes retain results and retry automatically; recovery preserves unreadable history before starting fresh. | `command-record-recovery.spec.ts` |
+| R54 | Command records capture final output without a newline, with no prompt text mixed into it, and retain it after a restart. | `command-capture.spec.ts` |
+| R55 | A worktree preview creates nothing; explicit creation preserves dirty source, opens its own agent in the correct checkout, retains task/check history after restart and never removes files when completed. | `worktree-task.spec.ts` |
+| R56 | Failed worktree-history writes block creation until recovered, and unreadable history is backed up before recovery. | `worktree-recovery.spec.ts` |
+| R57 | Explicit session grants expose only their project through the real CLI/pipe; revocation and app exit remove credentials and block further reads. | `agent-access.spec.ts` |
+| R58 | Only separately granted named tasks launch through the CLI, in a new visible tab, with idempotent request IDs, requester attribution and retained results. | `agent-task-run.spec.ts` |
+| R59 | Changed manifests or shell definitions invalidate task execution; revoking a grant while its new tab waits for a prompt prevents launch. | `agent-task-grant.spec.ts` |
+| R60 | Revoking access leaves an accepted running task visible, and the developer can explicitly stop it without targeting another pane. | `agent-task-stop.spec.ts` |
+| R61 | Reviewed tasks use the selected Command Prompt/Git Bash shell, preserve folder/requester and reported exit status, and leave that shell usable after targeted stop. | `agent-task-shells.spec.ts` |
+| R62 | Explicitly reviewed recipe steps run in dependency order in their chosen layout, retain original results, and never replay after restart. | `recipe-order.spec.ts` |
+| R63 | Service output readiness unlocks only its dependents; failures, unknown exits, timeouts and cancellation block pending steps without silently stopping unrelated programs. | `recipe-readiness.spec.ts` |
+| R64 | Changing a reviewed recipe or its shell before a delayed step starts cancels that launch instead of running a substituted command. | `recipe-definition.spec.ts` |
+| R65 | The session library separates provider/environment identities, filters reported metadata, retains pins across restart and labels missing sessions unavailable. | `session-library.spec.ts` |
+| R66 | Session pin writes retry without another edit, and unreadable pin history is preserved until explicit backup recovery. | `session-library-recovery.spec.ts` |
+| R67 | A reviewed session handoff exports bounded historical context and opens a chosen agent with literal file data, without executing hostile text or silently sharing excerpts. | `session-handoff.spec.ts` |
+| R68 | Disabling provider history clears its library data and prevents further discovery, resume or handoff while retaining only explicit pin identities. | `session-library-retention.spec.ts` |
+| R69 | An explicitly selected WSL distribution reports its real cwd, discovers Linux project settings/tasks without executing Git hooks/filters, and opens case-sensitive diagnostic files using the saved distribution context. | `wsl-project.spec.ts` |
+| R70 | A restored WSL pane retains its original distribution and output; editing or removing its profile cannot launch another environment with the saved Linux folder. The user can explicitly switch the pane to recover. | `wsl-restore.spec.ts` |
+| R71 | Windows/WSL folder transfers and pasted image paths use the selected distribution's actual filesystem mapping, including a Linux alias outside /mnt; the real shell can read the pasted PNG and transfer back to the original Windows folder. | `wsl-paths.spec.ts` |
+| R72 | A clipboard image broadcast to mixed Windows and WSL shells is translated and quoted separately, arrives exactly once in each pane, and both real interpreters read the same PNG bytes without another pane's terminal protocol replies corrupting input. | `broadcast-files.spec.ts` |
+| R73 | Switching from a Linux folder that Windows cannot represent reports the conversion error and preserves the original running pane instead of silently opening a profile's home. | `wsl-unrepresentable.spec.ts` |
+| R74 | Named WSL transcript sources require explicit source and provider-history opt-in, keep native/WSL UUIDs separate, invalidate changed/disabled source context, and report unavailable distros without default fallback. | `wsl-sources.spec.ts` |
+| R75 | Resuming a WSL library session uses its selected distribution, literal provider home and exact Linux project, without typing into the existing pane. | `wsl-resume.spec.ts` |
+| R76 | A WSL session handoff delivers exactly the reviewed literal brief to its chosen provider in the selected distribution and project. | `wsl-session-handoff.spec.ts` |
+| R77 | A pending WSL source launch is cancelled when its shell reaches a differently cased Linux folder or source access is revoked before the prompt. | `wsl-launch-guard.spec.ts` |
+| R78 | A reviewed WSL output handoff preserves command context and literal brief bytes for either provider, in a new tab or the confirmed idle source shell. | `wsl-output-handoff.spec.ts` |
+| R79 | A WSL output handoff cannot reuse a busy shell, a differently cased folder or a broadcasting pane; rejecting it leaves the existing program/input untouched. | `wsl-output-guard.spec.ts` |
+| R80 | Each WSL pane owns its detached Linux descendants: closing one pane cleans only that tree, and normal app exit or a forced Windows crash cleans all owned trees while unrelated Linux processes survive. | `wsl-ownership.spec.ts` |
+| R81 | The WSL ownership wrapper preserves real terminal input, Bash job control, Ctrl-C, pipeline signals, prompt/exit telemetry and terminal-size changes without consuming shell input. | `wsl-owned-terminal.spec.ts` |
+| R82 | Fixed WSL control helpers ignore Python startup paths: opening a pane/project and discovering sources cannot execute a project's sitecustomize.py through inherited PYTHONPATH. | `wsl-control-isolation.spec.ts` |
+| R83 | Provider menus separate colliding native/distribution UUIDs and folders; per-row/group forgetting removes only selected references, and native transcript rows resume natively. | `provider-menu-scope.spec.ts` |
+| R84 | Legacy menu resume uses the verified distribution/home/folder for both providers, waits through a new shell's startup program and safely reuses an actual idle prompt. | `provider-menu-resume.spec.ts` |
+| R85 | Disabling an already-discovered WSL source or selecting an unavailable distribution blocks remembered-menu resume without a fallback launch or cached source reuse. | `provider-menu-gates.spec.ts` |
+| R86 | Fresh-session menu actions use their folder group's exact environment and profile configuration; a missing matching distribution cannot fall back to another shell. | `provider-menu-new.spec.ts` |
 
 Claude Code itself isn't needed for R23 and R24: its hook and status line input is piped
 in by hand, and a copy of Node named `claude.exe` (see `startFakeClaude` in `qterm.ts`)
@@ -69,5 +118,10 @@ stands in for it, so qterm sees Claude running in the pane.
 
 Not covered here (unit tests or manual): the global hotkey and tray (OS input), Windows
 notifications, Claude Code itself, administrator tabs (UAC can't be automated).
+For R50, notification requests reach the native command and are recorded in the
+isolated app's `notification-attempts.jsonl`; the E2E identifier returns before
+Windows toast delivery or app-ID registration. This guard is always enabled for
+test builds, including deliberate negative tests. Never disable it to test alert
+policy: the user's desktop must not receive synthetic permission requests.
 "Stop what runs in this pane" is covered by a Rust test on a real ConPTY
 (`pty::tests::stopping_ends_the_program_and_keeps_the_shell`).

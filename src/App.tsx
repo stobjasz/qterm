@@ -3,6 +3,29 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   claudeSessionSeen,
+  createAgentBrief,
+  prepareVerification,
+  cancelVerification,
+  worktreeTaskDetails,
+  publishAgentPanes,
+  agentAccessSnapshot,
+  claimAgentTask,
+  launchAgentTask,
+  failAgentTask,
+  stopAgentTask,
+  onAgentTaskQueued,
+  type AgentInvocation,
+  startRecipe,
+  cancelRecipeRun,
+  recipeRunsSnapshot,
+  resolveLibrarySession,
+  resolveProviderSession,
+  createWslAgentBrief,
+  validateWslFolder,
+  type LibraryEntry,
+  type RecipeReview,
+  type WorktreeTask,
+  type AgentProvider,
   claudeRunning,
   onClaudeAttention,
   onClaudeSessionStart,
@@ -53,6 +76,7 @@ import {
   saveWorkspaces,
   openInEditor,
   resolveFiles,
+  wslTranslatePaths,
   saveOutput,
   onUpdateAvailable,
   installUpdate,
@@ -81,19 +105,43 @@ import { SettingsPanel } from "./settings/SettingsPanel";
 import { TabBar } from "./tabs/TabBar";
 import { LayoutView } from "./terminal/LayoutView";
 import { hasContent, plainLines } from "./terminal/content";
-import { dropText } from "./terminal/drop";
+import {prepareFilePaste,deliverFilePaste,type FileDestination} from "./terminal/filePaste";
+import {profileSupportsEnvironment,sourceEnabled,nativeAgentContext,sightingContext,sourceContext,sessionEnvironment} from "./agents/environments";
+import {environmentLabel} from "./agents/library";
 import { isMultiLine } from "./terminal/paste";
 import { ConfirmPaste } from "./terminal/ConfirmPaste";
 import { findJson, type Json } from "./terminal/json";
 import { JsonViewer } from "./terminal/JsonViewer";
 import { useCodex } from "./codex/useCodex";
+import { hookObservation, resolveObservation, tabAgentStatus, type AgentObservation, type AgentStatus } from "./agents/status";
+import { HandoffDialog } from "./agents/HandoffDialog";
+import { AgentInbox } from "./agents/AgentInbox";
+import { AgentAccessPanel } from "./agents/AgentAccessPanel";
+import { useAgentAccess } from "./agents/useAgentAccess";
+import { useSessionLibrary } from "./agents/useSessionLibrary";
+import { SessionLibrary } from "./agents/SessionLibrary";
+import { SessionHandoffDialog } from "./agents/SessionHandoffDialog";
+import { limitText } from "./text";
+import { useAgentInbox } from "./agents/useAgentInbox";
+import { AlertNotifications } from "./agents/notifications";
+import { ProblemsPanel } from "./problems/ProblemsPanel";
+import { commandRun, latestRuns, type CommandRun } from "./problems/runs";
+import { useCommandRuns } from "./problems/useCommandRuns";
+import { VerifyDialog } from "./problems/VerifyDialog";
+import { WorktreePanel } from "./project/WorktreePanel";
+import { useWorktreeTasks } from "./project/useWorktreeTasks";
+import { RecipePanel } from "./project/RecipePanel";
+import { useRecipeRuns } from "./project/useRecipeRuns";
+import type { LayoutNode } from "./workspace/layout";
+import type { Diagnostic } from "./problems/diagnostics";
+import { briefText, handoffCommand, resumeCommand, sameCommandFolder, type HandoffContext } from "./agents/handoff";
 import type { CacheState } from "./claude/cache";
 import { gitSummary, projectLook } from "./project/project";
-import { resumeHereCommand } from "./claude/resume";
-import { isClaudeAlert, nextWaiting } from "./claude/waiting";
+import { nextWaiting } from "./claude/waiting";
 import { crossedWarning, formatReset, mergeUsage, planSummary, type PlanUsage } from "./claude/plan";
 import { parseNamed, removeNamed, serializeNamed, upsertNamed, type NamedWorkspace } from "./workspace/named";
 import { SaveWorkspaceDialog } from "./workspace/SaveWorkspaceDialog";
+import { Persistence, persistOutput, type OutputSnapshot } from "./workspace/persistence";
 import { findTargets, labelsFor, type Target } from "./terminal/quickSelect";
 import { compileTriggers } from "./terminal/triggers";
 import { QuickSelectOverlay, type QuickSelectItem } from "./terminal/QuickSelectOverlay";
@@ -106,7 +154,7 @@ import { formatClock, formatDuration } from "./terminal/marks";
 import { PortDialog } from "./terminal/PortDialog";
 import { ShellPicker } from "./terminal/ShellPicker";
 import type { PaneBadge } from "./terminal/PaneView";
-import { startFolder } from "./workspace/shellCwd";
+import { startFolder, transferFolder } from "./workspace/shellCwd";
 import { TAB_COLOR_VALUES } from "./tabs/TabStyleMenu";
 import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents } from "./terminal/registry";
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
@@ -164,6 +212,8 @@ const RESIZE_STEP = 0.05;
 const SAVE_DELAY_MS = 400;
 /** Pane output is saved this often (only panes that printed since the last save). */
 const SCROLLBACK_SAVE_MS = 30_000;
+/** Retry failed saves even if the workspace and history haven't changed. */
+const SAVE_RETRY_MS = 5000;
 /** How often to look for Claude Code in the panes, and how recent output means "working". */
 const CLAUDE_POLL_MS = 2000;
 /** While a tab shows a dev server's Open button, how often to check its port is still listened on... */
@@ -231,9 +281,66 @@ export default function App() {
   /** Recent commands and folders across panes, for the palette (history.json). */
   const [history, setHistory] = useState<History>(emptyHistory);
   const historyLoaded = useRef(false);
+  const [saveErrors, setSaveErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  const inbox = useAgentInbox();
+  const inboxRef = useRef(inbox.snapshot); inboxRef.current = inbox.snapshot;
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [agentAccessOpen, setAgentAccessOpen] = useState(false);
+  const [recipesOpen,setRecipesOpen]=useState(false);
+  const [libraryOpen,setLibraryOpen]=useState(false);
+  const [sessionHandoff,setSessionHandoff]=useState<LibraryEntry>();
+  const library=useSessionLibrary();
+  useEffect(()=>{setSaveErrors(current=>{if((current.get("Session pins")??null)===(library.pins.error??null))return current;const next=new Map(current);if(library.pins.error)next.set("Session pins",library.pins.error);else next.delete("Session pins");return next;});},[library.pins.error]);
+  const agentAccess = useAgentAccess();
+  const [agentPaneError, setAgentPaneError] = useState<string>();
+  const [problemsOpen, setProblemsOpen] = useState(false);
+  const [problemRunId, setProblemRunId] = useState<string>();
+  const [worktreesOpen, setWorktreesOpen] = useState(false);
+  const worktrees = useWorktreeTasks();
+  useEffect(() => {
+    setSaveErrors((current) => {
+      if ((current.get("Worktree tasks") ?? null) === (worktrees.error ?? null)) return current;
+      const next = new Map(current); if (worktrees.error) next.set("Worktree tasks", worktrees.error); else next.delete("Worktree tasks"); return next;
+    });
+  }, [worktrees.error]);
+  const records = useCommandRuns();
+  const commandRuns = records.runs;
+  const [verificationRun, setVerificationRun] = useState<CommandRun>();
+  useEffect(() => {
+    setSaveErrors((current) => {
+      if ((current.get("Command records") ?? null) === (records.error ?? null)) return current;
+      const next = new Map(current); if (records.error) next.set("Command records", records.error); else next.delete("Command records"); return next;
+    });
+  }, [records.error]);
+  useEffect(() => {
+    if (!problemsOpen || !records.runs.some((r) => r.verification)) return;
+    void records.refresh().catch(() => {});
+    const timer = window.setInterval(() => void records.refresh().catch(() => {}), 5000);
+    return () => window.clearInterval(timer);
+  }, [problemsOpen, records.refresh, records.runs.some((r) => !!r.verification)]);
+  useEffect(() => {
+    setSaveErrors((current) => {
+      if ((current.get("Agent inbox") ?? null) === (inbox.error ?? null)) return current;
+      const next = new Map(current);
+      if (inbox.error) next.set("Agent inbox", inbox.error); else next.delete("Agent inbox");
+      return next;
+    });
+  }, [inbox.error]);
+  const [quitSaveFailed, setQuitSaveFailed] = useState(false);
+  const [persistence] = useState(() => new Persistence((store, error) => {
+    setSaveErrors((current) => {
+      if (error === undefined && !current.has(store)) return current;
+      if (error !== undefined && current.get(store) === error) return current;
+      const next = new Map(current);
+      if (error === undefined) next.delete(store); else next.set(store, error);
+      return next;
+    });
+  }));
   const [attention, setAttention] = useState<ReadonlyMap<PaneId, ClaudeAlert>>(new Map());
-  const attentionRef = useRef(attention);
-  attentionRef.current = attention;
+  const [alertNotifications] = useState(() => new AlertNotifications());
+  const pendingAgentEvents = useMemo(() => inbox.snapshot.events.filter((e) => e.runId === inbox.snapshot.runId && e.resolvedAt === null && (e.kind === "permission" || e.kind === "input")), [inbox.snapshot]);
+  const codexAttention = useMemo(() => new Map<PaneId, ClaudeAlert>(pendingAgentEvents.filter((e) => e.provider === "codex")
+    .reverse().map((e) => [e.paneId, { paneId: e.paneId, sessionId: e.sessionId, title: e.title, message: e.message, kind: "codex:permission" }])), [pendingAgentEvents]);
   /** Background panes that printed something, or rang the bell, since last seen. */
   const [activity, setActivity] = useState<ReadonlySet<PaneId>>(new Set());
   const [bells, setBells] = useState<ReadonlySet<PaneId>>(new Set());
@@ -242,8 +349,11 @@ export default function App() {
   const [paneMenu, setPaneMenu] = useState<{ paneId: PaneId; x: number; y: number }>();
   /** A click on a command's ✓/✗ bar: its menu. */
   const [blockMenu, setBlockMenu] = useState<{ paneId: PaneId; block: CommandBlock; x: number; y: number }>();
-  /** Panes with Claude Code running: working (recent output) or idle. */
-  const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
+  const [handoff, setHandoff] = useState<{ paneId: PaneId; sourceProfileId: string; environment:string; shellKind:Profile["kind"]; context: HandoffContext }>();
+  /** Process detection cannot establish idle; quiet unobserved panes are unknown. */
+  const [claudeStatus, setClaudeStatus] = useState<ReadonlyMap<PaneId, AgentStatus>>(new Map());
+  const [claudeObservations, setClaudeObservations] = useState<ReadonlyMap<PaneId, AgentObservation>>(new Map());
+  const claudeEvents = useRef(new Map<PaneId, AgentObservation>());
   const [claudeUsages, setClaudeUsages] = useState<ReadonlyMap<PaneId, ClaudeUsage>>(new Map());
   /** Which Claude session each pane runs, from the SessionStart hook. */
   const paneSessions = useRef(new Map<PaneId, PaneClaudeSession>());
@@ -268,6 +378,17 @@ export default function App() {
   workspaceRef.current = workspace;
   /** Typed into a pane's shell once it starts (resuming a Claude session). */
   const startupInput = useRef(new Map<PaneId, string>());
+  const startupShellKinds=useRef(new Map<PaneId,Profile["kind"]>());
+  const sourceLaunches=useRef(new Map<PaneId,{source:Pick<LibraryEntry,"key"|"sourceVersion"|"sourceConfig"|"provider"|"environment">;cwd:string}>());
+  const startupAtPrompt = useRef(new Set<PaneId>());
+  const agentTaskPanes = useRef(new Map<PaneId, { id: string; profileId: string; command: string; submitted: boolean }>());
+  const recipeHandlers=useRef<ReturnType<typeof useRecipeRuns>>(undefined);
+  const verificationTickets = useRef(new Map<PaneId, { id: string; profileId: string }>());
+  useEffect(() => {
+    for (const [paneId, ticket] of verificationTickets.current) {
+      if (workspace.panes[paneId]?.profileId !== ticket.profileId) { verificationTickets.current.delete(paneId); void cancelVerification(ticket.id).catch(() => {}); }
+    }
+  }, [workspace.panes]);
   /** Output saved before the restart, shown above each restored pane's new shell. */
   const restoredOutput = useRef(new Map<PaneId, string>());
 
@@ -276,6 +397,34 @@ export default function App() {
   const [registry] = useState(
     () =>
       new TerminalRegistry({
+        onValidateStartup:async(paneId,_session,cwd)=>{
+          const pending=sourceLaunches.current.get(paneId);if(!pending)throw new Error("Source launch is no longer pending");
+          const current=await resolveLibrarySession(pending.source.key,pending.source.sourceVersion);
+          if(!sourceEnabled(pending.source,configRef.current)||!current.launchCwd||!sameCommandFolder(current.launchCwd,cwd,current.environment)||!sameCommandFolder(pending.cwd,cwd,current.environment))throw new Error("Source settings or folder changed before the shell became ready");
+          sourceLaunches.current.delete(paneId);
+        },
+        onAuthorizeStartup: async (paneId, session, cwd) => {
+          if(recipeHandlers.current?.hasPane(paneId))return recipeHandlers.current.authorize(paneId,session,cwd);
+          const task = agentTaskPanes.current.get(paneId);
+          if (!task) throw new Error("Task launch is no longer pending");
+          task.submitted = true;
+          try { await launchAgentTask(task.id, paneId, session, cwd); }
+          catch (e) {
+            const snapshot = await agentAccessSnapshot();
+            const job = snapshot.invocations.find((j) => j.id === task.id);
+            if (!job?.startedAt) { task.submitted = false; throw e; }
+            setNotice(`The task launch outcome needs inspection: ${e}`);
+          }
+        },
+        onStartupError: (paneId, message) => {
+          sourceLaunches.current.delete(paneId);
+          recipeHandlers.current?.fail(paneId,message);
+          const task = agentTaskPanes.current.get(paneId);
+          if (task) { agentTaskPanes.current.delete(paneId); void failAgentTask(task.id, message).catch(() => {}); }
+          const ticket = verificationTickets.current.get(paneId);
+          if (ticket) { verificationTickets.current.delete(paneId); void cancelVerification(ticket.id).catch(() => {}); }
+          setNotice(message);
+        },
         onCommand: (...args) => handlers.current.onCommand(...args),
         onTitle: (...args) => handlers.current.onTitle(...args),
         onExit: (...args) => handlers.current.onExit(...args),
@@ -293,6 +442,10 @@ export default function App() {
         onDevServer: (...args) => handlers.current.onDevServer(...args),
       }),
   );
+  const recipes=useRecipeRuns(registry,workspace,message=>setNotice(message));recipeHandlers.current=recipes;
+  useEffect(()=>{
+    for(const [pane,pending] of sourceLaunches.current){if(!sourceEnabled(pending.source,config)){registry.cancelStartup(pane);sourceLaunches.current.delete(pane);startupInput.current.delete(pane);setNotice("Source launch cancelled: history or source settings changed before its shell was ready.");}}
+  },[config?.claudeSessions,config?.codexSessions,config?.wslSources,registry]);
   // Dev builds only: lets tests and debugging read the live workspace and terminals.
   if (import.meta.env.DEV) (window as unknown as { __qterm: unknown }).__qterm = { workspace: () => workspaceRef.current, registry };
 
@@ -350,10 +503,10 @@ export default function App() {
 
   // --- workspace actions -------------------------------------------------------
   const newTab = useCallback(
-    (profileId?: string, cwd?: string, elevated?: boolean) => {
+    (profileId?: string, cwd?: string, elevated?: boolean, reservedIds?: { tab: string; pane: string }) => {
       const profile = profileId ? profiles?.find((p) => p.id === profileId) : defaultProfile;
       if (!profile) return undefined;
-      const ids = { tab: nextId("tab"), pane: nextId("pane") };
+      const ids = reservedIds ?? { tab: nextId("tab"), pane: nextId("pane") };
       setWorkspace((ws) => openTab(ws, ids, profile, cwd, elevated));
       return ids.pane;
     },
@@ -361,6 +514,180 @@ export default function App() {
   );
   const newTabRef = useRef(newTab);
   newTabRef.current = newTab;
+  const openResolvedSession=useCallback((current:LibraryEntry)=>{
+    if(!configRef.current?.shellIntegration||!current.cwd)throw Error("Enable shell integration and verify the session folder before resuming.");
+    const candidates=(profiles??[]).filter(p=>profileSupportsEnvironment(current.environment,p));
+    const profile=candidates.find(p=>p.id===current.profileId)??candidates.find(p=>p.id===defaultProfile?.id)??candidates[0];
+    if(!profile)throw new Error("No supported shell matches this session's environment. Restore its distribution profile first.");
+    const command=resumeCommand(current.provider,current.id,profile.kind,current.sourceHome);if(!command)throw new Error("This shell cannot resume the selected provider session.");
+    if(!sourceEnabled(current,configRef.current))throw new Error("Source settings changed; refresh the session again.");
+    const pane=newTab(profile.id,current.launchCwd??current.cwd);if(!pane)throw new Error("Could not open the session tab.");
+    startupShellKinds.current.set(pane,profile.kind);sourceLaunches.current.set(pane,{source:sourceContext(current),cwd:current.launchCwd??current.cwd});
+    startupInput.current.set(pane,`${command}\r`);startupAtPrompt.current.add(pane);
+  },[profiles,defaultProfile,newTab]);
+  const resumeLibraryEntry=useCallback(async(entry:LibraryEntry)=>{
+    const current=await resolveLibrarySession(entry.key,entry.sourceVersion);
+    if(!entry.cwd||!current.cwd||!sameCommandFolder(entry.cwd,current.cwd,current.environment))throw new Error("The source folder changed; refresh and review the session again.");
+    openResolvedSession(current);setLibraryOpen(false);
+  },[openResolvedSession]);
+  const sendSessionHandoff=useCallback(async(provider:AgentProvider,profileId:string,text:string)=>{
+    if(!sessionHandoff)throw new Error("Source session is no longer selected.");
+    if(!config?.shellIntegration)throw new Error("Enable shell integration before opening a handoff agent, or export the reviewed file.");
+    const current=await resolveLibrarySession(sessionHandoff.key,sessionHandoff.sourceVersion),profile=profiles?.find(p=>p.id===profileId);
+    if(!profile||!profileSupportsEnvironment(current.environment,profile)||!current.cwd)throw new Error("Choose a supported shell in the source environment.");
+    if(!sessionHandoff.cwd||!sameCommandFolder(current.cwd,sessionHandoff.cwd,current.environment)||current.project!==sessionHandoff.project)throw new Error("The source project/folder changed. Refresh and review the handoff again.");
+    const brief=current.environment.startsWith("wsl:")?await createWslAgentBrief(current.environment.slice(4),text):await createAgentBrief(text),command=handoffCommand(provider,brief.path,profile.kind,provider===current.provider?current.sourceHome:undefined);if(!command)throw new Error("This shell cannot launch the destination agent.");
+    if(!sourceEnabled(sessionHandoff,configRef.current))throw new Error("Source settings changed; refresh and review the handoff again.");
+    const pane=newTab(profile.id,current.launchCwd??current.cwd);if(!pane)throw new Error("Could not create the handoff pane.");startupShellKinds.current.set(pane,profile.kind);sourceLaunches.current.set(pane,{source:sourceContext(current),cwd:current.launchCwd??current.cwd});startupInput.current.set(pane,`${command}\r`);startupAtPrompt.current.add(pane);setSessionHandoff(undefined);setNotice("The reviewed session handoff will open at the new pane's empty prompt.");
+  },[sessionHandoff,config?.shellIntegration,profiles,newTab]);
+  const recipeLaunchBindings=useRef(new Map<string,Record<string,string>>());
+  const openedRecipeRuns=useRef(new Set<string>());
+  const launchReviewedRecipe=useCallback(async(review:RecipeReview,name:string)=>{
+    const definition=review.recipes.find(r=>r.name===name),profile=profiles?.find(p=>p.id===review.profileId);
+    if(!definition||!profile)throw new Error("The reviewed workflow shell is unavailable");
+    const bindings=recipeLaunchBindings.current.get(review.id)??Object.fromEntries(definition.steps.map(s=>[s.name,nextId("pane")]));recipeLaunchBindings.current.set(review.id,bindings);
+    let run;
+    try{run=await startRecipe(review.id,name,bindings);}catch(e){run=(await recipeRunsSnapshot()).find(r=>r.reviewId===review.id&&r.name===name);if(!run)throw e;}
+    if(openedRecipeRuns.current.has(run.id))return;
+    if(run.steps.some(s=>s.state!=="pending"))throw new Error("This workflow launch is no longer pending. Review it again to create a new run.");
+    try{
+      openedRecipeRuns.current.add(run.id);
+      recipes.register(run);
+      const panes:Pane[]=run.steps.map(step=>{startupInput.current.set(step.paneId,`${step.command}\r`);startupAtPrompt.current.add(step.paneId);return{id:step.paneId,profileId:profile.id,profileName:profile.name,environment:"native",title:"",cwd:step.directory};});
+      if(run.layout==="tabs")setWorkspace(ws=>panes.reduce((next,pane)=>openTabWith(next,nextId("tab"),{kind:"leaf",pane:pane.id},[pane],`${run.name}: ${run.steps.find(s=>s.paneId===pane.id)!.name}`),ws));
+      else {const root:LayoutNode=panes.length===1?{kind:"leaf",pane:panes[0].id}:{kind:"split",dir:run.layout==="rows"?"column":"row",children:panes.map(p=>({kind:"leaf",pane:p.id})),sizes:panes.map(()=>1/panes.length)};setWorkspace(ws=>openTabWith(ws,nextId("tab"),root,panes,run.name));}
+      setNotice(`Launched workflow ${run.name}; dependent steps reserve input until ready.`);
+    }catch(e){await cancelRecipeRun(run.id);throw e;}
+  },[profiles,recipes]);
+  const claimingTasks = useRef(new Set<string>());
+  const acceptAgentTask = useCallback(async (id: string) => {
+    if (claimingTasks.current.has(id)) return;
+    claimingTasks.current.add(id);
+    let claimed = false;
+    try {
+      const ids = { tab: nextId("tab"), pane: nextId("pane") };
+      const job = await claimAgentTask(id, ids.pane); claimed = true;
+      const profile = profiles?.find((p) => p.id === job.profileId);
+      if (!profile || profile.kind === "wsl" || profile.kind === "other") throw new Error("The reviewed native shell is unavailable");
+      agentTaskPanes.current.set(ids.pane, { id, profileId: job.profileId, command: job.task.command, submitted: false });
+      startupInput.current.set(ids.pane, `${job.task.command}\r`); startupAtPrompt.current.add(ids.pane);
+      if (!newTab(job.profileId, job.task.directory, false, ids)) throw new Error("Could not create a task tab");
+      setWorkspace((ws) => renameTab(ws, ids.tab, `${job.requester.client}: ${job.task.name}`));
+      setNotice(`Queued ${job.task.name} for ${job.requester.client}; its new tab reserves input until the reviewed task can launch.`);
+    } catch (e) {
+      if (claimed) await failAgentTask(id, String(e)).catch(() => {});
+      setNotice(`Could not open the requested task: ${e}`);
+    } finally { claimingTasks.current.delete(id); }
+  }, [profiles, newTab]);
+  useEffect(() => {
+    let active = true;
+    const listener = onAgentTaskQueued((id) => { if (active) void acceptAgentTask(id); });
+    return () => { active = false; void listener.then((stop) => stop()).catch(() => {}); };
+  }, [acceptAgentTask]);
+  useEffect(() => {
+    for (const job of agentAccess.snapshot.invocations) if (job.state === "queued") void acceptAgentTask(job.id);
+    for (const [paneId, task] of agentTaskPanes.current) {
+      const job = agentAccess.snapshot.invocations.find((j) => j.id === task.id);
+      if (job?.state === "cancelled") { registry.cancelStartup(paneId); agentTaskPanes.current.delete(paneId); startupInput.current.delete(paneId); startupAtPrompt.current.delete(paneId); }
+    }
+  }, [agentAccess.snapshot.invocations, acceptAgentTask, registry]);
+  useEffect(() => {
+    for (const [paneId, task] of agentTaskPanes.current) if (workspace.panes[paneId]?.profileId !== task.profileId) {
+      agentTaskPanes.current.delete(paneId); void failAgentTask(task.id, "The task pane closed or changed shell").catch(() => {});
+    }
+  }, [workspace.panes]);
+  const stopRequestedTask = useCallback(async (job: AgentInvocation) => {
+    const task = job.paneId ? agentTaskPanes.current.get(job.paneId) : undefined;
+    if (job.startedAt && (!task || task.id !== job.id)) throw new Error("That command has already finished or its pane changed. Refresh task status before stopping it.");
+    await stopAgentTask(job.id);
+  }, []);
+
+  const openWorktree = useCallback(async (task: WorktreeTask, agent: boolean) => {
+    const profile = profiles?.find((p) => p.id === task.profileId);
+    if (!profile || profile.kind === "wsl" || profile.kind === "other") throw new Error("The recorded native shell is unavailable. Restore that profile before opening this task.");
+    const details = await worktreeTaskDetails(task.id); // Revalidate the recorded repository before opening a pane.
+    if (agent && details.branch !== task.branch) throw new Error(`This worktree is now on ${details.branch}. Switch back to ${task.branch} before launching its task agent, or open a shell to inspect it.`);
+    let command: string | undefined;
+    if (agent && task.provider !== "shell") {
+      if (!config?.shellIntegration) throw new Error("Enable shell integration before opening a task agent.");
+      const brief = await createAgentBrief(briefText({ command: `Worktree task: ${task.title}`, cwd: task.directory, output: "" }, task.request));
+      command = handoffCommand(task.provider, brief.path, profile.kind);
+      if (!command) throw new Error("This shell cannot launch the task agent.");
+    }
+    const id = newTab(profile.id, task.directory);
+    if (!id) throw new Error("Could not open the worktree tab.");
+    setWorkspace((ws) => { const tab = ws.tabs.find((t) => paneIds(t.root).includes(id)); return tab ? renameTab(ws, tab.id, task.title) : ws; });
+    if (command) { startupShellKinds.current.set(id,profile.kind);startupInput.current.set(id, `${command}\r`); startupAtPrompt.current.add(id); }
+    setWorktreesOpen(false);
+    setNotice(command ? "The task agent will launch at the new worktree's empty shell prompt." : "Opened the task worktree in a new shell tab.");
+  }, [profiles, config?.shellIntegration, newTab]);
+
+  const showHandoff = useCallback((paneId: PaneId, block?: CommandBlock) => {
+    const pane = workspaceRef.current.panes[paneId];
+    if (!pane) return;
+    const selected = block ? "" : registry.selection(paneId);
+    const command = selected ? undefined : block ?? registry.lastCommandBlock(paneId);
+    const output = selected || (command ? registry.blockOutput(paneId, command.id) : "");
+    if (!output.trim()) { setNotice("Select some output first, or run a command that prints output."); return; }
+    setHandoff({ paneId, sourceProfileId: pane.profileId,environment:registry.environmentOf(paneId)??pane.environment??"unknown",shellKind:registry.shellKindOf(paneId)??"other", context: {
+      command: command?.command, cwd: command?.cwd ?? pane.cwd, environment:registry.environmentOf(paneId)??pane.environment??"unknown", exitCode: command?.exitCode, output, selected: Boolean(selected),
+    } });
+  }, [registry]);
+
+  const sendHandoff = useCallback(async (provider: AgentProvider, profileId: string, where: "new" | "current", text: string) => {
+    if (!handoff) throw new Error("The source output is no longer selected.");
+    const profile = profiles?.find((p) => p.id === profileId);
+    const from = {id:handoff.sourceProfileId,kind:handoff.shellKind,environment:handoff.environment};
+    if (!profile || !profileSupportsEnvironment(handoff.environment,profile)) throw new Error("Choose a supported shell in the output's original environment.");
+    if (!config?.shellIntegration) throw new Error("Enable shell integration before launching an agent from this action, or copy the brief for a manual handoff.");
+    const start = startFolder(handoff.context.cwd, from, profile);
+    if (start.lost) throw new Error("This shell cannot open the command's folder. Choose a compatible shell.");
+    const distribution=handoff.environment.startsWith("wsl:")?handoff.environment.slice(4):undefined;
+    let prompt:string|undefined;
+    if (where === "current") {
+      const ws = workspaceRef.current;
+      const pane = ws.panes[handoff.paneId];
+      const session = registry.sessionOf(handoff.paneId);
+      if (!pane || pane.profileId !== profileId || session === undefined || registry.environmentOf(pane.id)!==handoff.environment || registry.shellKindOf(pane.id)!==profile.kind || (start.cwd && (!pane.cwd || !sameCommandFolder(pane.cwd, start.cwd,handoff.environment)))) throw new Error("The source pane changed shell or folder. Open a new tab instead.");
+      if (ws.tabs.some((tab) => tab.broadcast && paneIds(tab.root).includes(pane.id))) throw new Error("Turn off broadcast input before reusing this pane.");
+      prompt=registry.handoffPrompt(pane.id);
+      if (!distribution&&(await runningPrograms([session])).length) throw new Error("The source pane is busy. Open a new tab instead.");
+    }
+    if(distribution){if(!start.cwd)throw Error("The Linux command folder is unknown. Copy the brief for a manual handoff.");start.cwd=await validateWslFolder(distribution,start.cwd);}
+    const brief = distribution?await createWslAgentBrief(distribution,text):await createAgentBrief(text);
+    const command = handoffCommand(provider, brief.path, profile.kind);
+    if (!command) throw new Error("This shell cannot launch the agent.");
+    if(!configRef.current?.shellIntegration)throw Error("Shell integration changed while preparing the handoff. Review it again.");
+    if (where === "new") {
+      const id = newTab(profile.id, start.cwd);
+      if (!id) throw new Error("Could not create an agent tab.");
+      startupInput.current.set(id, `${command}\r`);
+      startupShellKinds.current.set(id,profile.kind);
+      startupAtPrompt.current.add(id);
+      setNotice("The agent will launch when its new pane reaches an empty shell prompt.");
+    } else {
+      const ws=workspaceRef.current,pane=ws.panes[handoff.paneId];
+      if(!pane||pane.profileId!==profileId||ws.tabs.some(tab=>tab.broadcast&&paneIds(tab.root).includes(pane.id)))throw Error("The source pane or broadcast mode changed. Open a new tab instead.");
+      registry.focus(handoff.paneId);
+      registry.submitHandoff(handoff.paneId,prompt!,command);
+    }
+    setHandoff(undefined);
+  }, [handoff, profiles, registry, newTab, config?.shellIntegration]);
+
+  const runVerification = useCallback(async () => {
+    const run = verificationRun;
+    if (!run?.cwd || !run.command.trim() || run.commandTruncated) throw new Error("This run has no complete recorded command or folder.");
+    const profile = profiles?.find((p) => p.id === run.profileId);
+    if (!profile || profile.kind === "other" || profile.kind === "wsl" || !run.shellKind || run.shellKind !== profile.kind) throw new Error("The original native shell profile is unavailable or changed kind. WSL verification is still planned.");
+    if (!config?.shellIntegration) throw new Error("Enable shell integration before tracking verification results.");
+    const prepared = await prepareVerification(run.cwd, run.command);
+    const paneId = newTab(profile.id, run.cwd);
+    if (!paneId) { await cancelVerification(prepared.id); throw new Error("Could not open a verification pane."); }
+    verificationTickets.current.set(paneId, { id: prepared.id, profileId: profile.id });
+    startupInput.current.set(paneId, `${run.command}\r`); startupAtPrompt.current.add(paneId);
+    setVerificationRun(undefined);
+    setNotice("The reviewed check will run when its new pane reaches an empty prompt in the recorded folder.");
+  }, [verificationRun, profiles, config?.shellIntegration, newTab]);
 
   /** A short message over the tab bar, e.g. why an admin tab opened as a window. */
   const [notice, setNotice] = useState<string>();
@@ -402,9 +729,10 @@ export default function App() {
    * shell writes it. Says so when it can't start there (its home folder then).
    */
   const folderFor = useCallback(
-    (cwd: string | undefined, fromProfile: string | undefined, to: Profile) => {
-      const from = profiles?.find((p) => p.id === fromProfile);
-      const start = startFolder(cwd, from, to);
+    async (cwd: string | undefined, fromProfile: string | undefined, to: Profile,environment?:string) => {
+      const current = profiles?.find((p) => p.id === fromProfile);
+      const from = current?{...current,environment}:environment?{id:fromProfile??"unavailable",kind:"other" as const,environment}:undefined;
+      const start = await transferFolder(cwd, from, to,wslTranslatePaths);
       if (start.lost) setNotice(`${to.name} can't start in ${cwd}, so it opened in its home folder.`);
       return start.cwd;
     },
@@ -419,10 +747,13 @@ export default function App() {
       const source = workspaceRef.current.panes[paneId];
       const profile = profiles?.find((p) => p.id === (options?.profileId ?? source?.profileId)) ?? defaultProfile;
       if (!profile) return;
-      const newPane = nextId("pane");
-      if (options?.command) startupInput.current.set(newPane, `${options.command}\r`);
-      const cwd = options?.cwd ?? folderFor(source?.cwd, source?.profileId, profile);
-      setWorkspace((ws) => splitPane(ws, paneId, dir, newPane, profile, cwd));
+      void (async()=>{
+        if(options?.command&&!configRef.current?.shellIntegration)throw Error("Enable shell integration before launching a project task at its new prompt.");
+        const cwd = options?.cwd ?? await folderFor(source?.cwd, source?.profileId, profile,registry.environmentOf(paneId)??source?.environment);
+        const current=workspaceRef.current.panes[paneId];if(!source||!current||current.profileId!==source.profileId||current.cwd!==source.cwd)throw Error("The source pane changed while its folder was being translated; try again.");
+        const newPane=nextId("pane");if(options?.command){startupInput.current.set(newPane,`${options.command}\r`);startupAtPrompt.current.add(newPane);}
+        setWorkspace((ws) => splitPane(ws, paneId, dir, newPane, profile, cwd));
+      })().catch(e=>setNotice(`Could not split the pane: ${e}`));
     },
     [profiles, defaultProfile, folderFor],
   );
@@ -431,6 +762,9 @@ export default function App() {
     (paneId: PaneId) => {
       registry.dispose(paneId);
       startupInput.current.delete(paneId);
+      startupShellKinds.current.delete(paneId);
+      sourceLaunches.current.delete(paneId);
+      startupAtPrompt.current.delete(paneId);
       setAttention((current) => without(current, paneId));
       setWorkspace((ws) => closePane(ws, paneId));
     },
@@ -473,79 +807,80 @@ export default function App() {
       askToClose(
         "pane",
         [paneId],
-        () => {
-          const cwd = folderFor(pane.cwd, pane.profileId, profile);
+        () => {void (async()=>{
+          const session=registry.sessionOf(paneId),submission=registry.submissionRevision(paneId);
+          const cwd = await folderFor(pane.cwd, pane.profileId, profile,registry.environmentOf(paneId)??pane.environment);
+          const current=workspaceRef.current.panes[paneId];if(!current||registry.sessionOf(paneId)!==session||registry.submissionRevision(paneId)!==submission||current.profileId!==pane.profileId||current.cwd!==pane.cwd)throw Error("The source pane changed while its folder was being translated; try again.");
           const newPane = nextId("pane");
           registry.dispose(paneId);
           startupInput.current.delete(paneId);
+          startupShellKinds.current.delete(paneId);
+          sourceLaunches.current.delete(paneId);
+          startupAtPrompt.current.delete(paneId);
           setAttention((current) => without(current, paneId));
           setWorkspace((ws) => replacePane(ws, paneId, newPane, profile, cwd));
-        },
+        })().catch(e=>setNotice(`Could not switch the pane: ${e}`));},
         "switch",
       );
     },
     [profiles, folderFor, askToClose, registry],
   );
 
-  /** Opens a tab in the session's folder and types `claude --resume <id>` there. */
-  const resumeClaude = useCallback(
-    (session: ClaudeSession) => {
-      const recorded = profiles?.find((p) => p.id === session.profileId);
-      // A Windows folder can't be entered from WSL (and vice versa): use the default shell then.
-      const windowsPath = session.cwd ? /^[A-Za-z]:\\/.test(session.cwd) : true;
-      const profile = recorded && recorded.id.startsWith("wsl:") === !windowsPath ? recorded : defaultProfile;
-      const paneId = newTab(profile?.id, session.cwd ?? undefined);
-      if (paneId) startupInput.current.set(paneId, `claude --resume ${session.id}\r`);
-    },
-    [profiles, defaultProfile, newTab],
-  );
-
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
-  const claudeStatusRef = useRef<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
-  const codexStatusRef = useRef<ReadonlyMap<PaneId, "busy" | "idle">>(new Map());
-  /**
-   * Resumes a session in the focused pane: its folder, then `claude --resume`. A new
-   * tab instead when that pane is busy (Claude or another command running) or its
-   * shell can't reach the folder.
-   */
-  const resumeClaudeHere = useCallback(
-    (session: ClaudeSession) => {
-      const ws = workspaceRef.current;
-      const paneId = activeTab(ws)?.focusedPane;
-      const pane = paneId ? ws.panes[paneId] : undefined;
-      const kind = profilesRef.current?.find((p) => p.id === pane?.profileId)?.kind ?? "other";
-      const command = resumeHereCommand(session.id, session.cwd, kind);
-      const busy = paneId && (claudeStatusRef.current.has(paneId) || codexStatusRef.current.has(paneId) || registry.commandRunning(paneId));
-      if (!paneId || !command || busy) {
-        setNotice(
-          busy
-            ? "That tab is busy (Claude Code or another command is running there), so the session opened in a new tab."
-            : "That tab's shell can't open this session's folder, so it opened in a new tab.",
-        );
-        resumeClaude(session);
-        return;
+  const claudeStatusRef = useRef<ReadonlyMap<PaneId, AgentStatus>>(new Map());
+  const codexStatusRef = useRef<ReadonlyMap<PaneId, AgentStatus>>(new Map());
+  const resumeProvider=useCallback(async(provider:AgentProvider,session:ClaudeSession,where:"new"|"current")=>{
+    try{
+      if(!configRef.current?.shellIntegration)throw Error("Enable shell integration before resuming a provider session.");
+      const environment=sessionEnvironment(session),targetId=activeTab(workspaceRef.current)?.focusedPane;
+      const target=targetId?workspaceRef.current.panes[targetId]:undefined,kind=targetId?registry.shellKindOf(targetId):undefined;
+      let prompt:string|undefined;
+      if(where==="current"&&target&&kind&&kind!=="other"&&registry.environmentOf(target.id)===environment&&!claudeStatusRef.current.has(target.id)&&!codexStatusRef.current.has(target.id)){
+        try{prompt=registry.handoffPrompt(target.id);}catch{/* A busy/unknown initial prompt uses the verified new-tab path. */}
       }
-      registry.focus(paneId);
-      registry.typeSnippet(paneId, command, true);
-    },
-    [registry, resumeClaude],
-  );
-  /** A fresh Claude Code session in `cwd`, in a new tab with the default shell. */
-  const newClaudeSession = useCallback(
-    (cwd: string) => {
-      const paneId = newTab(defaultProfile?.id, cwd);
-      if (paneId) startupInput.current.set(paneId, "claude\r");
-    },
-    [newTab, defaultProfile],
-  );
+      const current=await resolveProviderSession({provider,id:session.id.toLowerCase(),environment});
+      if(session.cwd&&current.cwd&&!sameCommandFolder(session.cwd,current.cwd,environment))throw Error("The session folder changed. Refresh and review it in Session library before resuming.");
+      if(where==="new"||!prompt||!target||!kind){openResolvedSession(current);if(where==="current")setNotice("The current pane is busy or incompatible, so the verified session opened in a new tab.");return;}
+      if(registry.handoffPrompt(target.id)!==prompt)throw Error("The source pane changed while resolving the session; nothing was typed.");
+      const nativeSession=registry.sessionOf(target.id);
+      if(environment==="native"&&nativeSession!==undefined&&(await runningPrograms([nativeSession])).length){
+        if(registry.handoffPrompt(target.id)!==prompt)throw Error("The source pane changed while checking its programs; nothing was typed.");
+        openResolvedSession(current);setNotice("The current pane has a running program, so the verified session opened in a new tab.");return;
+      }
+      const verified=await resolveLibrarySession(current.key,current.sourceVersion);
+      if(!verified.launchCwd||!current.launchCwd||!sameCommandFolder(current.launchCwd,verified.launchCwd,environment)||!sourceEnabled(verified,configRef.current))throw Error("Source settings or folder changed; refresh and review this session again.");
+      if(!configRef.current?.shellIntegration||activeTab(workspaceRef.current)?.focusedPane!==target.id||workspaceRef.current.panes[target.id]?.profileId!==target.profileId)throw Error("The focused pane changed; nothing was typed.");
+      const command=resumeCommand(provider,verified.id,kind,verified.sourceHome,verified.launchCwd);if(!command)throw Error("This shell cannot resume the selected provider session.");
+      registry.submitHandoff(target.id,prompt,command);registry.focus(target.id);
+    }catch(error){setNotice(`Could not resume ${provider}: ${error}`);}
+  },[registry,openResolvedSession]);
+  const resumeClaude=useCallback((session:ClaudeSession)=>void resumeProvider("claude",session,"new"),[resumeProvider]);
+  const resumeClaudeHere=useCallback((session:ClaudeSession)=>void resumeProvider("claude",session,"current"),[resumeProvider]);
+  const newProviderSession=useCallback(async(provider:AgentProvider,cwd:string,environment:string)=>{
+    try{
+      if(!configRef.current?.shellIntegration)throw Error("Enable shell integration before launching an agent at its new prompt.");
+      const candidates=(profiles??[]).filter(profile=>profileSupportsEnvironment(environment,profile)&&!(profile.kind==="cmd"&&cwd.startsWith("\\\\")));
+      const profile=candidates.find(profile=>profile.id===defaultProfile?.id)??candidates[0];if(!profile)throw Error("No supported shell matches this folder's captured environment.");
+      const folder=environment.startsWith("wsl:")?await validateWslFolder(environment.slice(4),cwd):cwd;
+      if(!configRef.current?.shellIntegration)throw Error("Shell integration changed before launch.");
+      const pane=newTab(profile.id,folder);if(!pane)throw Error("Could not open the agent pane.");startupShellKinds.current.set(pane,profile.kind);startupAtPrompt.current.add(pane);startupInput.current.set(pane,provider==="codex"?"codex --no-daemon\r":"claude\r");
+    }catch(error){setNotice(`Could not open ${provider}: ${error}`);}
+  },[profiles,defaultProfile,newTab]);
+  const newClaudeSession=useCallback((cwd:string,environment:string)=>void newProviderSession("claude",cwd,environment),[newProviderSession]);
 
   const paneSpec = useCallback((pane: Pane): PaneSpec => {
     const profile = profilesRef.current?.find((p) => p.id === pane.profileId);
     return {
       profileId: pane.profileId,
+      distribution: profile?.distribution,
+      shellKind:startupShellKinds.current.get(pane.id)??profile?.kind,
+      environment:pane.environment,
       cwd: pane.cwd,
       startupInput: startupInput.current.get(pane.id),
+      startupAtPrompt: startupAtPrompt.current.has(pane.id),
+      startupAuthorization: agentTaskPanes.current.has(pane.id) || !!recipeHandlers.current?.hasPane(pane.id),
+      startupValidation:sourceLaunches.current.has(pane.id),
       restored: restoredOutput.current.get(pane.id),
       elevated: pane.elevated,
       theme: profile?.theme ? THEMES[profile.theme] : undefined,
@@ -698,12 +1033,18 @@ export default function App() {
         case "nextWaiting": {
           const ws = workspaceRef.current;
           const order = ws.tabs.flatMap((tab) => paneIds(tab.root));
-          const waiting = [...attentionRef.current].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([id]) => id);
+          const waiting = inboxRef.current.events.filter((e) => e.resolvedAt === null && (e.kind === "permission" || e.kind === "input") && e.runId === inboxRef.current.runId).map((e) => e.paneId);
           const next = nextWaiting(order, new Set(waiting), paneId);
           if (next) setWorkspace((w) => focusPane(w, next));
           else setNotice("No coding agent is waiting for you in any pane.");
           break;
         }
+        case "agentInbox": setInboxOpen(true); break;
+        case "problems": setProblemsOpen(true); break;
+        case "worktrees": setWorktreesOpen(true); break;
+        case "agentAccess": setAgentAccessOpen(true); break;
+        case "recipes": setRecipesOpen(true); break;
+        case "sessionLibrary": setLibraryOpen(true); break;
         case "stopPrograms": {
           const session = registry.sessionOf(paneId);
           if (session === undefined) break;
@@ -725,6 +1066,9 @@ export default function App() {
         }
         case "splitWith":
           setShellPicker({ paneId, dir: command.dir });
+          break;
+        case "askAgent":
+          showHandoff(paneId);
           break;
         case "switchShell":
           setShellPicker({ paneId });
@@ -751,7 +1095,7 @@ export default function App() {
     onCodexSession: (paneId, id) => codex.seen(paneId, id, false),
     onClaudeSession: (paneId, id) => {
       const pane = workspaceRef.current.panes[paneId];
-      if (pane) void claudeSessionSeen(id, pane.profileId, pane.cwd);
+      if (pane) void claudeSessionSeen(id, pane.profileId, pane.cwd,sightingContext(registry.environmentOf(paneId)??pane.environment,registry.shellKindOf(paneId))).catch(e=>setNotice(`Could not remember Claude session: ${e}`));
     },
     onSearchResults: (paneId, results) => setSearch((s) => (s?.pane === paneId ? { ...s, results } : s)),
     onActivity: (paneId) => setActivity((current) => new Set(current).add(paneId)),
@@ -781,11 +1125,25 @@ export default function App() {
         return new Map(current).set(paneId, [...kept, { url, port, at: Date.now() }].slice(-MAX_DEV_LINKS));
       }),
     onCommandFinished: (paneId, finished) => {
+      const run = commandRun({ paneId, profileId: workspaceRef.current.panes[paneId]?.profileId, shellKind:finished.shellKind, command: finished.command,
+        environment:finished.environment,
+        cwd: finished.cwd, exitCode: finished.exitCode, output: finished.output, outputTruncated: finished.outputTruncated,
+        startedAt: finished.startedAt, finishedAt: finished.startedAt + finished.durationMs });
+      const task = agentTaskPanes.current.get(paneId);
+      const recipeId=recipeHandlers.current?.finished(paneId,finished.command);if(recipeId)run.id=recipeId;
+      if (task?.submitted) {
+        if (finished.command.trim() === task.command.trim()) run.id = task.id;
+        else void failAgentTask(task.id, "The shell reported a different command; its result was saved as an ordinary command").catch(() => {});
+        agentTaskPanes.current.delete(paneId);
+      }
+      const ticket = verificationTickets.current.get(paneId);
+      verificationTickets.current.delete(paneId);
+      void records.record(run, ticket?.id).catch((e) => setNotice(`Could not save command record: ${e}`));
       // A command may have changed the repository, or the project's settings.
       refreshProject.current(paneId);
       // A server it ran has stopped: check its port now rather than at the next poll.
       if (devLinksRef.current.size) void checkDevLinks.current(paneId);
-      const cwd = workspaceRef.current.panes[paneId]?.cwd;
+      const cwd = finished.cwd;
       setHistory((h) =>
         rememberCommand(h, { command: finished.command, cwd, exitCode: finished.exitCode, at: Date.now(), durationMs: finished.durationMs }),
       );
@@ -804,13 +1162,26 @@ export default function App() {
 
   /** The image on the clipboard, saved as a file, its path typed as the pane's shell writes paths. */
   function pasteImage(paneId: PaneId) {
+    let destinations:FileDestination[];try{destinations=fileDestinations(paneId);}catch(e){setNotice(`Could not paste the image: ${e}`);return;}
     void clipboardImageFile()
       .then((file) => {
         if (!file) return;
-        const kind = profilesRef.current?.find((p) => p.id === workspaceRef.current.panes[paneId]?.profileId)?.kind ?? "other";
-        registry.pasteText(paneId, dropText([file], kind));
+        return pasteFiles(paneId,[file],destinations);
       })
       .catch((e) => setNotice(`Could not paste the image: ${e}`));
+  }
+
+  /** File paths are data. Translate in the actual destination before shell quoting. */
+  function fileDestinations(paneId:PaneId):FileDestination[]{
+    return registry.inputTargets(paneId).map(id=>{
+      const session=registry.sessionOf(id),environment=registry.environmentOf(id),kind=registry.shellKindOf(id);
+      if(!workspaceRef.current.panes[id]||session===undefined||!environment||!kind||!registry.acceptsPaste(id))throw Error("A file destination is unavailable or reserved for task startup.");
+      return{id,session,submission:registry.submissionRevision(id),environment,kind};
+    });
+  }
+  async function pasteFiles(paneId:PaneId,paths:string[],destinations=fileDestinations(paneId)){
+    const prepared=await prepareFilePaste(paths,destinations,wslTranslatePaths);
+    deliverFilePaste(prepared,destinations,fileDestinations(paneId),(id,text)=>registry.pasteTextToPane(id,text));
   }
 
   // --- dev servers: an Open button while their port is listened on ---------------------
@@ -871,7 +1242,7 @@ export default function App() {
     if (!cwd) return setProjects((current) => without(current, paneId));
     const read = { again: false };
     projectReads.current.set(paneId, read);
-    void projectInfo(cwd)
+    void projectInfo(cwd,workspaceRef.current.panes[paneId]?.profileId,registry.environmentOf(paneId))
       .catch(() => undefined)
       .then((info) => {
         projectReads.current.delete(paneId);
@@ -932,6 +1303,8 @@ export default function App() {
   alertsOn.current = config?.claudeAlerts ?? true;
   const onAlert = useRef<(alert: ClaudeAlert) => void>(null!);
   onAlert.current = (alert) => {
+    if (workspaceRef.current.panes[alert.paneId]) claudeEvents.current.set(alert.paneId,
+      hookObservation(alert.kind?.startsWith("stop_failure") ? "failed" : "waiting", alert.kind ?? "Notification", registry.submissionRevision(alert.paneId), alert.sessionId));
     if (alertsOn.current) raiseAlert(alert);
   };
   /** Marks the pane's tab and, unless you are in the console, shows a Windows notification. */
@@ -943,10 +1316,10 @@ export default function App() {
     if (consoleInFocus && activeTab(ws)?.focusedPane === alert.paneId) return;
     setAttention((current) => new Map(current).set(alert.paneId, alert));
     // Console up and focused, but on another tab or pane: the tab marker is enough.
-    if (!consoleInFocus && notify) void showClaudeAlert(alert);
+    if (!consoleInFocus && notify && alertNotifications.allow(alert)) void showClaudeAlert(alert);
   }
-  /** The tray says in how many panes Claude waits: its alerts only, not long commands or triggers. */
-  const claudeWaiting = useMemo(() => [...attention.values()].filter((a) => isClaudeAlert(a.kind)).length, [attention]);
+  /** Durable pending requests from either provider, including closed panes. */
+  const claudeWaiting = useMemo(() => new Set(inbox.snapshot.events.filter((e) => e.resolvedAt === null && (e.kind === "permission" || e.kind === "input")).map((e) => e.paneId)).size, [inbox.snapshot.events]);
   useEffect(() => void setAttentionCount(claudeWaiting), [claudeWaiting]);
   // Looking at the pane again clears its marker.
   useEffect(() => {
@@ -960,6 +1333,17 @@ export default function App() {
     const index = ws.tabs.findIndex((tab) => paneIds(tab.root).includes(paneId));
     return index < 0 ? "?" : `${index + 1} · ${tabTitle(ws, ws.tabs[index])}`;
   }, []);
+  useEffect(() => {
+    if (!agentAccess.snapshot.grants.length) return;
+    let active = true;
+    const publish = () => void publishAgentPanes(Object.values(workspace.panes).map((pane) => ({
+      id: pane.id, cwd: pane.cwd && pane.cwd.length <= 4096 ? pane.cwd : null,
+      label: limitText(paneLabel(pane.id), 512), profileId: pane.profileId,
+      kind: (registry.environmentOf(pane.id)??pane.environment)?.startsWith("wsl:") ? "wsl" : profiles?.find((p) => p.id === pane.profileId)?.kind ?? "other",
+    }))).then(() => active && setAgentPaneError(undefined), (e) => active && setAgentPaneError(`Could not publish pane observations: ${e}`));
+    publish(); const timer = window.setInterval(publish, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [agentAccess.snapshot.grants.length, workspace, profiles, paneLabel]);
   const revealHit = useCallback(
     (hit: SearchHit, query: string, options: SearchOptions) => {
       setWorkspace((ws) => focusPane(ws, hit.paneId));
@@ -969,13 +1353,14 @@ export default function App() {
   );
 
   const codex = useCodex({
-    config, workspace, profiles, defaultProfile, registry, newTab,
-    startupInput: startupInput.current, attention,
-    raiseAlert: (alert) => raiseAlert(alert),
+    config, workspace, registry, attention: codexAttention,
+    raiseAlert: (alert, notify) => raiseAlert(alert, notify),
+    clearAlert: (paneId) => setAttention((current) => current.get(paneId)?.kind?.startsWith("codex:") ? without(current, paneId) : current),
     focusPane: (paneId) => setWorkspace((ws) => focusPane(ws, paneId)),
     label: paneLabel, notice: setNotice,
-    agentRunning: (paneId) => claudeStatusRef.current.has(paneId),
     refreshProject: (paneId) => refreshProject.current(paneId),
+    resumeSession:(session,where)=>void resumeProvider("codex",session,where),
+    newSession:(cwd,environment)=>void newProviderSession("codex",cwd,environment),
   });
   codexStatusRef.current = codex.status;
   useEffect(() => {
@@ -986,6 +1371,9 @@ export default function App() {
   // --- Claude Code's status line: exact figures and plan usage ------------------------
   const onStatusline = useRef<(line: StatuslineUsage) => void>(null!);
   onStatusline.current = (line) => {
+    if (!workspaceRef.current.panes[line.paneId]) return;
+    const session = paneSessions.current.get(line.paneId);
+    if (line.sessionId && session && line.sessionId !== session.sessionId) return;
     statuslines.current.set(line.paneId, line);
     if (line.cache) {
       const cache = line.cache;
@@ -1020,6 +1408,7 @@ export default function App() {
   const onReply = useRef<(reply: ClaudeReply) => void>(null!);
   onReply.current = (reply) => {
     if (!workspaceRef.current.panes[reply.paneId]) return;
+    claudeEvents.current.set(reply.paneId, hookObservation("completed", "Stop", registry.submissionRevision(reply.paneId), reply.sessionId));
     setReplies((current) => new Map(current).set(reply.paneId, reply.message));
     // Claude may have changed the repository during the turn.
     refreshProject.current(reply.paneId);
@@ -1033,7 +1422,7 @@ export default function App() {
       if (!open || target.kind === "hash" || target.kind === "ip") return copy();
       if (target.kind === "url") return void openUrl(target.text).catch((e) => setNotice(`Could not open it: ${e}`));
       if (target.kind === "folder") return void newTab(undefined, target.text);
-      void resolveFiles([target.text], workspaceRef.current.panes[paneId]?.cwd)
+      void resolveFiles([target.text], workspaceRef.current.panes[paneId]?.cwd,workspaceRef.current.panes[paneId]?.profileId,registry.environmentOf(paneId))
         .then(([file]) => (file ? openInEditor(file, target.line, target.col) : setNotice(`No such file: ${target.text}`)))
         .catch((e) => setNotice(`Could not open it: ${e}`));
     },
@@ -1220,23 +1609,23 @@ export default function App() {
           run: () => setPortDialog(owner),
         };
       }),
-      ...(config?.codexSessions ? codex.sessions : []).flatMap((session) => [
-        { id: `codex:${session.id}`, group: "Resume Codex", label: session.title ?? session.id, run: () => codex.resume(session) },
-        { id: `codex-here:${session.id}`, group: "Resume Codex here", label: session.title ?? session.id, run: () => codex.resumeHere(session) },
-      ]),
+      ...(config?.codexSessions ? codex.sessions : []).flatMap((session) => {const environment=sessionEnvironment(session),label=`${session.title??session.id} · ${environmentLabel(environment)}`;return[
+        { id: `codex:${environment}:${session.id}`, group: "Resume Codex", label, run: () => codex.resume(session) },
+        { id: `codex-here:${environment}:${session.id}`, group: "Resume Codex here", label, run: () => codex.resumeHere(session) },
+      ];}),
       ...(config?.claudeSessions ? claudeSessions : []).flatMap((session) => {
-        const label = `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""}`;
+        const environment=sessionEnvironment(session),label = `${session.title ?? session.id.slice(0, 8)}${session.cwd ? ` (${session.cwd})` : ""} · ${environmentLabel(environment)}`;
         return [
-          { id: `claude:${session.id}`, group: "Resume Claude", label, run: () => resumeClaude(session) },
-          { id: `claude-here:${session.id}`, group: "Resume Claude here", label, run: () => resumeClaudeHere(session) },
+          { id: `claude:${environment}:${session.id}`, group: "Resume Claude", label, run: () => resumeClaude(session) },
+          { id: `claude-here:${environment}:${session.id}`, group: "Resume Claude here", label, run: () => resumeClaudeHere(session) },
         ];
       }),
-      ...[...attention].filter(([, alert]) => isClaudeAlert(alert.kind)).map(([paneId, alert]) => ({
-        id: `waiting:${paneId}`,
+      ...pendingAgentEvents.filter((e) => workspace.panes[e.paneId]).map((event) => ({
+        id: `waiting:${event.id}`,
         group: "Agent waits",
-        label: paneLabel(paneId),
-        hint: alert.message.length > 40 ? `${alert.message.slice(0, 39)}…` : alert.message,
-        run: () => setWorkspace((ws) => focusPane(ws, paneId)),
+        label: `${event.provider === "codex" ? "Codex" : "Claude"} · ${paneLabel(event.paneId)}`,
+        hint: event.message.length > 40 ? `${event.message.slice(0, 39)}…` : event.message,
+        run: () => setWorkspace((ws) => focusPane(ws, event.paneId)),
       })),
       ...history.commands.slice(0, 50).map((recent, i) => ({
         id: `recent-command:${i}`,
@@ -1282,31 +1671,46 @@ export default function App() {
       })),
       { id: "settings:file", group: "Settings", label: "Open settings file", run: () => void openConfigFile() },
     ];
-  }, [config, workspace, profiles, claudeSessions, codex.sessions, codex.resume, codex.resumeHere, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, attention, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry, switchShell]);
+  }, [config, workspace, profiles, claudeSessions, codex.sessions, codex.resume, codex.resumeHere, newTab, resumeClaude, openLayout, saveTabAsLayout, openAdminTab, resumeClaudeHere, pendingAgentEvents, paneLabel, history, namedWorkspaces, openNamedWorkspace, changeNamedWorkspaces, projects, focusedProject, split, devLinks, ports, registry, switchShell]);
 
   claudeStatusRef.current = claudeStatus;
-  // Claude status per pane: a claude.exe below the pane's shell; busy when it printed
-  // in the last moments (its spinner animates while it works).
+  // Recent output is only an activity hint; silence never proves the agent idle.
   const claudeFeatures = Boolean(config?.claudeSessions || config?.claudeAlerts);
   useEffect(() => {
     if (!claudeFeatures) {
       setClaudeStatus(new Map());
+      setClaudeObservations(new Map());
       return;
     }
+    let disposed = false;
+    let timer: number;
     const poll = async () => {
-      const running = new Set(await claudeRunning().catch(() => []));
-      const now = Date.now();
-      const next = new Map<PaneId, "busy" | "idle">();
-      for (const paneId of Object.keys(workspaceRef.current.panes)) {
-        const session = registry.sessionOf(paneId);
-        if (session === undefined || !running.has(session)) continue;
-        next.set(paneId, now - registry.lastOutput(paneId) < CLAUDE_BUSY_MS ? "busy" : "idle");
+      try {
+        const running = new Set(await claudeRunning());
+        if (disposed) return;
+        const now = Date.now();
+        const next = new Map<PaneId, AgentStatus>();
+        const observed = new Map<PaneId, AgentObservation>();
+        for (const paneId of Object.keys(workspaceRef.current.panes)) {
+          const session = registry.sessionOf(paneId);
+          const native=nativeAgentContext(registry.environmentOf(paneId),registry.shellKindOf(paneId));
+          if (session === undefined || (native?!running.has(session):!claudeEvents.current.has(paneId)&&!paneSessions.current.has(paneId))) continue;
+          const event = resolveObservation(claudeEvents.current.get(paneId), registry.submissionRevision(paneId), registry.lastOutput(paneId), now, CLAUDE_BUSY_MS);
+          next.set(paneId, event.state); observed.set(paneId, event);
+        }
+        for (const id of claudeEvents.current.keys()) if (!next.has(id)) claudeEvents.current.delete(id);
+        setClaudeStatus((current) => (sameStatus(current, next) ? current : next));
+        setClaudeObservations(observed);
+      } catch {
+        if (!disposed) {
+          setClaudeStatus((current) => new Map([...current.keys()].map((id) => [id, "unknown"])));
+          setClaudeObservations((current) => new Map([...current].map(([id, value]) => [id, { ...value, state: "unknown", reason: "Process scan failed; last observation retained." }])));
+        }
       }
-      setClaudeStatus((current) => (sameStatus(current, next) ? current : next));
+      if (!disposed) timer = window.setTimeout(() => void poll(), CLAUDE_POLL_MS);
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), CLAUDE_POLL_MS);
-    return () => window.clearInterval(timer);
+    return () => { disposed = true; window.clearTimeout(timer); };
   }, [claudeFeatures, registry]);
 
   // A pane's last reply and cache countdown go when Claude Code isn't running there any more.
@@ -1326,9 +1730,12 @@ export default function App() {
     const poll = async () => {
       const next = new Map<PaneId, ClaudeUsage>();
       for (const paneId of claudeStatus.keys()) {
-        const known = paneSessions.current.get(paneId)?.transcriptPath ?? undefined;
+        const sessionAtStart = paneSessions.current.get(paneId);
+        const known = sessionAtStart?.transcriptPath ?? undefined;
         const cwd = known ? undefined : workspaceRef.current.panes[paneId]?.cwd;
-        const usage = mergeUsage((await claudeUsage(known, cwd).catch(() => null)) ?? undefined, statuslines.current.get(paneId));
+        const native=nativeAgentContext(registry.environmentOf(paneId),registry.shellKindOf(paneId));
+        const usage = mergeUsage(native?((await claudeUsage(known, cwd).catch(() => null)) ?? undefined):undefined, statuslines.current.get(paneId));
+        if (!workspaceRef.current.panes[paneId] || paneSessions.current.get(paneId)?.sessionId !== sessionAtStart?.sessionId) continue;
         if (usage) next.set(paneId, usage);
       }
       setClaudeUsages(next);
@@ -1359,8 +1766,10 @@ export default function App() {
               bell: ids.some((id) => bells.has(id)),
               zoomed: Boolean(tab.zoomed),
               broadcast: Boolean(tab.broadcast),
-              claude: statuses.includes("busy") ? ("busy" as const) : statuses.includes("idle") ? ("idle" as const) : undefined,
-              codex: codexStatuses.includes("busy") ? ("busy" as const) : codexStatuses.includes("idle") ? ("idle" as const) : undefined,
+              claude: tabAgentStatus(statuses),
+              codex: tabAgentStatus(codexStatuses),
+              claudeObservation: ids.map((id) => claudeObservations.get(id)).find((o) => o?.state === tabAgentStatus(statuses)),
+              codexObservation: ids.map((id) => codex.observations.get(id)).find((o) => o?.state === tabAgentStatus(codexStatuses)),
               codexUsage: codexPane ? codex.usages.get(codexPane) : undefined,
               codexReply: codexPane ? codex.replies.get(codexPane) : undefined,
               claudeUsage: usage,
@@ -1372,7 +1781,7 @@ export default function App() {
           ] as const;
         }),
       ),
-    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeUsages, codex.status, codex.usages, codex.replies, replies, caches, projects, devLinks],
+    [workspace.tabs, workspace.panes, activity, bells, claudeStatus, claudeObservations, claudeUsages, codex.status, codex.observations, codex.usages, codex.replies, replies, caches, projects, devLinks],
   );
   /** Pane → Claude session running in it, saved with the tabs (see claude_restore). */
   const claudeByPane = useMemo(
@@ -1385,26 +1794,28 @@ export default function App() {
       workspace.tabs
         .flatMap((tab) => paneIds(tab.root))
         .flatMap((paneId) => {
-          const alert = attention.get(paneId);
-          return alert && isClaudeAlert(alert.kind) && !alert.kind?.startsWith("codex:") ? [{ paneId, label: paneLabel(paneId), message: alert.message, reply: replies.get(paneId) }] : [];
+          const event = pendingAgentEvents.find((e) => e.provider === "claude" && e.paneId === paneId);
+          return event ? [{ paneId, label: paneLabel(paneId), message: event.message, reply: replies.get(paneId) }] : [];
         }),
-    [workspace.tabs, attention, paneLabel, replies],
+    [workspace.tabs, pendingAgentEvents, paneLabel, replies],
   );
   /** Claude sessions running now, for the ✳ menu. */
   const runningClaude = useMemo(
     () =>
-      [...claudeUsages].map(([paneId, usage]) => ({ paneId, label: paneLabel(paneId), usage })),
-    [claudeUsages, paneLabel, workspace.tabs],
+      [...claudeStatus].map(([paneId, state]) => ({ paneId, label: paneLabel(paneId), usage: claudeUsages.get(paneId), state, observation: claudeObservations.get(paneId) })),
+    [claudeStatus, claudeObservations, claudeUsages, paneLabel, workspace.tabs],
   );
   const attentionTabs = useMemo(
     () =>
       new Map(
         workspace.tabs.flatMap((tab) => {
-          const alert = paneIds(tab.root).map((id) => attention.get(id)).find(Boolean);
+          const ids = paneIds(tab.root);
+          const event = tab.id !== workspace.activeTab ? inbox.snapshot.events.find((e) => e.runId === inbox.snapshot.runId && e.viewedAt === null && e.resolvedAt === null && ids.includes(e.paneId)) : undefined;
+          const alert = event ? { paneId: event.paneId, sessionId: event.sessionId, title: event.title, message: event.message, kind: event.provider === "codex" ? `codex:${event.kind}` : event.kind === "failure" ? "stop_failure" : event.kind === "completed" ? "agent_completed" : event.kind } : ids.map((id) => attention.get(id)).find(Boolean);
           return alert ? [[tab.id, alert] as const] : [];
         }),
       ),
-    [workspace.tabs, attention],
+    [workspace.tabs, workspace.activeTab, attention, inbox.snapshot],
   );
 
   // --- startup, events ---------------------------------------------------------
@@ -1429,7 +1840,17 @@ export default function App() {
         setUpdateBanner(true);
       }),
       onClaudeAttention((alert) => onAlert.current(alert)),
-      onClaudeSessionStart((session) => paneSessions.current.set(session.paneId, session)),
+      onClaudeSessionStart((session) => {
+        if (!workspaceRef.current.panes[session.paneId]) return;
+        if (paneSessions.current.get(session.paneId)?.sessionId !== session.sessionId) {
+          setReplies((current) => without(current, session.paneId));
+          setCaches((current) => without(current, session.paneId));
+          setClaudeUsages((current) => without(current, session.paneId));
+          statuslines.current.delete(session.paneId);
+        }
+        paneSessions.current.set(session.paneId, session);
+        claudeEvents.current.set(session.paneId, hookObservation("unknown", "SessionStart", registry.submissionRevision(session.paneId), session.sessionId));
+      }),
       onClaudeStatusline((line) => onStatusline.current(line)),
       onClaudeReply((reply) => onReply.current(reply)),
       onFocusPane((paneId) => setWorkspace((ws) => focusPane(ws, paneId))),
@@ -1472,11 +1893,9 @@ export default function App() {
       mark(drag.type === "over" ? pane : undefined);
       const paneId = pane?.dataset.paneId;
       if (drag.type !== "drop" || !paneId) return;
-      const profileId = workspaceRef.current.panes[paneId]?.profileId;
-      const kind = profilesRef.current?.find((p) => p.id === profileId)?.kind ?? "other";
       setWorkspace((ws) => focusPane(ws, paneId));
       registry.focus(paneId);
-      registry.pasteText(paneId, dropText(drag.paths, kind));
+      void pasteFiles(paneId,drag.paths).catch(e=>setNotice(`Could not paste the files: ${e}`));
       // Explorer had the focus; take it so typing goes on at the prompt.
       void getCurrentWindow().setFocus();
     });
@@ -1539,17 +1958,20 @@ export default function App() {
   // --- scrollback: each pane's output, kept across restarts (per shell) -------------
   /** Settings → "Clear all saved output": the files, and the open panes' history (else the next save brings it back). */
   const clearAllHistory = useCallback(async () => {
-    for (const paneId of Object.keys(workspaceRef.current.panes)) registry.clearHistory(paneId);
-    await deleteScrollback();
-  }, [registry]);
+    await persistence.run("Saved output", async () => {
+      for (const paneId of Object.keys(workspaceRef.current.panes)) registry.clearHistory(paneId);
+      await deleteScrollback();
+      lastScrollbackSave.current.clear();
+    });
+  }, [registry, persistence]);
   const configRef = useRef(config);
   configRef.current = config;
   const lastScrollbackSave = useRef(new Map<PaneId, number>());
-  const saveScrollbacks = useCallback(async () => {
+  const saveScrollbacks = useCallback(() => persistence.run("Saved output", async () => {
     const cfg = configRef.current;
     if (!cfg || startup.current !== "done") return;
     const keep: PaneId[] = [];
-    const saves: Promise<void>[] = [];
+    const snapshots: OutputSnapshot[] = [];
     for (const pane of Object.values(workspaceRef.current.panes)) {
       if (!cfg.restoreSession || !keepsOutput(cfg, pane.profileId)) continue;
       const worth = registry.worthSaving(pane.id);
@@ -1558,25 +1980,24 @@ export default function App() {
       keep.push(pane.id);
       // Not started yet (a restored tab not shown so far): its file stays as it is.
       if (worth === undefined) continue;
-      const changed = registry.lastOutput(pane.id) > (lastScrollbackSave.current.get(pane.id) ?? 0);
+      const revision = registry.outputRevision(pane.id);
+      const changed = revision > (lastScrollbackSave.current.get(pane.id) ?? 0);
       const text = changed ? registry.serialize(pane.id, cfg.scrollback.lines) : undefined;
       if (text === undefined) continue;
-      lastScrollbackSave.current.set(pane.id, Date.now());
-      saves.push(saveScrollback(pane.id, text).catch(() => {}));
+      snapshots.push({ paneId: pane.id, revision, text });
     }
-    await Promise.all(saves);
-    await pruneScrollback(keep).catch(() => {});
-  }, [registry]);
+    await persistOutput(snapshots, lastScrollbackSave.current, saveScrollback, () => pruneScrollback(keep));
+    for (const id of lastScrollbackSave.current.keys()) if (!keep.includes(id)) lastScrollbackSave.current.delete(id);
+  }), [registry, persistence]);
   useEffect(() => {
-    const timer = window.setInterval(() => void saveScrollbacks(), SCROLLBACK_SAVE_MS);
+    const timer = window.setInterval(() => void saveScrollbacks().catch(() => {}), SCROLLBACK_SAVE_MS);
     return () => window.clearInterval(timer);
   }, [saveScrollbacks]);
   // Hiding the console is a natural moment to save; quitting is the last one.
   useEffect(() => {
-    if (!shown) void saveScrollbacks();
+    if (!shown) void saveScrollbacks().catch(() => {});
   }, [shown, saveScrollbacks]);
   // Save the layout shortly after it changes (shell titles alone don't count).
-  const lastSaved = useRef<string>(undefined);
   const codexByPaneRef = useRef(codex.byPane);
   codexByPaneRef.current = codex.byPane;
   const claudeByPaneRef = useRef(claudeByPane);
@@ -1586,12 +2007,10 @@ export default function App() {
     const ws = workspaceRef.current;
     if (startup.current !== "done" || ws.tabs.length === 0) return;
     const text = saveWorkspace(ws, claudeByPaneRef.current, codexByPaneRef.current);
-    if (text === lastSaved.current) return;
-    lastSaved.current = text;
-    await saveSession(text).catch(() => {});
-  }, []);
+    await persistence.save("Workspace", text, saveSession);
+  }, [persistence]);
   useEffect(() => {
-    const timer = window.setTimeout(() => void flushSession(), SAVE_DELAY_MS);
+    const timer = window.setTimeout(() => void flushSession().catch(() => {}), SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [workspace, claudeByPane, codex.byPane, flushSession]);
 
@@ -1606,26 +2025,40 @@ export default function App() {
   const historyRef = useRef(history);
   historyRef.current = history;
   const flushHistory = useCallback(async () => {
-    if (historyLoaded.current) await saveHistory(JSON.stringify(historyRef.current)).catch(() => {});
-  }, []);
+    if (historyLoaded.current) await persistence.save("Recent commands", JSON.stringify(historyRef.current), saveHistory);
+  }, [persistence]);
   useEffect(() => {
     if (!historyLoaded.current) return;
-    const timer = window.setTimeout(() => void flushHistory(), SAVE_DELAY_MS);
+    const timer = window.setTimeout(() => void flushHistory().catch(() => {}), SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [history, flushHistory]);
 
+  const retrySaves = useCallback(async () => {
+    await Promise.allSettled([flushSession(), saveScrollbacks(), flushHistory(), inbox.flush(), records.flush(), worktrees.flush(), library.flush()]);
+  }, [flushSession, saveScrollbacks, flushHistory, inbox.flush, records.flush, worktrees.flush, library.flush]);
+  useEffect(() => {
+    if (saveErrors.size === 0) return;
+    const timer = window.setInterval(() => void retrySaves(), SAVE_RETRY_MS);
+    return () => window.clearInterval(timer);
+  }, [saveErrors.size, retrySaves]);
+
   /** Saves tabs and output like quitting does, then installs; qterm exits and restarts. */
   const updateNow = useCallback(async () => {
-    await Promise.all([flushSession(), saveScrollbacks(), flushHistory()]);
+    await Promise.all([flushSession(), saveScrollbacks(), flushHistory(), inbox.flush(), records.flush(), worktrees.flush(), library.flush()]);
     await installUpdate();
-  }, [flushSession, saveScrollbacks, flushHistory]);
+  }, [flushSession, saveScrollbacks, flushHistory, inbox.flush, records.flush, worktrees.flush, library.flush]);
   const [updateError, setUpdateError] = useState<string>();
 
   // Quitting right after a change (a cd, a new tab) must not lose it to the save delay.
   useEffect(() => {
-    const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks(), flushHistory()]).finally(() => void quitNow()));
+    const unlisten = onQuitRequested(() => void Promise.all([flushSession(), saveScrollbacks(), flushHistory(), inbox.flush(), records.flush(), worktrees.flush(), library.flush()])
+      .then(() => quitNow())
+      .catch(() => {
+        setQuitSaveFailed(true);
+        setNotice("Could not save before quitting. Retry saving, then quit again, or choose Quit without saving.");
+      }));
     return () => void unlisten.then((fn) => fn());
-  }, [saveScrollbacks, flushSession, flushHistory]);
+  }, [saveScrollbacks, flushSession, flushHistory, inbox.flush, records.flush, worktrees.flush, library.flush]);
 
   // Re-parenting a terminal (zoom, split, swap) drops its keyboard focus, so focus
   // again whenever the active tab's layout changes, not only the focused pane.
@@ -1634,8 +2067,8 @@ export default function App() {
     return tab ? `${tab.id}|${tab.zoomed ?? ""}|${JSON.stringify(tab.root)}` : "";
   }, [workspace]);
   useEffect(() => {
-    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen && !jsonView && !pasteConfirm && !portDialog && !shellPicker) registry.focus(focusedPane);
-  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen, jsonView, pasteConfirm, portDialog, shellPicker]);
+    if (shown && focusedPane && !search && !settingsOpen && !paletteOpen && !jsonView && !pasteConfirm && !portDialog && !shellPicker && !handoff && !inboxOpen && !problemsOpen && !verificationRun && !worktreesOpen && !agentAccessOpen && !recipesOpen && !libraryOpen && !sessionHandoff) registry.focus(focusedPane);
+  }, [registry, shown, focusedPane, activeLayout, search, settingsOpen, paletteOpen, jsonView, pasteConfirm, portDialog, shellPicker, handoff, inboxOpen, problemsOpen, verificationRun, worktreesOpen, agentAccessOpen, recipesOpen, libraryOpen, sessionHandoff]);
 
   // Safety net: app shortcuts also work while focus is outside any terminal or field.
   useEffect(() => {
@@ -1820,6 +2253,45 @@ export default function App() {
       {jsonView && (
         <JsonViewer value={jsonView.value} source={jsonView.source} onCopy={(text) => writeText(text)} onClose={() => setJsonView(undefined)} />
       )}
+      {handoff && <HandoffDialog context={handoff.context} sourceProfileId={handoff.sourceProfileId}
+        profiles={(profiles ?? []).filter((profile) => profileSupportsEnvironment(handoff.environment,profile) && !startFolder(handoff.context.cwd,{id:handoff.sourceProfileId,kind:handoff.shellKind,environment:handoff.environment},profile).lost)}
+        onSend={sendHandoff} onCancel={() => setHandoff(undefined)} />}
+      {inboxOpen && <AgentInbox snapshot={inbox.snapshot} error={inbox.error}
+        paneLabels={new Map(Object.keys(workspace.panes).map((id) => [id, paneLabel(id)]))}
+        onAction={inbox.act} onClose={() => setInboxOpen(false)}
+        onGo={(id) => { if (workspaceRef.current.panes[id]) setWorkspace((ws) => focusPane(ws, id)); setInboxOpen(false); }} />}
+      {libraryOpen && <SessionLibrary wslSources={config?.wslSources??[]} snapshot={library.snapshot} pins={library.pins} error={library.error} enabled={{claude:!!config?.claudeSessions,codex:!!config?.codexSessions}}
+        onLoad={library.load} onPin={library.pin} onPinsAction={library.act} onResume={resumeLibraryEntry} onHandoff={entry=>{setLibraryOpen(false);setSessionHandoff(entry);}} onClose={()=>setLibraryOpen(false)}/>}
+      {sessionHandoff && <SessionHandoffDialog source={sessionHandoff} enabled={sourceEnabled(sessionHandoff,config)}
+        onValidate={async()=>{await resolveLibrarySession(sessionHandoff.key,sessionHandoff.sourceVersion,false);if(!sourceEnabled(sessionHandoff,configRef.current))throw new Error("Source settings changed; review the source again.");}}
+        profiles={(profiles??[]).filter(p=>profileSupportsEnvironment(sessionHandoff.environment,p))} checks={commandRuns} onSend={sendSessionHandoff} onClose={()=>{setSessionHandoff(undefined);setLibraryOpen(true);}}/>}
+      {agentAccessOpen && <AgentAccessPanel cwd={focusedPane ? workspace.panes[focusedPane]?.cwd : undefined} snapshot={agentAccess.snapshot} error={agentAccess.error ?? agentPaneError}
+        profiles={(profiles ?? []).filter((p) => p.kind !== "wsl" && p.kind !== "other")} profileId={focusedPane ? workspace.panes[focusedPane]?.profileId : undefined} recordedIds={new Set(commandRuns.map((r) => r.id))}
+        onGrant={agentAccess.grant} onRevoke={agentAccess.revoke} onClose={() => setAgentAccessOpen(false)} onStop={stopRequestedTask}
+        onGo={(paneId) => { if (workspaceRef.current.panes[paneId]) { setWorkspace((ws) => focusPane(ws, paneId)); setAgentAccessOpen(false); } else setNotice("That task pane is closed."); }}
+        onInspect={(job) => { setProblemRunId(job.id); setAgentAccessOpen(false); setProblemsOpen(true); }} />}
+      {recipesOpen && <RecipePanel cwd={focusedPane?workspace.panes[focusedPane]?.cwd:undefined} profileId={focusedPane?workspace.panes[focusedPane]?.profileId:undefined}
+        profiles={(profiles??[]).filter(p=>p.kind!=="wsl"&&p.kind!=="other")} runs={recipes.runs} error={recipes.error} recordedIds={new Set(commandRuns.map(r=>r.id))}
+        onLaunch={launchReviewedRecipe} onCancel={recipes.cancel} onStop={recipes.stop} onClose={()=>setRecipesOpen(false)}
+        onGo={pane=>{if(workspaceRef.current.panes[pane]){setWorkspace(ws=>focusPane(ws,pane));setRecipesOpen(false);}else setNotice("That workflow pane is closed.");}}
+        onInspect={id=>{setProblemRunId(id);setRecipesOpen(false);setProblemsOpen(true);}}/>}
+      {worktreesOpen && <WorktreePanel cwd={focusedPane ? workspace.panes[focusedPane]?.cwd : undefined} profileId={focusedPane ? workspace.panes[focusedPane]?.profileId : undefined}
+        profiles={(profiles ?? []).filter((p) => p.kind !== "wsl" && p.kind !== "other")} snapshot={worktrees.snapshot} saveError={worktrees.error} runs={commandRuns}
+        onCreate={worktrees.create} onAction={worktrees.action} onOpen={openWorktree} onClose={() => setWorktreesOpen(false)}
+        onInspect={(run) => { setProblemRunId(run.id); setWorktreesOpen(false); setProblemsOpen(true); }} />}
+      {problemsOpen && <ProblemsPanel runs={commandRuns} initialRunId={problemRunId}
+        snapshot={records.snapshot} saveError={records.error} comparisonError={records.refreshError} onAction={records.act} onRefresh={records.refresh}
+        onVerify={(run) => { setProblemsOpen(false); setVerificationRun(run); }}
+        paneLabels={new Map(Object.keys(workspace.panes).map((id) => [id, paneLabel(id)]))}
+        onOpen={async (run: CommandRun, diagnostic: Diagnostic) => {
+          if (!diagnostic.file) throw new Error("This diagnostic has no source location.");
+          const [file] = await resolveFiles([diagnostic.file], run.cwd,run.profileId,run.environment??(run.shellKind==="wsl"?undefined:"native"));
+          if (!file) throw new Error(`Source file no longer exists: ${diagnostic.file}`);
+          await openInEditor(file, diagnostic.line, diagnostic.col);
+        }} onClose={() => { setProblemsOpen(false); setProblemRunId(undefined); }}
+        onGo={(id) => { if (workspaceRef.current.panes[id]) setWorkspace((ws) => focusPane(ws, id)); setProblemsOpen(false); }} />}
+      {verificationRun && <VerifyDialog run={verificationRun} shell={profiles?.find((p) => p.id === verificationRun.profileId)?.name ?? "original shell"}
+        onRun={runVerification} onClose={() => { setVerificationRun(undefined); setProblemsOpen(true); }} />}
       {blockMenu && workspace.panes[blockMenu.paneId] && (
         <CommandBlockMenu
           block={blockMenu.block}
@@ -1831,6 +2303,7 @@ export default function App() {
             else setNotice("That output is no longer in the scrollback.");
           }}
           onCopyCommand={() => void writeText(blockMenu.block.command)}
+          onAskAgent={() => showHandoff(blockMenu.paneId, blockMenu.block)}
           onSelectOutput={() => {
             if (!registry.selectBlock(blockMenu.paneId, blockMenu.block.id)) setNotice("That output is no longer in the scrollback.");
             registry.focus(blockMenu.paneId);
@@ -1864,6 +2337,7 @@ export default function App() {
       )}
         {settingsOpen && settings && profiles && (
           <SettingsPanel
+            paneLabel={(id) => workspace.panes[id] ? paneLabel(id) : undefined}
             snapshot={settings}
             profiles={profiles}
             onClose={() => {
@@ -1922,6 +2396,15 @@ export default function App() {
           </button>
         </div>
       )}
+      {saveErrors.size > 0 && (
+        <div className="app-notice persistence-error" role="alert" aria-label="Save problem">
+          <span><strong>Changes could not be saved.</strong> Retrying automatically.
+            {[...saveErrors].map(([store, error]) => <span key={store}> {store}: {error}</span>)}
+          </span>
+          <button onClick={() => void retrySaves()}>Retry saving</button>
+          {quitSaveFailed && <button onClick={() => void quitNow().catch((e) => setNotice(`Could not quit: ${e}`))}>Quit without saving</button>}
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="settings-errors" role="alert">
           <strong>Settings problem</strong> (previous values stay in effect until it is fixed):
@@ -1933,6 +2416,15 @@ export default function App() {
         </div>
       )}
       <TabBar
+        problemCount={latestRuns(commandRuns).reduce((n, run) => n + run.diagnostics.items.filter((d) => d.severity === "error").length, 0)}
+        onOpenProblems={() => { setProblemRunId(undefined); setProblemsOpen(true); }}
+        onOpenWorktrees={() => setWorktreesOpen(true)}
+        onOpenAgentAccess={() => setAgentAccessOpen(true)}
+        onOpenRecipes={()=>setRecipesOpen(true)}
+        onOpenSessionLibrary={()=>setLibraryOpen(true)}
+        inboxOpenCount={inbox.snapshot.events.filter((e) => e.resolvedAt === null).length}
+        inboxUnreadCount={inbox.snapshot.events.filter((e) => e.viewedAt === null).length}
+        onOpenInbox={() => setInboxOpen(true)}
         workspace={workspace}
         profiles={profiles ?? []}
         codex={config?.codexSessions ? codex.menu : undefined}
@@ -1942,7 +2434,7 @@ export default function App() {
                 sessions: claudeSessions,
                 onResume: resumeClaude,
                 onResumeHere: resumeClaudeHere,
-                onForget: (ids) => void forgetClaudeSessions(ids),
+                onForget: (references) => void forgetClaudeSessions(references).catch(error=>setNotice(`Could not forget Claude sessions: ${error}`)),
                 onNewSession: newClaudeSession,
                 running: runningClaude,
                 waiting: waitingClaude,

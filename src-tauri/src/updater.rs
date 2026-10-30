@@ -98,20 +98,20 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         if let Ok(marker) = &marker {
             let _ = std::fs::write(marker, b"");
         }
-        return update.install(bytes).map_err(|e| {
+        return crate::process_owner::during_update(|| update.install(bytes).map_err(|e| {
             if let Ok(marker) = &marker {
                 let _ = std::fs::remove_file(marker);
             }
             format!("could not install the update: {e}")
-        });
+        }));
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     replace_exe(&exe, &bytes)?;
-    std::process::Command::new(&exe)
+    crate::process_owner::during_update(|| std::process::Command::new(&exe)
         .arg(AFTER_UPDATE_ARG)
         .arg(std::process::id().to_string())
         .spawn()
-        .map_err(|e| format!("updated, but could not restart qterm: {e}"))?;
+        .map_err(|e| format!("updated, but could not restart qterm: {e}")))?;
     app.exit(0);
     Ok(())
 }

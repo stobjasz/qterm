@@ -44,6 +44,8 @@ import { THEMES } from "../terminal/themes";
 import { applyFilter } from "./filter";
 import { layoutGroups } from "./masonry";
 import { changes, keepsScrollback, overrides, toDraft, withShellScrollback, type Draft } from "./draft";
+import { IntegrationHealth } from "../agents/IntegrationHealth";
+import {WslSourcesEditor} from "./WslSourcesEditor";
 
 const HOTKEYS: [string, string][] = [
   ["Backquote", "~ (the key left of 1)"],
@@ -68,10 +70,11 @@ interface Props {
   checkRequest: number;
   /** Shows this version's release notes. */
   onWhatsNew(version: string): void;
+  paneLabel(id: string): string | undefined;
 }
 
 /** Edits config.toml without touching the file by hand. Esc closes without saving. */
-export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, update, onUpdateFound, onInstallUpdate, checkRequest, onWhatsNew }: Props) {
+export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, update, onUpdateFound, onInstallUpdate, checkRequest, onWhatsNew, paneLabel }: Props) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(snapshot.config));
   const [autostart, setAutostartState] = useState<boolean>();
   const [error, setError] = useState<string>();
@@ -518,6 +521,7 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
           </Group>
 
           <Group title="Claude Code">
+            <IntegrationHealth provider="claude" paneLabel={paneLabel} />
             <Toggle
               label="Remember Claude Code sessions"
               hint='When a terminal prints "claude --resume <id>", keep it for resuming in its folder (✳ in the tab bar).'
@@ -588,8 +592,9 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
           </Group>
 
           <Group title="Codex CLI">
+            <IntegrationHealth provider="codex" paneLabel={paneLabel} />
             <Toggle label="Remember Codex sessions" hint='Keep sessions printed as "codex resume <id>" in the ⬡ menu, grouped by folder.' checked={draft.codexSessions} onChange={(v) => set("codexSessions", v)} />
-            <Toggle label="Alert me when Codex is waiting" hint="Mark the tab and show a Windows notification for permission requests and completed replies. Requires the optional hooks below." checked={draft.codexAlerts} onChange={(v) => set("codexAlerts", v)} />
+            <Toggle label="Codex activity and reply alerts" hint="Show approval checks as informational activity and notify for completed replies. An approval hook does not confirm a question for you; automatic review may handle it. Requires the optional hooks below." checked={draft.codexAlerts} onChange={(v) => set("codexAlerts", v)} />
             <Toggle label="Resume Codex sessions on start" hint="Resume sessions in restored panes. Requires reopening tabs and layout; hooks identify the session in each pane." checked={draft.codexRestore} onChange={(v) => set("codexRestore", v)} />
             <div className="settings-field">
               <span className="settings-label">Codex hooks</span>
@@ -607,6 +612,8 @@ export function SettingsPanel({ snapshot, profiles, onClose, onClearHistory, upd
               <span className="settings-hint">Model, context and plan limits are read from local Codex records when available. Codex does not report a cache expiry time or subscription cost per session.</span>
             </div>
           </Group>
+
+          <Group title="WSL session sources"><WslSourcesEditor sources={draft.wslSources} onChange={sources=>set("wslSources",sources)}/></Group>
 
           <Group title="Settings file">
             <div className="settings-field">

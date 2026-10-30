@@ -32,6 +32,13 @@ export type Command =
   | { type: "showHelp" }
   | { type: "stopPrograms" }
   | { type: "viewJson" }
+  | { type: "askAgent" }
+  | { type: "agentInbox" }
+  | { type: "problems" }
+  | { type: "worktrees" }
+  | { type: "agentAccess" }
+  | { type: "recipes" }
+  | { type: "sessionLibrary" }
   | { type: "toggleSize" }
   | { type: "splitWith"; dir: SplitDir }
   | { type: "switchShell" };
@@ -80,6 +87,13 @@ const ACTIONS = {
   show_help: { command: { type: "showHelp" }, chord: "ctrl+shift+/" },
   stop_programs: { command: { type: "stopPrograms" }, chord: "" },
   view_json: { command: { type: "viewJson" }, chord: "" },
+  ask_agent: { command: { type: "askAgent" }, chord: "" },
+  agent_inbox: { command: { type: "agentInbox" }, chord: "" },
+  problems: { command: { type: "problems" }, chord: "" },
+  worktrees: { command: { type: "worktrees" }, chord: "" },
+  agent_access: { command: { type: "agentAccess" }, chord: "" },
+  recipes: { command: { type: "recipes" }, chord: "" },
+  session_library: { command: { type: "sessionLibrary" }, chord: "" },
   // Like Windows Terminal's full screen key.
   toggle_size: { command: { type: "toggleSize" }, chord: "f11" },
   // Like Split right / down, with a shell picked from a list.
@@ -131,6 +145,13 @@ const LABELS: Record<Action, string> = {
   show_help: "Shortcuts and tips",
   stop_programs: "Stop what runs in this pane (keeps the shell)",
   view_json: "View the selection or last output as JSON",
+  ask_agent: "Ask an agent about this",
+  agent_inbox: "Agent inbox",
+  problems: "Problems and command runs",
+  worktrees: "Worktree tasks",
+  agent_access: "Agent access",
+  recipes: "Workflow recipes",
+  session_library: "Session library",
   toggle_size: "Full size console / back",
   split_right_with: "Split right with another shell…",
   split_down_with: "Split down with another shell…",

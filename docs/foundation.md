@@ -487,7 +487,7 @@ Lessons:
 | Search | `@xterm/addon-search` with decorations. Bar with match count, case and regex toggles, Enter/Shift+Enter, Esc. | CDP: "1 of 4", case-sensitive "No results", Esc closes |
 | Rename / reorder tabs | `renameTab` (blank clears) and `moveTab`, pure and tested. Double-click edits the title in place; dragging uses pointer events, because Tauri's native file-drop swallows HTML5 drag-and-drop on Windows. | CDP |
 | Themes | `terminal/themes.ts`: 9 palettes. The theme drives xterm colours plus the CSS vars the chrome derives from (`color-mix`). | CDP: accent changed live; a test keeps `default.toml` in sync with the theme list |
-| Folder tracking | Shells report OSC 9;9 (or OSC 7). `shell_integration` (default on) adds it: PowerShell gets a prompt wrapper via `-EncodedCommand` that keeps the user's own prompt, cmd a `PROMPT` prefix, Git Bash a `PROMPT_COMMAND`. Not WSL yet. | Rust probe: OSC 9;9 passes through both ConPTYs. CDP: `cd` updates the pane, splits open there, reload restores there |
+| Folder tracking | Shells report OSC 9;9 (or OSC 7). `shell_integration` (default on) adds it: PowerShell gets a prompt wrapper via `-EncodedCommand` that keeps the user's own prompt, cmd a `PROMPT` prefix, Git Bash and distribution-specific WSL Bash a `PROMPT_COMMAND`. See [WSL support](wsl-support.md) for current limits. | Rust probe: OSC 9;9 passes through both ConPTYs. CDP: `cd` updates the pane, splits open there, reload restores there |
 | Session restore | `saveWorkspace`/`restoreWorkspace` (versioned JSON; damaged or outdated sessions are rejected whole; vanished profiles map to the default). Saved 400 ms after layout changes to `%APPDATA%\dev.qterm.app\session.json`; shell titles excluded so they don't trigger saves. | Unit tests + CDP reload |
 | Claude sessions | Off by default (`claude_sessions`). The registry scans new lines (`onLineFeed`, debounced) for `claude --resume <uuid>`. Rust finds `<claude home>/projects/*/<id>.jsonl` (`CLAUDE_CONFIG_DIR` or `~/.claude`) and takes the first `cwd` (the launch folder, where `--resume` must run) and the latest `aiTitle`. Falls back to the pane's folder. The id is validated as a UUID before being used in a path. Kept in `claude-sessions.json` (newest first, max 50). Resume opens a tab in that folder and types the command once the shell is up. | Rust tests on fixture transcripts. CDP: this conversation's real transcript gave its title and folder; resume opened a cmd tab in the remembered folder and ran `claude --resume <id>` |
 | Settings panel | `settings/draft.ts` (tested) turns edits into minimal TOML changes. Rust `ConfigState::update` applies them with `toml_edit`, keeping key comments (on the key) and trailing comments (on the value), validates, then writes; the watcher reloads. "Start with Windows" applies right away and keeps the tray check in sync. | Rust tests: comments and layout survive, invalid edits leave the file untouched. CDP: theme + toggle saved |
@@ -615,6 +615,22 @@ includes `message`, `title`, `notification_type` and `session_id`.
 
 ## 19. Scrollback across restarts (#10) and crash cleanup (#12) (2026-10-11)
 
+**Correction, 2026-10-29:** repeated testing on the current Windows build found
+that `ping` can survive after the shell and console owner exit. Waiting on pinned
+process handles confirmed that it was still running, rather than a recycled PID.
+The user chose ownership of all descendants, including detached tools. qterm now
+creates a non-inheritable kill-on-close Windows job before launching children.
+The original crash test passes with that protection. Separate real-process tests
+cover normal exit, detached children, failed update launch and the update
+replacement surviving its old owner. The historical observations below no longer
+provide a cleanup guarantee.
+
+Only while launching a verified update, new children may break away from the
+old job. Existing descendants stay owned, and launch failure restores the normal
+limits. The installer uses the same path. See Microsoft's
+[job inheritance and limits](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+and [kill-on-close behavior](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information).
+
 **#12: shells after a crash.** Measured before building anything. With qterm
 force-killed, as in a crash or Task Manager:
 - the shell (`pwsh`) and its console host (`OpenConsole.exe`) were gone within 3 s;
@@ -671,8 +687,10 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
     pixels. `ipc.onFileDrag` converts them to CSS pixels, and `elementFromPoint` finds the
     `[data-pane-id]` under them. Overlays (settings, palette) cover the panes, so they
     take no drops.
-  - The paths go through `term.paste`: they are broadcast like typing, and bracketed when
-    the shell asked for it.
+  - File paths are translated/quoted per broadcast destination before any delivery.
+    Each goes through its own `term.paste` with broadcasting suppressed, preserving
+    that shell's bracketed-paste protocol. Changed destinations or failed preparation
+    cancel the whole operation before typing. Terminal replies never broadcast.
   - The profile's shell kind (`Profile.kind`: powershell, cmd, bash, wsl, other) is now
     sent to the UI and picks the spelling.
 - **Quoting** (`terminal/drop.ts`): a path made only of letters, digits and `_ - . : \ / +`
@@ -680,11 +698,13 @@ Object. Instead, the guarantee is locked in by `a_crash_takes_the_shell_and_its_
   - PowerShell: `'…'` with `'` doubled (curly quotes too).
   - cmd and other: `"…"`.
   - Git Bash: `/c/…`, in `'…'`.
-  - WSL: `/mnt/c/…` (`\wsl$\Distro\…` becomes the Linux path), in `'…'`.
+  - WSL: translate through the captured distribution's `wslpath`, then quote the
+    actual Linux path in `'…'`. Foreign-distribution UNC files are rejected.
 - **Limits:**
   - With "hide on blur" on, clicking into Explorer hides the console first.
   - An elevated qterm gets no drops from a normal Explorer (Windows' UIPI).
-  - A custom profile running `wsl.exe` counts as "other" and gets Windows paths.
+  - Custom `wsl.exe` profiles with an explicit distribution participate in WSL
+    translation. Ambiguous commands remain "other". See [WSL support](wsl-support.md).
 - **Verified:**
   - Unit tests cover the quoting and path translation.
   - In a dev instance with its own identifier, events were emitted the way Tauri emits an
@@ -1254,7 +1274,8 @@ poe / pdm / hatch scripts and entry points through uv or poetry), `git` (`git
 so no process outside repositories; `CREATE_NO_WINDOW`), and the nearest `.qterm.toml`
 (name, `tab_color`, icon, `[[snippets]]`, `[[triggers]]`; `deny_unknown_fields`, the
 same trigger checks as config.toml via `check_triggers`). A folder that doesn't exist on
-Windows (a WSL path) knows nothing. The UI reads it when a pane's folder changes, after
+Windows needs an explicit WSL environment for distribution-side inspection. The UI
+reads it when a pane's folder changes, after
 each finished command, after each Claude reply and when the palette opens, at most one
 read per pane in flight (a second request re-reads when the first returns). Project
 look is a transient `Pane.project` (not saved); `tabTitle` puts its name after a manual
@@ -1351,15 +1372,13 @@ pane's own; the ▾ menu's split buttons per shell, the palette's "Split right w
 (Ctrl+Alt+Shift+= / -, through `ShellPicker`: digits pick, arrows and Enter, Esc) all
 end there. Layouts, workspaces and session restore already kept a profile per pane.
 
-**The folder carries over.** `startFolder(cwd, from, to)` (`shellCwd.ts`) reads the
-pane's folder as a Windows folder or a folder in a distro: Git Bash's `/c/...`, WSL's
-`/mnt/<drive>/...` and `\\wsl$` / `\\wsl.localhost` paths are Windows-side, other
-`/...` paths of a `wsl:<distro>` pane belong to that distro. It then writes it for the
-target: `/mnt/<drive>/...` for WSL (a distro's own folders only for the same distro),
-`\\wsl.localhost\<distro>\...` for PowerShell and Git Bash, nothing for cmd (it can't
-start in a network folder). Nothing found where there was a folder: the shell starts at
-home and a notice says why. The same profile keeps its folders untouched (Rust already
-translates Git Bash's).
+**The folder carries over.** `transferFolder` (`shellCwd.ts`) uses captured pane
+environment and explicit custom/built-in distribution metadata. Windows/WSL
+crossings query that distro's `wslpath`; no drive mount root is guessed. Windows
+folders can transfer between distros through their actual Windows path, while
+distro-only folders stay scoped. Cmd cannot start in UNC folders. An incompatible
+folder opens the explicitly selected shell at home with a notice; translation
+errors leave the source pane intact. Same-environment transfers remain local.
 
 **Switching a pane's shell.** `replacePane` puts a new pane id in the old one's leaf
 (`swapLeaves` with an id not in the tree), keeping focus, zoom and a chosen background;

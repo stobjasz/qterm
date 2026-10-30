@@ -14,6 +14,7 @@ export type SessionId = number;
 export type ShellKind = "powershell" | "cmd" | "bash" | "wsl" | "other";
 
 export interface Profile {
+  distribution?: string | null;
   id: string;
   name: string;
   kind: ShellKind;
@@ -63,6 +64,7 @@ export interface Config {
   codexSessions: boolean;
   codexAlerts: boolean;
   codexRestore: boolean;
+  wslSources?:WslSource[];
   editor: string;
   /** Seconds; 0 = off. */
   longCommandAlert: number;
@@ -86,6 +88,8 @@ export interface Config {
     profiles: Record<string, boolean>;
   };
 }
+
+export interface WslSource{distribution:string;enabled:boolean;claudeHome:string;codexHome:string}
 
 /** A [[snippets]] entry: a named command for the current pane. */
 export interface Snippet {
@@ -134,16 +138,20 @@ export function ptySpawn(
   cwd: string | undefined,
   onOutput: (data: Uint8Array) => void,
   elevated = false,
+  expectedEnvironment?: string,
+  expectedKind?:ShellKind,
 ): Promise<SessionId> {
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows, elevated }, onOutput: channel });
+  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows, elevated,expectedEnvironment,expectedKind }, onOutput: channel });
 }
 
 export function ptyWrite(id: SessionId, data: string): Promise<void> {
   return invoke("pty_write", { id, data });
 }
+
+export function wslTranslatePaths(distribution:string,paths:string[],toLinux:boolean):Promise<string[]>{return invoke("wsl_translate_paths",{distribution,paths,toLinux});}
 
 /** Tells Rust that xterm.js has processed `bytes` of output (flow control). */
 export function ptyAck(id: SessionId, bytes: number): Promise<void> {
@@ -176,6 +184,7 @@ export function saveSession(session: string): Promise<void> {
 }
 
 export interface ClaudeSession {
+  environment?:string|null;
   id: string;
   /** Where to resume; null when neither the transcript nor the pane knew. */
   cwd: string | null;
@@ -189,12 +198,13 @@ export function listClaudeSessions(): Promise<ClaudeSession[]> {
   return invoke("list_claude_sessions");
 }
 
-export function claudeSessionSeen(id: string, profileId: string, paneCwd: string | undefined): Promise<ClaudeSession[]> {
-  return invoke("claude_session_seen", { id, profileId, paneCwd });
+export function claudeSessionSeen(id: string, profileId: string, paneCwd: string | undefined,environment?:string): Promise<ClaudeSession[]> {
+  return invoke("claude_session_seen", { id, profileId, paneCwd,environment });
 }
 
-export function forgetClaudeSessions(ids: string[]): Promise<ClaudeSession[]> {
-  return invoke("forget_claude_sessions", { ids });
+export interface SessionReference {id:string;environment:string}
+export function forgetClaudeSessions(references: SessionReference[]): Promise<ClaudeSession[]> {
+  return invoke("forget_claude_sessions", { references });
 }
 
 export function onClaudeSessionsChanged(handler: (sessions: ClaudeSession[]) => void): Promise<UnlistenFn> {
@@ -252,8 +262,8 @@ export function saveConsoleHeight(share: number): Promise<void> {
 }
 
 /** Absolute paths of the candidates that exist (relative ones against `cwd`), else null. */
-export function resolveFiles(paths: string[], cwd: string | undefined): Promise<(string | null)[]> {
-  return invoke("resolve_files", { paths, cwd });
+export function resolveFiles(paths: string[], cwd: string | undefined,profileId?:string|null,environment?:string|null): Promise<(string | null)[]> {
+  return invoke("resolve_files", { paths, cwd,profileId,environment });
 }
 
 /** Opens a file at a line with the configured editor. */
@@ -295,6 +305,56 @@ export interface HookStatus {
   current: boolean;
   settingsPath: string;
 }
+
+export type AgentProvider = "claude" | "codex";
+export interface RepositorySnapshot { root: string; head: string | null; branch: string | null; digest: string; files: number; bytes: number; capturedAt: number }
+export interface VerificationEvidence {
+  before: RepositorySnapshot; after: RepositorySnapshot | null; eligible: boolean; changedDuringRun: boolean;
+  status: "matches" | "stale" | "unknown"; reason: string; checkedAt: number;
+}
+export interface RecordedCommandRun {
+  environment?:string|null;
+  requester?: AgentRequester | null;
+  id: string; paneId: string; profileId?: string | null; cwd?: string | null; command: string;
+  shellKind?: ShellKind | null; appRunId?: string | null;
+  commandTruncated?: boolean;
+  exitCode?: number | null; startedAt: number; finishedAt: number; output: string; outputTruncated: boolean;
+  verification?: VerificationEvidence | null;
+}
+export interface CommandRunsSnapshot { runId: string; revision: number; runs: RecordedCommandRun[]; error: string | null; recoveryRequired: boolean; backupPath: string | null }
+export type CommandRunsAction = "retry" | "resetSaved" | "clear";
+export const commandRunsSnapshot = (): Promise<CommandRunsSnapshot> => invoke("command_runs_snapshot");
+export const recordCommandRun = (run: RecordedCommandRun, ticket?: string): Promise<CommandRunsSnapshot> => invoke("record_command_run", { run, ticket });
+export const commandRunsAction = (action: CommandRunsAction): Promise<CommandRunsSnapshot> => invoke("command_runs_action", { action });
+export const prepareVerification = (cwd: string, command: string): Promise<{ id: string; before: RepositorySnapshot }> => invoke("prepare_verification", { cwd, command });
+export const cancelVerification = (ticket: string): Promise<void> => invoke("cancel_verification", { ticket });
+export const refreshVerification = (): Promise<CommandRunsSnapshot> => invoke("refresh_verification");
+export const onCommandRunsChanged = (handler: (snapshot: CommandRunsSnapshot) => void): Promise<UnlistenFn> => listen<CommandRunsSnapshot>("command-runs-changed", (event) => handler(event.payload));
+export interface AgentInboxEvent {
+  id: string; provider: AgentProvider; paneId: string; sessionId: string | null; cwd: string | null;
+  kind: "approval" | "permission" | "input" | "completed" | "failure"; title: string; message: string;
+  createdAt: number; updatedAt: number; viewedAt: number | null; resolvedAt: number | null;
+  resolution: string | null; repeats: number; runId: string;
+}
+export interface AgentInboxSnapshot {
+  revision: number; runId: string; events: AgentInboxEvent[]; error: string | null;
+  recoveryRequired: boolean; backupPath: string | null;
+}
+export type AgentInboxAction = "view" | "resolve" | "reopen" | "clearResolved" | "retry" | "resetSaved";
+export const agentInboxSnapshot = (): Promise<AgentInboxSnapshot> => invoke("agent_inbox_snapshot");
+export const agentInboxAction = (action: AgentInboxAction, ids: string[] = []): Promise<AgentInboxSnapshot> => invoke("agent_inbox_action", { action, ids });
+export const onAgentInboxChanged = (handler: (value: AgentInboxSnapshot) => void): Promise<UnlistenFn> => listen<AgentInboxSnapshot>("agent-inbox-changed", (event) => handler(event.payload));
+export const createAgentBrief = (text: string): Promise<{ path: string }> => invoke("create_agent_brief", { text });
+export interface AgentIntegrationHealth {
+  provider: AgentProvider;
+  home: string | null;
+  executable: string;
+  inbox: string | null;
+  lastEvent: { event: string; paneId: string; sessionId: string | null; receivedAt: number } | null;
+  lastProbe: { checkedAt: number; success: boolean; error: string | null } | null;
+}
+export const agentIntegrationHealth = (provider: AgentProvider): Promise<AgentIntegrationHealth> => invoke("agent_integration_health", { provider });
+export const testAgentDelivery = (provider: AgentProvider): Promise<AgentIntegrationHealth> => invoke("test_agent_delivery", { provider });
 
 export function claudeHookStatus(): Promise<HookStatus> {
   return invoke("claude_hook_status");
@@ -440,9 +500,54 @@ export interface ProjectInfo {
   settingsError: string | null;
 }
 
-export function projectInfo(cwd: string): Promise<ProjectInfo> {
-  return invoke("project_info", { cwd });
+export function projectInfo(cwd: string,profileId?:string,environment?:string): Promise<ProjectInfo> {
+  return invoke("project_info", { cwd,profileId,environment });
 }
+export const wslDistributions=():Promise<string[]>=>invoke("wsl_distributions");
+export const createWslAgentBrief=(distribution:string,text:string):Promise<{path:string;distribution:string}>=>invoke("create_wsl_agent_brief",{distribution,text});
+export const validateWslFolder=(distribution:string,cwd:string):Promise<string>=>invoke("validate_wsl_folder",{distribution,cwd});
+
+export interface WorktreeTask {
+  id: string; title: string; request: string; repository: string; commonDir: string;
+  directory: string; branch: string; base: string; commit: string;
+  provider: AgentProvider | "shell"; profileId: string; createdAt: number;
+  status: "creating" | "active" | "completed" | "failed"; error: string | null;
+}
+export interface WorktreeDraft {
+  cwd: string; title: string; request: string; branch: string; base: string;
+  directory: string; provider: AgentProvider | "shell"; profileId: string;
+}
+export interface WorktreePreview { token: string; task: WorktreeTask; sourceDirty: boolean }
+export interface WorktreeSnapshot { tasks: WorktreeTask[]; revision: number; error: string | null; recoveryRequired: boolean; backupPath: string | null }
+export interface WorktreeDetails { branch: string; head: string; changed: number; untracked: number; commits: string; summary: string; summaryTruncated: boolean }
+export const worktreeTasksSnapshot = () => invoke<WorktreeSnapshot>("worktree_tasks_snapshot");
+export const previewWorktreeTask = (draft: WorktreeDraft) => invoke<WorktreePreview>("preview_worktree_task", { draft });
+export const cancelWorktreePreview = (token: string) => invoke<void>("cancel_worktree_preview", { token });
+export const createWorktreeTask = (token: string) => invoke<WorktreeSnapshot>("create_worktree_task", { token });
+export const worktreeTaskAction = (action: "retry" | "recover" | "complete" | "reopen", taskId?: string) => invoke<WorktreeSnapshot>("worktree_task_action", { action, taskId });
+export const worktreeTaskDetails = (taskId: string) => invoke<WorktreeDetails>("worktree_task_details", { taskId });
+export const onWorktreeTasksChanged = (fn: (value: WorktreeSnapshot) => void) => listen<WorktreeSnapshot>("worktree-tasks-changed", (event) => fn(event.payload));
+
+export interface GrantedTask { id: string; name: string; command: string; source: string; directory: string; manifestDigest: string }
+export interface ExecutionPolicy { profileId: string; profileName: string; tasks: GrantedTask[]; manifests: { path: string; digest: string; preview: string; truncated: boolean }[] }
+export interface AgentRequester { client: string; grantId: string; taskId: string; taskName: string; requestId: string }
+export interface AgentInvocation { id: string; requester: AgentRequester; project: string; task: GrantedTask; profileId: string; state: string; paneId: string | null; queuedAt: number; startedAt: number | null; finishedAt: number | null; exitCode: number | null; error: string | null; evidenceWarning: string | null }
+export interface AgentAccessReview { id: string; project: string; execution: ExecutionPolicy | null }
+export interface AgentGrant { id: string; client: string; project: string; connectionFile: string; createdAt: number; tasks: GrantedTask[]; profileId: string | null }
+export interface AgentAccessSnapshot { grants: AgentGrant[]; listening: boolean; revision: number; executable: string; invocations: AgentInvocation[] }
+export interface AgentPane { id: string; cwd: string | null; label: string; profileId: string; kind: string }
+export const agentAccessSnapshot = () => invoke<AgentAccessSnapshot>("agent_access_snapshot");
+export const reviewAgentAccess = (cwd: string, profileId?: string) => invoke<AgentAccessReview>("review_agent_access", { cwd, profileId });
+export const cancelAgentAccessReview = (id: string) => invoke<void>("cancel_agent_access_review", { id });
+export const grantAgentAccess = (review: string, client: string, taskIds: string[] = []) => invoke<AgentAccessSnapshot>("grant_agent_access", { review, client, taskIds });
+export const revokeAgentAccess = (id: string) => invoke<AgentAccessSnapshot>("revoke_agent_access", { id });
+export const publishAgentPanes = (panes: AgentPane[]) => invoke<void>("publish_agent_panes", { panes });
+export const onAgentAccessChanged = (fn: (value: AgentAccessSnapshot) => void) => listen<AgentAccessSnapshot>("agent-access-changed", (event) => fn(event.payload));
+export const onAgentTaskQueued = (fn: (id: string) => void) => listen<string>("agent-task-queued", (event) => fn(event.payload));
+export const claimAgentTask = (id: string, paneId: string) => invoke<AgentInvocation>("claim_agent_task", { id, paneId });
+export const launchAgentTask = (id: string, paneId: string, session: number, cwd: string) => invoke<AgentInvocation>("launch_agent_task", { id, paneId, session, cwd });
+export const failAgentTask = (id: string, message: string) => invoke<void>("fail_agent_task", { id, message });
+export const stopAgentTask = (id: string) => invoke<void>("stop_agent_task", { id });
 
 /** A listening TCP port and the process holding it (see src-tauri/src/ports.rs). */
 export interface PortOwner {
@@ -742,6 +847,37 @@ export function onFileDrag(handler: (drag: FileDrag) => void): Promise<UnlistenF
 
 
 export type CodexSession = ClaudeSession;
+
+export interface LibraryIdentity { provider:AgentProvider; environment:string; id:string }
+export interface SessionPin extends LibraryIdentity { pinnedAt:number }
+export interface SessionPins {pins:SessionPin[];revision:number;error:string|null;recoveryRequired:boolean;backupPath:string|null}
+export interface LibraryEntry extends LibraryIdentity {sourceHome?:string|null;sourceVersion?:string|null;sourceConfig?:string|null;launchCwd?:string|null;key:string;cwd:string|null;project:string|null;title:string|null;branch:string|null;lastPrompt:string|null;modified:number|null;seenAt:number|null;profileId:string|null;remembered:boolean;pinned:boolean;available:boolean;availability:string;reason:string|null;observedAt:number|null}
+export interface LibrarySource {provider:AgentProvider;environment?:string;home:string|null;observedAt:number|null;errors:string[];truncated:boolean;enabled:boolean}
+export interface SessionLibrarySnapshot {sourceRevision?:string;entries:LibraryEntry[];sources:LibrarySource[];pins:SessionPins;truncated:boolean}
+export const loadSessionLibrary=(refresh=false):Promise<SessionLibrarySnapshot>=>invoke("load_session_library",{refresh});
+export const resolveLibrarySession=(key:string,sourceVersion?:string|null,requireFolder=true):Promise<LibraryEntry>=>invoke("resolve_library_session",{key,sourceVersion,requireFolder});
+export const resolveProviderSession=(identity:LibraryIdentity):Promise<LibraryEntry>=>invoke("resolve_provider_session",{identity});
+export const sessionPinsSnapshot=():Promise<SessionPins>=>invoke("session_pins_snapshot");
+export const pinLibrarySession=(identity:LibraryIdentity,pinned:boolean):Promise<SessionPins>=>invoke("pin_library_session",{identity,pinned});
+export const sessionPinsAction=(action:"retry"|"recover"):Promise<SessionPins>=>invoke("session_pins_action",{action});
+export const onSessionPinsChanged=(handler:(pins:SessionPins)=>void)=>listen<SessionPins>("session-pins-changed",e=>handler(e.payload));
+
+export type RecipeState = "pending" | "running" | "ready" | "succeeded" | "failed" | "blocked" | "cancelled" | "unknown" | "timed_out" | "stopping" | "exited";
+export interface RecipeStep { name:string; command:string; cwd:string; directory:string; dependsOn:string[]; readyOutput:string|null; timeoutSeconds:number }
+export interface RecipeDefinition { name:string; layout:"tabs"|"rows"|"columns"; steps:RecipeStep[] }
+export interface RecipeReview { id:string; source:string; project:string; digest:string; profileId:string; profileName:string; recipes:RecipeDefinition[] }
+export interface RecipeStepRun extends RecipeStep { id:string; paneId:string; state:RecipeState; runnable:boolean; startedAt:number|null; finishedAt:number|null; exitCode:number|null; error:string|null; evidenceWarning:string|null }
+export interface RecipeRun { id:string; reviewId:string; name:string; layout:RecipeDefinition["layout"]; project:string; profileId:string; createdAt:number; steps:RecipeStepRun[] }
+export const reviewRecipes=(cwd:string,profileId:string):Promise<RecipeReview>=>invoke("review_recipes",{cwd,profileId});
+export const cancelRecipeReview=(id:string):Promise<void>=>invoke("cancel_recipe_review",{id});
+export const startRecipe=(reviewId:string,name:string,bindings:Record<string,string>):Promise<RecipeRun>=>invoke("start_recipe",{reviewId,name,bindings});
+export const recipeRunsSnapshot=():Promise<RecipeRun[]>=>invoke("recipe_runs_snapshot");
+export const onRecipeRunsChanged=(handler:(runs:RecipeRun[])=>void)=>listen<RecipeRun[]>("recipe-runs-changed",e=>handler(e.payload));
+export const launchRecipeStep=(id:string,paneId:string,session:number,cwd:string):Promise<RecipeRun>=>invoke("launch_recipe_step",{id,paneId,session,cwd});
+export const recipeStepOutput=(observation:{id:string;paneId:string;session:number;sequence:number;text:string}):Promise<void>=>invoke("recipe_step_output",{observation});
+export const failRecipeStep=(id:string,message:string):Promise<void>=>invoke("fail_recipe_step",{id,message});
+export const cancelRecipeRun=(id:string):Promise<void>=>invoke("cancel_recipe_run",{id});
+export const stopRecipeRun=(id:string):Promise<void>=>invoke("stop_recipe_run",{id});
 export interface CodexUsage {
   sessionId: string;
   model: string | null;
@@ -755,8 +891,16 @@ export interface CodexLimit { used_percent: number; window_minutes?: number; res
 export interface CodexActivity { paneId: string; sessionId: string | null; busy: boolean }
 export const listCodexSessions = (): Promise<CodexSession[]> => invoke("list_codex_sessions");
 export const listAllCodexSessions = (): Promise<TranscriptSummary[]> => invoke("list_all_codex_sessions");
-export const codexSessionSeen = (id: string, profileId: string, paneCwd?: string): Promise<CodexSession[]> => invoke("codex_session_seen", { id, profileId, paneCwd });
-export const forgetCodexSessions = (ids: string[]): Promise<CodexSession[]> => invoke("forget_codex_sessions", { ids });
+export interface CodexScan {
+  home: string;
+  sessionsPath: string;
+  sessions: TranscriptSummary[];
+  diagnostics: { filesScanned: number; unrecognizedFiles: number; missingSessionsFolder: boolean; errors: string[] };
+}
+export const scanCodexSessions = (): Promise<CodexScan> => invoke("scan_codex_sessions");
+export const codexUsageMany = (ids: string[]): Promise<CodexUsage[]> => invoke("codex_usage_many", { ids });
+export const codexSessionSeen = (id: string, profileId: string, paneCwd?: string,environment?:string): Promise<CodexSession[]> => invoke("codex_session_seen", { id, profileId, paneCwd,environment });
+export const forgetCodexSessions = (references: SessionReference[]): Promise<CodexSession[]> => invoke("forget_codex_sessions", { references });
 export const codexRunning = (): Promise<SessionId[]> => invoke("codex_running");
 export const codexUsage = (id: string): Promise<CodexUsage | null> => invoke("codex_usage", { id });
 export const codexHookStatus = (): Promise<HookStatus> => invoke("codex_hook_status");

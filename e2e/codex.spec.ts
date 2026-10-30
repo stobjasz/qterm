@@ -54,7 +54,7 @@ test("Codex history is separate from Claude and can resume in the current shell"
   await qterm.page.getByRole("button", { name: "Codex sessions", exact: true }).click();
   await expect(qterm.page.getByRole("tab", { name: "Remembered", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toBeVisible();
-  await qterm.page.getByRole("tab", { name: "All on this PC", exact: true }).click();
+  await qterm.page.getByRole("tab", { name: "Native Windows", exact: true }).click();
   await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toBeVisible();
   await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Fix the Codex integration" })).toContainText("1 prompt");
 });
@@ -72,23 +72,53 @@ test("Codex hooks deliver context, plan usage, activity and the last reply to it
   await settings.getByRole("button", { name: "Cancel", exact: true }).click();
   await qterm.run(pane, `Start-Process -WindowStyle Hidden ${quote(fakeExe)} '-e "setTimeout(() => {}, 60000)"'`);
   const tab = qterm.page.getByRole("tab").first();
-  await expect(tab.getByRole("status", { name: "Codex is idle", exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(tab.getByRole("status", { name: "Codex status unknown", exact: true })).toBeVisible({ timeout: 30000 });
   await qterm.run(pane, input("SessionStart"));
   await expect(tab.getByLabel("Codex context 25% full")).toBeVisible();
   await qterm.run(pane, input("UserPromptSubmit"));
   await expect(tab.getByRole("status", { name: "Codex is working", exact: true })).toBeVisible();
   await qterm.run(pane, input("Stop", { last_assistant_message: "Done: Codex integration verified." }));
   await expect(tab).toHaveAccessibleDescription(/Codex's last reply:\s+Done: Codex integration verified\./);
-  await expect(tab.getByRole("status", { name: "Codex is idle", exact: true })).toBeVisible();
+  const completed = tab.getByRole("status", { name: "Codex turn completed", exact: true });
+  await expect(completed).toBeVisible();
+  await expect(completed).toHaveAccessibleDescription(/Hook: Stop/);
+  await qterm.run(pane, "Write-Output ('new-input-' + (1 + 1))");
+  await expect(tab.getByRole("status", { name: "Codex status unknown", exact: true })).toBeVisible();
+  await qterm.run(pane, input("PermissionRequest"));
+  const waiting = tab.getByRole("status", { name: "Codex approval check (input not confirmed)", exact: true });
+  await expect(waiting).toBeVisible();
+  await expect(waiting).toHaveAccessibleDescription(/Hook: PermissionRequest/);
   await qterm.page.getByRole("button", { name: "Codex sessions", exact: true }).click();
   await expect(qterm.page.getByRole("region", { name: "Codex running now" })).toContainText("5-hour 23%");
 });
 
-test("a Codex permission request marks its background tab", async ({ qterm }) => {
+test("a Codex approval check marks activity without claiming a question exists", async ({ qterm }) => {
   const pane = await qterm.activePane();
   await qterm.waitForPrompt(pane);
   await qterm.run(pane, `Start-Sleep -Seconds 2; ${input("PermissionRequest")}`);
   await qterm.page.keyboard.press("Control+Shift+T");
   await expect(qterm.page.getByRole("tab")).toHaveCount(2);
-  await expect(qterm.page.getByRole("tab").first().getByRole("status", { name: /Codex needs permission/ })).toBeVisible();
+  await expect(qterm.page.getByRole("tab").first().getByRole("status", { name: /Codex approval check/ })).toBeVisible();
+});
+
+test("the session scan reports unrecognized files and refresh finds a new session", async ({ qterm }) => {
+  const unknown = path.join(sessions, "unknown-format.jsonl");
+  const added = path.join(sessions, "added-on-refresh.jsonl");
+  fs.writeFileSync(unknown, '{"type":"unknown_format"}\n');
+  try {
+    await qterm.page.getByRole("button", { name: "Codex sessions", exact: true }).click();
+    const scan = qterm.page.getByRole("region", { name: "Codex session scan", exact: true });
+    await expect(scan).toContainText(home);
+    await expect(scan).toContainText("2 rollout files scanned; 1 unrecognized.");
+    fs.writeFileSync(added, [
+      { type: "session_meta", payload: { id: "01a1690c-c7b7-7e80-9864-e6971b91db17", cwd: home } },
+      { type: "event_msg", payload: { type: "user_message", message: "Found after refresh" } },
+    ].map((record) => JSON.stringify(record)).join("\n"));
+    await qterm.page.getByRole("button", { name: "Refresh Codex sessions", exact: true }).click();
+    await expect(qterm.page.getByRole("menuitem").filter({ hasText: "Found after refresh" })).toBeVisible();
+    await expect(scan).toContainText("3 rollout files scanned; 1 unrecognized.");
+  } finally {
+    fs.rmSync(unknown, { force: true });
+    fs.rmSync(added, { force: true });
+  }
 });

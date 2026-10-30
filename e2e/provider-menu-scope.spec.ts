@@ -1,0 +1,13 @@
+// R83: real persisted colliding identities, provider menus and native/WSL shells.
+import fs from "node:fs";import path from "node:path";
+import {expect,IDENTIFIER,test} from "./qterm";
+import {providerMenuFixture} from "./provider-menu-fixture";
+const fixture=providerMenuFixture();test.skip(!fixture.distro,"Requires an installed WSL distribution");test.use({settings:fixture.settings});test.beforeAll(fixture.seed);test.afterAll(fixture.cleanup);test.beforeEach(()=>fixture.reset());
+for(const provider of ["claude","codex"] as const)test(`${provider} menu keeps colliding environments separate and forgets only selected references`,async({qterm},info)=>{
+  await fixture.ready(qterm);let menu=await fixture.menu(qterm,provider);await expect(menu.getByRole("region")).toHaveCount(3);await expect(fixture.group(menu).getByRole("menuitem")).toContainText(`Linux reference ${provider}`);await expect(fixture.group(menu,fixture.other).getByRole("menuitem")).toContainText(`Other reference ${provider}`);if(provider==="codex")await qterm.page.screenshot({path:info.outputPath("provider-scoped-menu.png")});
+  await fixture.group(menu,"native").getByRole("button",{name:`Forget Native reference ${provider}`,exact:true}).click();await expect(menu.getByRole("menuitem")).toHaveCount(2);const saved=()=>JSON.parse(fs.readFileSync(path.join(process.env.APPDATA!,IDENTIFIER,`${provider}-sessions.json`),"utf8"));await expect.poll(()=>saved().map((row:{environment:string})=>row.environment).sort()).toEqual([fixture.environment,fixture.other].sort());
+  await menu.getByRole("tab",{name:"Native Windows",exact:true}).click();await expect(menu).toContainText("Native Windows transcripts only");await menu.getByRole("menuitem").filter({hasText:`Native menu ${provider}`}).click();await expect(qterm.page.getByRole("tab")).toHaveCount(2);const pane=await qterm.activePane();await expect.poll(()=>qterm.terminalText(pane)).toContain("NATIVE_MENU_RESULT_42");expect((await qterm.workspace()).panes[pane].environment).toBe("native");expect(JSON.parse(fs.readFileSync(fixture.nativeRecord,"utf8"))).toMatchObject({provider,cwd:fixture.nativeProject});
+  // Resuming legitimately remembers the native session again. Removing the other
+  // distribution must preserve both the resumed native and remaining WSL reference.
+  menu=await fixture.menu(qterm,provider);await fixture.group(menu,fixture.other).getByRole("button",{name:"Forget all sessions in Case",exact:true}).click();await expect(menu.getByRole("menuitem")).toHaveCount(2);await expect.poll(()=>saved().map((row:{environment:string})=>row.environment).sort()).toEqual([fixture.environment,"native"].sort());
+});

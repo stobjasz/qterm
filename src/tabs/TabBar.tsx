@@ -14,6 +14,7 @@ import type { LayoutDef } from "../workspace/layouts";
 import { tabTitle, type SplitDir, type TabColor, type TabId, type Workspace } from "../workspace/workspace";
 import { TAB_COLOR_VALUES, TabStyleMenu } from "./TabStyleMenu";
 import { Popup } from "./Popup";
+import { observationDetail, agentStatusLabel, type AgentObservation, type AgentStatus } from "../agents/status";
 
 /** A drag only starts after the pointer moved this far, so clicks stay clicks. */
 const DRAG_THRESHOLD_PX = 6;
@@ -35,6 +36,15 @@ interface Props {
   onStyle(tabId: TabId, style: { color?: TabColor | null; icon?: string | null }): void;
   onMove(tabId: TabId, toIndex: number): void;
   onOpenSettings(): void;
+  inboxOpenCount: number;
+  inboxUnreadCount: number;
+  onOpenInbox(): void;
+  problemCount: number;
+  onOpenProblems(): void;
+  onOpenWorktrees(): void;
+  onOpenAgentAccess(): void;
+  onOpenRecipes(): void;
+  onOpenSessionLibrary(): void;
   /** A dev server's Open button: the address in the browser. */
   onOpenLink(url: string): void;
   /** Pinned open: clicking elsewhere and the hotkey don't hide the console. */
@@ -56,9 +66,11 @@ export interface TabMarkers {
   bell: boolean;
   zoomed: boolean;
   broadcast: boolean;
-  /** Claude Code in one of the tab's panes: working, or idle at its prompt. */
-  claude?: "busy" | "idle";
-  codex?: "busy" | "idle";
+  /** Activity can be unknown even while the provider's process is running. */
+  claude?: AgentStatus;
+  codex?: AgentStatus;
+  claudeObservation?: AgentObservation;
+  codexObservation?: AgentObservation;
   codexUsage?: CodexUsage;
   codexReply?: string;
   /** Its token use, when its transcript was found. */
@@ -177,7 +189,7 @@ export function TabBar(props: Props) {
                 </>
               )}
               {marks?.codex && !waiting && (
-                <span className={`tab-claude ${marks.codex}`} role="status" aria-label={marks.codex === "busy" ? "Codex is working" : "Codex is idle"} title={marks.codexUsage ? codexSummary(marks.codexUsage) : `Codex is ${marks.codex}`}>
+                <span className={`tab-claude ${marks.codex}`} role="status" aria-label={agentStatusLabel("Codex", marks.codex)} title={`${agentStatusLabel("Codex", marks.codex)}\n${observationDetail(marks.codexObservation, marks.codex)}${marks.codexUsage ? `\n${codexSummary(marks.codexUsage)}` : ""}`}>
                   ⬡
                 </span>
               )}
@@ -188,8 +200,8 @@ export function TabBar(props: Props) {
                 <span
                   className={`tab-claude ${marks.claude}`}
                   role="status"
-                  aria-label={marks.claude === "busy" ? "Claude is working" : "Claude is idle"}
-                  title={`${marks.claude === "busy" ? "Claude Code is working" : "Claude Code is idle"}${marks.claudeUsage ? `\n${usageSummary(marks.claudeUsage)}` : ""}`}
+                  aria-label={agentStatusLabel("Claude", marks.claude)}
+                  title={`${agentStatusLabel("Claude", marks.claude)}\n${observationDetail(marks.claudeObservation, marks.claude)}${marks.claudeUsage ? `\n${usageSummary(marks.claudeUsage)}` : ""}`}
                 >
                   ✳
                 </span>
@@ -203,7 +215,7 @@ export function TabBar(props: Props) {
                   {contextPercent(marks.claudeUsage)}%
                 </span>
               )}
-              {marks?.claude === "idle" && marks.claudeCache && <CacheCountdown cache={marks.claudeCache} />}
+              {marks?.claude && marks.claude !== "busy" && marks.claudeCache && <CacheCountdown cache={marks.claudeCache} />}
               {marks?.devLinks?.map((url) => (
                 <button
                   key={url}
@@ -368,6 +380,14 @@ export function TabBar(props: Props) {
       >
         📌
       </button>
+      <button className="tab-new inbox-toggle" aria-label="Agent inbox" title={`Agent inbox: ${props.inboxOpenCount} open, ${props.inboxUnreadCount} unread`} onClick={props.onOpenInbox}>
+        Inbox{props.inboxOpenCount > 0 ? ` ${props.inboxOpenCount}` : ""}{props.inboxUnreadCount > 0 ? " •" : ""}
+      </button>
+      <button className="tab-new inbox-toggle" aria-label="Problems and command runs" title={`Problems: ${props.problemCount} error${props.problemCount === 1 ? "" : "s"} in latest command runs`} onClick={props.onOpenProblems}>Problems{props.problemCount ? ` ${props.problemCount}` : ""}</button>
+      <button className="tab-new inbox-toggle" aria-label="Worktree tasks" onClick={props.onOpenWorktrees}>Worktrees</button>
+      <button className="tab-new inbox-toggle" aria-label="Agent access" onClick={props.onOpenAgentAccess}>Access</button>
+      <button className="tab-new inbox-toggle" aria-label="Workflow recipes" onClick={props.onOpenRecipes}>Recipes</button>
+      <button className="tab-new inbox-toggle" aria-label="Session library" onClick={props.onOpenSessionLibrary}>Sessions</button>
       <button className="tab-new" aria-label="Shortcuts and tips" title="Shortcuts and tips (Ctrl+Shift+/)" onClick={props.onHelp}>
         ?
       </button>
@@ -380,7 +400,7 @@ export function TabBar(props: Props) {
 
 /** Alerts that say what happened in their title: a long command's end, Claude stopping on an error, a trigger. */
 function titled(kind: string | null | undefined): boolean {
-  return Boolean(kind?.startsWith("codex:") || kind?.startsWith("command_") || kind?.startsWith("stop_failure") || kind === "trigger");
+  return Boolean(kind?.startsWith("codex:") || kind?.startsWith("command_") || kind?.startsWith("stop_failure") || kind === "trigger" || kind === "agent_completed");
 }
 
 function RenameField({ initial, onDone }: { initial: string; onDone(value?: string): void }) {

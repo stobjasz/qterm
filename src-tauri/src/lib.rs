@@ -1,4 +1,19 @@
 mod alerts;
+mod agent_health;
+mod agent_brief;
+mod agent_inbox;
+mod agent_access;
+mod agent_tasks;
+mod agent_pipe;
+mod process_owner;
+mod repo_state;
+mod run_records;
+mod worktree_tasks;
+mod recipes;
+mod session_library;
+mod wsl;
+mod wsl_sources;
+mod wsl_owner;
 mod claude;
 mod claude_hook;
 mod claude_statusline;
@@ -37,6 +52,7 @@ use config::{ConfigState, Reload};
 pub use alerts::{run_hook as run_claude_hook, HOOK_ARG};
 pub use updater::wait_for_previous;
 pub use alerts::run_codex_hook;
+pub use agent_access::run_client as run_agent_client;
 pub use codex_hook::HOOK_ARG as CODEX_HOOK_ARG;
 pub use claude_statusline::STATUSLINE_ARG;
 
@@ -82,6 +98,7 @@ pub(crate) fn set_settings_folder(app: &AppHandle, folder: Option<&std::path::Pa
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     log::log_panics();
+    if let Err(error) = process_owner::ensure() { qlog!("{error}"); }
     tauri::Builder::default()
         // Must be registered first: a second launch only toggles the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match explorer::open_here_arg(&args) {
@@ -108,6 +125,8 @@ pub fn run() {
         .manage(window::QuakeState::default())
         .manage(hotkey::HotkeyState::default())
         .manage(codex::Index::default())
+        .manage(wsl_sources::State::default())
+        .manage(agent_health::Health::default())
         .manage(claude::TranscriptIndex::default())
         .manage(claude_usage::UsageIndex::default())
         .setup(|app| {
@@ -129,6 +148,12 @@ pub fn run() {
                 qlog!("{error}");
             }
             app.manage(config);
+            app.manage(agent_inbox::Store::load(app.path().app_local_data_dir()?.join("agent-inbox.json")));
+            app.manage(run_records::Store::load(app.path().app_local_data_dir()?.join("command-runs.json")));
+            app.manage(agent_access::Access::new(app.path().app_local_data_dir()?.join("agent-connections")));
+            app.manage(recipes::Store::default());
+            app.manage(session_library::Store::load(app.path().app_local_data_dir()?.join("session-pins.json")));
+            app.manage(worktree_tasks::Store::load(app.path().app_local_data_dir()?.join("worktree-tasks.json")));
             app.manage(codex::Store::load(&config_dir));
             app.manage(claude::ClaudeStore::load(&config_dir, claude::claude_home()));
             app.manage(scrollback::ScrollbackStore::new(app.path().app_local_data_dir()?.join("scrollback")));
@@ -185,6 +210,50 @@ pub fn run() {
             commands::codex_session_seen,
             commands::forget_codex_sessions,
             commands::list_all_codex_sessions,
+            commands::scan_codex_sessions,
+            commands::agent_integration_health,
+            commands::test_agent_delivery,
+            commands::create_agent_brief,
+            commands::agent_inbox_snapshot,
+            commands::agent_inbox_action,
+            commands::command_runs_snapshot,
+            commands::record_command_run,
+            commands::command_runs_action,
+            commands::prepare_verification,
+            commands::cancel_verification,
+            commands::refresh_verification,
+            commands::worktree_tasks_snapshot,
+            commands::agent_access_snapshot,
+            commands::load_session_library,
+            commands::resolve_library_session,
+            commands::resolve_provider_session,
+            commands::session_pins_snapshot,
+            commands::pin_library_session,
+            commands::session_pins_action,
+            commands::review_recipes,
+            commands::cancel_recipe_review,
+            commands::recipe_runs_snapshot,
+            commands::start_recipe,
+            commands::launch_recipe_step,
+            commands::recipe_step_output,
+            commands::fail_recipe_step,
+            commands::cancel_recipe_run,
+            commands::stop_recipe_run,
+            commands::review_agent_access,
+            commands::cancel_agent_access_review,
+            commands::grant_agent_access,
+            commands::revoke_agent_access,
+            commands::publish_agent_panes,
+            commands::claim_agent_task,
+            commands::launch_agent_task,
+            commands::fail_agent_task,
+            commands::stop_agent_task,
+            commands::preview_worktree_task,
+            commands::cancel_worktree_preview,
+            commands::create_worktree_task,
+            commands::worktree_task_action,
+            commands::worktree_task_details,
+            commands::codex_usage_many,
             commands::codex_running,
             commands::codex_usage,
             commands::set_codex_plan_summary,
@@ -224,6 +293,10 @@ pub fn run() {
             commands::claude_running,
             commands::stop_programs,
             commands::project_info,
+            commands::wsl_distributions,
+            commands::wsl_translate_paths,
+            commands::create_wsl_agent_brief,
+            commands::validate_wsl_folder,
             commands::listening_ports,
             commands::end_port_owner,
             commands::clipboard_image_file,
@@ -262,6 +335,8 @@ fn on_config_file_changed(app: &AppHandle) {
         Reload::ErrorCleared => {}
         Reload::Changed(old) => {
             let new = state.get();
+            app.state::<wsl_sources::State>().retain(&new);
+            app.state::<session_library::Store>().retain_sources(wsl_sources::enabled(&new),&wsl_sources::configs(&new));
             if new.hotkey != old.hotkey {
                 if let Err(e) = hotkey::apply(app) {
                     qlog!("could not register the hotkey: {e}");

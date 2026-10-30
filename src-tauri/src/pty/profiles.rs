@@ -1,9 +1,7 @@
 //! Shell profiles, auto-detected the way Windows Terminal does it.
 
 use std::ffi::OsString;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -11,9 +9,6 @@ use portable_pty::CommandBuilder;
 use serde::Serialize;
 
 use crate::config::CustomProfile;
-
-/// Keeps `wsl.exe -l` from flashing a console window in release (GUI-subsystem) builds.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Which shell a profile runs: decides how it starts in a folder and how shell
 /// integration makes it report its working directory. The UI uses it to quote
@@ -34,6 +29,8 @@ enum Kind {
 pub struct Profile {
     pub id: String,
     pub name: String,
+    /// Explicit distribution identity; never infer one from a POSIX folder.
+    pub distribution: Option<String>,
     #[serde(skip)]
     program: OsString,
     #[serde(skip)]
@@ -83,16 +80,72 @@ function global:prompt {
 }
 "#;
 
-/// Same for Git Bash: the marks and the MSYS path ("/c/Users/me"; see
-/// `msys_to_windows`). The profile sets PS1 after this is in place, so B is
-/// appended to whatever PS1 is, once.
-const BASH_INTEGRATION: &str = r#"__qterm_rc=$?; printf '\033]133;D;%s\007\033]133;A\007\033]9;9;%s\033\\' "$__qterm_rc" "$PWD"; [[ $PS1 == *'133;B'* ]] || PS1="$PS1"'\[\e]133;B\a\]'"#;
+/// Same for Git Bash: report native Windows paths, including MSYS mount aliases.
+/// The profile sets PS1 after this is in place, so B is appended to PS1 once.
+// Git's /tmp and other mount aliases are not /c paths. Report the actual Windows
+// folder so native path checks, links and agent launch guards agree on identity.
+const BASH_INTEGRATION: &str = r#"__qterm_rc=$?; __qterm_pwd=$(/usr/bin/cygpath -aw -- "$PWD" 2>/dev/null) || __qterm_pwd=$PWD; printf '\033]133;D;%s\007\033]133;A\007\033]9;9;%s\033\\' "$__qterm_rc" "$__qterm_pwd"; [[ $PS1 == *'133;B'* ]] || PS1="$PS1"'\[\e]133;B\a\]'"#;
+const WSL_INTEGRATION: &str = r#"__qterm_rc=$?; printf '\033]133;D;%s\007\033]133;A\007\033]9;9;%s\033\\' "$__qterm_rc" "$PWD"; [[ $PS1 == *'133;B'* ]] || PS1="$PS1"'\[\e]133;B\a\]'"#;
+
+fn distribution(args:&[String])->Option<String>{
+    let end=args.iter().position(|a|matches!(a.as_str(),"--exec"|"-e")).unwrap_or(args.len());let args=&args[..end];
+    if args.iter().any(|a|matches!(a.as_str(),"--user"|"-u")){return None;}
+    args.windows(2).find(|pair|matches!(pair[0].as_str(),"-d"|"--distribution")).map(|pair|pair[1].clone()).filter(|d|crate::wsl::valid_distribution(d))
+}
+fn shared_wsl_environment(current:&str,integrate:bool)->String{
+    let mut vars:Vec<String>=current.split(':').filter(|s|!s.is_empty()&&!matches!(s.split('/').next(),Some("QTERM_PANE"|"QTERM_INBOX"))&&(!integrate||s.split('/').next()!=Some("PROMPT_COMMAND"))).map(str::to_owned).collect();
+    vars.extend(["QTERM_PANE".into(),"QTERM_INBOX".into()]);if integrate{vars.push("PROMPT_COMMAND/u".into());}vars.join(":")
+}
 
 impl Profile {
+    /// Wrap only recognized distribution profiles; preserve the shell's exact
+    /// --exec argv and the existing WSL options and terminal handles.
+    pub(crate) fn owned_command(&self,cwd:Option<&str>,integrate:bool,owner:&crate::wsl_owner::Owner)->Result<CommandBuilder,String>{
+        let mut cmd=self.command(cwd,integrate);
+        let argv=cmd.get_argv_mut();
+        let at=if let Some(at)=argv.iter().position(|arg|arg=="--exec"||arg=="-e"){at}else{
+            let mut at=1;
+            while at<argv.len(){let flag=argv[at].to_string_lossy();if matches!(flag.as_ref(),"-d"|"--distribution"|"--cd")&&at+1<argv.len(){at+=2;}else{return Err("Owned WSL profiles require --exec before a custom Linux command; unsupported WSL launch options were not run".into());}}
+            argv.push("--exec".into());at
+        };
+        argv.splice(at+1..at+1,[OsString::from("/usr/bin/python3"),OsString::from("-I"),OsString::from("-S"),OsString::from("-c"),OsString::from(crate::wsl_owner::SCRIPT)]);
+        let current=cmd.get_env("WSLENV").map(|v|v.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut vars:Vec<&str>=current.split(':').filter(|item|!item.is_empty()&&!matches!(item.split('/').next(),Some("QTERM_LIFETIME"|"QTERM_OWNER_TOKEN"))).collect();vars.extend(["QTERM_LIFETIME/p","QTERM_OWNER_TOKEN"]);
+        cmd.env("WSLENV",vars.join(":"));cmd.env("QTERM_LIFETIME",crate::repo_state::display(&owner.path));cmd.env("QTERM_OWNER_TOKEN",&owner.token);
+        Ok(cmd)
+    }
+    pub fn check_kind(&self,expected:Option<&str>)->Result<(),String>{
+        let actual=match self.kind{Kind::PowerShell=>"powershell",Kind::Cmd=>"cmd",Kind::Bash=>"bash",Kind::Wsl=>"wsl",Kind::Other=>"other"};
+        if expected.is_some_and(|expected|expected!=actual){return Err("The shell profile kind changed while preparing this pane; choose the profile again before sending startup input".into());}Ok(())
+    }
+    pub fn check_environment(&self,expected:Option<&str>)->Result<(),String>{
+        let actual=self.distribution.as_ref().map(|d|format!("wsl:{}",d.to_lowercase())).unwrap_or_else(||"native".into());
+        if expected.is_some_and(|expected|expected!=actual){return Err(format!("This pane belongs to {}, but its profile now uses {actual}. Switch the pane to an appropriate profile explicitly; its saved folder was not opened.",expected.unwrap()));}Ok(())
+    }
+    /// A Cmd batch file otherwise executes in the interactive shell itself and
+    /// Ctrl-C can leave it asking for batch confirmation. Isolate granted tasks
+    /// in a child of the selected interpreter so targeted stop preserves the tab.
+    pub fn task_command(&self, command:&str)->String {
+        if self.kind!=Kind::Cmd { return command.into(); }
+        let program=if Path::new(&self.program).is_absolute() { PathBuf::from(&self.program) } else {
+            std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(||PathBuf::from(r"C:\Windows")).join("System32").join("cmd.exe")
+        };
+        format!("\"{}\" /d /s /c \"{}\"",program.display(),command)
+    }
+    /// Git's bin/bash.exe is a Windows launcher for usr/bin/bash.exe. Keep both
+    /// owned by the pane, but treat the latter as its interactive shell.
+    pub fn shell_proxy(&self) -> Option<PathBuf> {
+        if self.kind != Kind::Bash { return None; }
+        let program=Path::new(&self.program);
+        if program.file_name()?.to_string_lossy().to_ascii_lowercase()!="bash.exe" || program.parent()?.file_name()?.to_string_lossy().to_ascii_lowercase()!="bin" { return None; }
+        let actual=program.parent()?.parent()?.join("usr/bin/bash.exe");
+        std::fs::canonicalize(actual).ok()
+    }
     fn new(id: &str, name: &str, program: impl Into<OsString>, args: &[&str], kind: Kind) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
+            distribution: (kind==Kind::Wsl).then(||id.strip_prefix("wsl:").unwrap_or(id).to_owned()),
             program: program.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
             kind,
@@ -115,17 +168,21 @@ impl Profile {
             .file_stem()
             .map(|s| s.to_string_lossy().to_lowercase())
             .unwrap_or_default();
+        let args:Vec<String>=words.collect();
+        let distribution=(stem=="wsl").then(||distribution(&args)).flatten();
         let kind = match stem.as_str() {
             "pwsh" | "powershell" => Kind::PowerShell,
             "cmd" => Kind::Cmd,
             "bash" => Kind::Bash,
+            "wsl" if distribution.is_some()=>Kind::Wsl,
             _ => Kind::Other,
         };
         Self {
             id: def.id(),
             name: def.name.clone(),
+            distribution,
             program: program.into(),
-            args: words.collect(),
+            args,
             kind,
             cwd: def.cwd.clone(),
             env: def.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -149,9 +206,12 @@ impl Profile {
 
         if self.kind == Kind::Wsl {
             // WSL takes its folder as the `--cd` argument and speaks Linux paths.
-            if let (Some(cwd), Some(last)) = (cwd.filter(|c| c.starts_with('/')), args.last_mut()) {
-                *last = cwd.to_string();
+            if let Some(cwd)=cwd.filter(|c|c.starts_with('/')) {
+                if let Some(index)=args.iter().position(|a|a=="--cd") {if let Some(value)=args.get_mut(index+1){*value=cwd.into();}}
+                else{args.splice(0..0,["--cd".into(),cwd.into()]);}
             }
+            let existing=cmd.get_env("WSLENV").map(|s|s.to_string_lossy().into_owned()).or_else(||std::env::var("WSLENV").ok()).unwrap_or_default();
+            cmd.env("WSLENV",shared_wsl_environment(&existing,integrate));
         } else {
             let folder = cwd
                 .map(|c| if self.kind == Kind::Bash { msys_to_windows(c) } else { c.to_string() })
@@ -173,8 +233,8 @@ impl Profile {
                     cmd.env("PROMPT", format!("$e]133;D$e\\$e]133;A$e\\$e]9;9;$P$e\\{own}$e]133;B$e\\"));
                 }
                 Kind::Bash => cmd.env("PROMPT_COMMAND", BASH_INTEGRATION),
-                // Environment variables don't cross into WSL without WSLENV; not wired yet.
-                Kind::Wsl | Kind::Other => {}
+                Kind::Wsl=>cmd.env("PROMPT_COMMAND",WSL_INTEGRATION),
+                Kind::Other => {}
             }
         }
         cmd.args(&args);
@@ -213,6 +273,15 @@ fn powershell_integration(args: &mut Vec<String>) {
 /// Detected profiles plus the user's [[profiles]]. A custom profile with a detected
 /// id ("pwsh") replaces that one in place; the rest are added after.
 impl Profile {
+    /// Exact launch configuration, including environment, without exposing secrets.
+    pub fn automation_key(&self) -> Option<String> {
+        use std::os::windows::ffi::OsStrExt;
+        use sha2::{Digest, Sha256};
+        if matches!(self.kind, Kind::Wsl | Kind::Other) { return None; }
+        let program: Vec<u16> = self.program.encode_wide().collect();
+        let bytes = serde_json::to_vec(&(&self.id, program, &self.args, &self.cwd, &self.env, self.kind)).ok()?;
+        Some(format!("{:x}", Sha256::digest(bytes)))
+    }
     /// Program file name and arguments, lower-cased (see wt_import::command_key).
     pub fn command_key(&self) -> String {
         let file = std::path::Path::new(&self.program).file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default();
@@ -288,7 +357,7 @@ pub fn detect() -> Vec<Profile> {
     }
     for distro in wsl_distros() {
         let id = format!("wsl:{distro}");
-        profiles.push(Profile::new(&id, &distro, "wsl.exe", &["-d", &distro, "--cd", "~"], Kind::Wsl));
+        profiles.push(Profile::new(&id, &distro, crate::wsl::program(), &["-d", &distro, "--cd", "~"], Kind::Wsl));
     }
     profiles
 }
@@ -357,21 +426,11 @@ fn git_bash() -> Option<PathBuf> {
 }
 
 fn wsl_distros() -> Vec<String> {
-    let Ok(output) = Command::new("wsl.exe")
-        .args(["--list", "--quiet"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    parse_wsl_list(&output.stdout)
+    crate::wsl::distributions().unwrap_or_default()
 }
 
 /// `wsl --list` writes UTF-16LE. Docker Desktop's internal distros aren't shells.
-fn parse_wsl_list(stdout: &[u8]) -> Vec<String> {
+pub(crate) fn parse_wsl_list(stdout: &[u8]) -> Vec<String> {
     let units: Vec<u16> = stdout
         .as_chunks::<2>()
         .0
@@ -407,6 +466,24 @@ mod tests {
     #[test]
     fn empty_wsl_list_has_no_distros() {
         assert!(parse_wsl_list(&[]).is_empty());
+    }
+
+    #[test]
+    fn captured_environment_rejects_profile_retargeting_before_launch(){
+        let ubuntu=Profile::new("wsl:Ubuntu","Ubuntu","wsl.exe",&["-d","Ubuntu"],Kind::Wsl);
+        let debian=Profile::new("wsl:Debian","Debian","wsl.exe",&["-d","Debian"],Kind::Wsl);
+        let native=Profile::new("cmd","cmd","cmd.exe",&[],Kind::Cmd);
+        assert!(ubuntu.check_environment(Some("wsl:ubuntu")).is_ok());
+        assert!(ubuntu.check_environment(Some("native")).is_err());
+        assert!(debian.check_environment(Some("wsl:ubuntu")).is_err());
+        assert!(native.check_environment(Some("wsl:ubuntu")).is_err());
+        assert!(native.check_environment(Some("native")).is_ok());
+        assert!(native.check_environment(None).is_ok());
+        assert!(native.check_environment(Some("unknown")).is_err());
+        assert!(native.check_kind(Some("cmd")).is_ok());
+        assert!(native.check_kind(Some("powershell")).is_err());
+        assert!(ubuntu.check_kind(Some("wsl")).is_ok());
+        assert!(ubuntu.check_kind(Some("bash")).is_err());
     }
 
     #[test]
@@ -554,5 +631,14 @@ mod tests {
         assert_eq!(msys_to_windows("/d"), r"D:\");
         assert_eq!(msys_to_windows("/home/me"), "/home/me");
         assert_eq!(msys_to_windows(r"C:\x"), r"C:\x");
+    }
+    #[test]
+    fn explicit_wsl_profiles_share_association_and_prompt_environment_without_overwriting_exec_arguments(){
+        let def:CustomProfile=serde_json::from_value(serde_json::json!({"name":"WSL test","command":"wsl.exe -d Ubuntu --exec /bin/bash --noprofile -i","env":{"WSLENV":"KEEP/p:QTERM_PANE/p:PROMPT_COMMAND/w"}})).unwrap();let profile=Profile::custom(&def);assert_eq!(profile.kind,Kind::Wsl);assert_eq!(profile.distribution.as_deref(),Some("Ubuntu"));let command=profile.command(Some("/c/Case Folder"),true);assert_eq!(argv(&command),["wsl.exe","--cd","/c/Case Folder","-d","Ubuntu","--exec","/bin/bash","--noprofile","-i"]);assert_eq!(command.get_env("WSLENV").unwrap(),"KEEP/p:QTERM_PANE:QTERM_INBOX:PROMPT_COMMAND/u");assert!(command.get_env("PROMPT_COMMAND").unwrap().to_string_lossy().contains("\"$PWD\""));
+    }
+    #[test]
+    fn ambiguous_or_other_user_wsl_profiles_do_not_claim_default_distribution_identity(){
+        for command in ["wsl.exe","wsl.exe --user root -d Ubuntu"]{let def:CustomProfile=serde_json::from_value(serde_json::json!({"name":"ambiguous","command":command})).unwrap();let profile=Profile::custom(&def);assert_eq!(profile.kind,Kind::Other);assert!(profile.distribution.is_none());}
+        assert_eq!(shared_wsl_environment("A/w:B/p:QTERM_INBOX/p",false),"A/w:B/p:QTERM_PANE:QTERM_INBOX");
     }
 }

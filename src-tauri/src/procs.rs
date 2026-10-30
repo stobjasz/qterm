@@ -10,6 +10,25 @@ pub struct Process {
     pub name: String,
 }
 
+/// Resolve only the known Git Bash launcher child, using its actual image path.
+/// A user-started nested shell still counts as a program beneath this root.
+pub fn interactive_shell(processes:&[Process],root:u32,expected:Option<&std::path::Path>)->u32 {
+    let Some(expected)=expected else { return root; };
+    let candidates:Vec<_>=processes.iter().filter(|p|p.parent==root && p.pid!=root && p.name=="bash.exe").filter(|p|process_image(p.pid).as_deref()==Some(expected)).collect();
+    if candidates.len()==1 { candidates[0].pid } else { root }
+}
+
+fn process_image(pid:u32)->Option<std::path::PathBuf> {
+    use std::os::windows::{ffi::OsStringExt,io::{AsRawHandle,FromRawHandle,OwnedHandle}};
+    use windows_sys::Win32::System::Threading::{OpenProcess,PROCESS_QUERY_LIMITED_INFORMATION,QueryFullProcessImageNameW};
+    // SAFETY: a query-only, non-inheritable handle; owned until the query ends.
+    let raw=unsafe {OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,0,pid)};
+    if raw.is_null() { return None; }
+    let process=unsafe {OwnedHandle::from_raw_handle(raw)}; let mut text=vec![0u16;32768]; let mut size=text.len() as u32;
+    if unsafe {QueryFullProcessImageNameW(process.as_raw_handle(),0,text.as_mut_ptr(),&mut size)}==0 { return None; }
+    std::fs::canonicalize(std::ffi::OsString::from_wide(&text[..size as usize])).ok()
+}
+
 /// All running processes (one ToolHelp snapshot). Empty if the snapshot fails.
 pub fn snapshot() -> Vec<Process> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};

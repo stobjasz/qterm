@@ -1,0 +1,70 @@
+// R47: own hook subprocesses -> native durable store -> inbox UI -> close/restart.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { EXE, expect, test } from "./qterm";
+
+test("reading agent attention does not dismiss it and closed-pane events survive restart", async ({ qterm }, info) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qterm-inbox-"));
+  const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
+  try {
+    const pane = await qterm.activePane(); await qterm.waitForPrompt(pane);
+    fs.writeFileSync(path.join(dir, "permission.json"), JSON.stringify({ hook_event_name: "Notification", notification_type: "permission_prompt", title: "Claude needs permission", message: "Please review the command.", session_id: "inbox-claude", cwd: dir }));
+    fs.writeFileSync(path.join(dir, "reply.json"), JSON.stringify({ hook_event_name: "Stop", session_id: "01a1690c-c7b7-7e80-9864-e6971b91db16", cwd: dir, last_assistant_message: "Tests passed. Review the implementation before merging." }));
+    await qterm.run(pane, `Get-Content ${quote(path.join(dir, "permission.json"))} -Raw | & ${quote(EXE)} --claude-notify; Get-Content ${quote(path.join(dir, "reply.json"))} -Raw | & ${quote(EXE)} --codex-notify; 'hooks-' + (6*7)`);
+    await expect.poll(() => qterm.terminalText(pane)).toContain("hooks-42");
+    const toggle = qterm.page.getByRole("button", { name: "Agent inbox", exact: true });
+    await expect(toggle).toHaveAccessibleDescription("Agent inbox: 2 open, 2 unread");
+    await toggle.click();
+    const dialog = qterm.page.getByRole("dialog", { name: "Agent inbox", exact: true });
+    await expect(dialog.getByRole("listitem")).toHaveCount(2);
+    await dialog.getByLabel("Inbox provider", { exact: true }).selectOption("codex");
+    await expect(dialog.getByRole("listitem")).toHaveCount(1);
+    await dialog.getByLabel("Inbox provider", { exact: true }).selectOption("all");
+    await dialog.getByLabel("Inbox type", { exact: true }).selectOption("completed");
+    await expect(dialog.getByRole("listitem")).toHaveCount(1);
+    await dialog.getByLabel("Inbox type", { exact: true }).selectOption("all");
+    await dialog.getByLabel("Search agent inbox", { exact: true }).fill("Tests passed");
+    await expect(dialog.getByRole("listitem")).toHaveCount(1);
+    await dialog.getByLabel("Search agent inbox", { exact: true }).fill("");
+    await dialog.getByRole("button", { name: "View claude permission: Claude needs permission", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("2 open · 1 unread");
+    await expect(dialog.getByLabel("Event details", { exact: true })).toContainText(dir);
+    await expect(dialog.getByRole("button", { name: "Go to pane", exact: true })).toBeEnabled();
+    await dialog.getByRole("button", { name: "View codex completed: Turn completed", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("2 open · 0 unread");
+    await expect(dialog.getByLabel("Event details", { exact: true })).toContainText("Tests passed.");
+    await dialog.getByRole("button", { name: "Resolve event", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("1 open · 0 unread");
+    await dialog.getByLabel("Inbox status", { exact: true }).selectOption("all");
+    await expect(dialog.getByRole("listitem")).toHaveCount(2);
+    await dialog.getByRole("button", { name: "Reopen event", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("2 open · 0 unread");
+    await dialog.getByRole("button", { name: "Resolve event", exact: true }).click();
+    await dialog.getByRole("button", { name: "Clear resolved events", exact: true }).click();
+    await expect(dialog.getByRole("listitem")).toHaveCount(1);
+    await dialog.getByRole("button", { name: "Close inbox", exact: true }).click();
+    // The shell is idle and its hook commands have returned before closing.
+    const source = qterm.page.getByRole("tab").first();
+    await qterm.page.getByRole("button", { name: "New tab", exact: true }).click();
+    const second = await qterm.activePane(); await qterm.waitForPrompt(second);
+    await source.getByRole("button", { name: /^Close / }).click();
+    await expect(qterm.page.getByRole("tab")).toHaveCount(1);
+    await toggle.click();
+    await dialog.getByRole("button", { name: "View claude permission: Claude needs permission", exact: true }).click();
+    await expect(dialog.getByRole("listitem")).toContainText("Pane closed");
+    await expect(dialog.getByRole("button", { name: "Go to pane", exact: true })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Close inbox", exact: true }).click();
+    await qterm.restart();
+    await qterm.page.getByRole("button", { name: "Agent inbox", exact: true }).click();
+    const restored = qterm.page.getByRole("dialog", { name: "Agent inbox", exact: true });
+    await expect(restored.getByRole("status")).toHaveText("1 open · 0 unread");
+    await expect(restored.getByRole("listitem")).toContainText("Previous run");
+    await restored.getByRole("button", { name: "View claude permission: Claude needs permission", exact: true }).click();
+    await expect(restored.getByLabel("Event details", { exact: true })).toContainText(dir);
+    await expect(restored.getByRole("button", { name: "Go to pane", exact: true })).toBeDisabled();
+    await qterm.page.screenshot({ path: info.outputPath("agent-inbox.png") });
+    await restored.getByRole("button", { name: "Resolve event", exact: true }).click();
+    await expect(restored.getByRole("status")).toHaveText("0 open · 0 unread");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

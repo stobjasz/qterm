@@ -50,7 +50,7 @@ describe("openTab", () => {
     expect(ws.activeTab).toBe("t2");
     expect(ws.tabs[1].root).toEqual({ kind: "leaf", pane: "p2" });
     expect(ws.tabs[1].focusedPane).toBe("p2");
-    expect(ws.panes.p2).toEqual({ id: "p2", profileId: "cmd", profileName: "Command Prompt", title: "" });
+    expect(ws.panes.p2).toEqual({ id: "p2", profileId: "cmd", profileName: "Command Prompt", environment:"native", title: "" });
   });
 });
 
@@ -278,7 +278,7 @@ describe("save and restore", () => {
     const restored = restoreWorkspace(saveWorkspace(ws), profiles)!;
     expect(restored.tabs).toEqual(ws.tabs);
     expect(restored.activeTab).toBe("t2");
-    expect(restored.panes.p2).toEqual({ id: "p2", profileId: "cmd", profileName: "Command Prompt", title: "", cwd: "C:\b" });
+    expect(restored.panes.p2).toEqual({ id: "p2", profileId: "cmd", profileName: "Command Prompt", environment:"native", title: "", cwd: "C:\b" });
     expect(restored.panes.p1.title, "shell titles are not saved; the shell sets them again").toBe("");
   });
 
@@ -287,11 +287,23 @@ describe("save and restore", () => {
     expect(saveWorkspace(setPaneTitle(ws, "p1", "x"))).toBe(saveWorkspace(ws));
   });
 
-  it("moves panes of a profile that no longer exists to the default profile", () => {
+  it("preserves missing WSL profiles instead of substituting the default", () => {
     const saved = saveWorkspace(openTab(emptyWorkspace(), { tab: "t1", pane: "p1" }, { id: "wsl:Gone", name: "Gone" }));
     const restored = restoreWorkspace(saved, profiles)!;
-    expect(restored.panes.p1.profileId).toBe("pwsh");
-    expect(restored.panes.p1.profileName).toBe("PowerShell");
+    expect(restored.panes.p1.profileId).toBe("wsl:Gone");
+    expect(restored.panes.p1.environment).toBe("wsl:gone");
+  });
+
+  it("retains a custom distribution after profile retargeting or removal and validates saved identities",()=>{
+    const profile={id:"custom:linux",name:"Linux",distribution:"Ubuntu"};
+    const original=openTab(emptyWorkspace(),{tab:"linux",pane:"lp"},profile,"/c/Case");
+    const saved=saveWorkspace(original);const changed=restoreWorkspace(saved,[{...profile,distribution:"Debian"}])!;
+    expect(changed.panes.lp).toMatchObject({environment:"wsl:ubuntu",cwd:"/c/Case",profileId:profile.id});
+    expect(restoreWorkspace(saved,profiles)!.panes.lp).toMatchObject({environment:"wsl:ubuntu",profileId:profile.id});
+    const legacy=JSON.parse(saved);delete legacy.panes.lp.environment;
+    expect(restoreWorkspace(JSON.stringify(legacy),[profile])!.panes.lp.environment).toBe("wsl:ubuntu");
+    legacy.panes.lp.environment="wsl:Ubuntu/other";
+    expect(restoreWorkspace(JSON.stringify(legacy),[profile])).toBeUndefined();
   });
 
   it("rejects damaged or empty sessions", () => {
@@ -433,7 +445,7 @@ describe("switching a pane's shell", () => {
     expect(next.tabs[0].focusedPane).toBe("p3");
     expect(next.tabs[0].zoomed).toBe("p3");
     expect(next.panes.p1).toBeUndefined();
-    expect(next.panes.p3).toEqual({ id: "p3", profileId: "cmd", profileName: "Command Prompt", title: "", cwd: "C:\work", background: "#14213d" });
+    expect(next.panes.p3).toEqual({ id: "p3", profileId: "cmd", profileName: "Command Prompt", environment:"native", title: "", cwd: "C:\work", background: "#14213d" });
     expect(replacePane(ws, "nope", "p9", cmd)).toBe(ws);
   });
 });

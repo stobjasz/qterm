@@ -44,8 +44,8 @@ struct Rollout {
     usage: Usage,
 }
 
-fn parse(path: &Path) -> Option<Rollout> {
-    let file = std::fs::File::open(path).ok()?;
+fn parse(path: &Path) -> std::io::Result<Option<Rollout>> {
+    let file = std::fs::File::open(path)?;
     let mut summary = TranscriptSummary {
         id: String::new(),
         cwd: None,
@@ -69,14 +69,16 @@ fn parse(path: &Path) -> Option<Rollout> {
     let mut response_prompts = 0;
     let mut response_title = None;
     let mut response_last_prompt = None;
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    for line in BufReader::new(file).lines() {
+        let line = line?;
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         let p = &record["payload"];
         match record["type"].as_str() {
             Some("session_meta") => {
-                summary.id = p["id"].as_str()?.to_ascii_lowercase();
+                let Some(id) = p["id"].as_str() else { continue };
+                summary.id = id.to_ascii_lowercase();
                 summary.cwd = p["cwd"].as_str().map(str::to_owned);
                 summary.git_branch = p
                     .pointer("/git/branch")
@@ -145,11 +147,11 @@ fn parse(path: &Path) -> Option<Rollout> {
         summary.last_prompt = response_last_prompt;
     }
     if !valid_id(&summary.id) {
-        return None;
+        return Ok(None);
     }
     usage.session_id = summary.id.clone();
     usage.title = summary.title.clone();
-    Some(Rollout { summary, usage })
+    Ok(Some(Rollout { summary, usage }))
 }
 
 fn stamp(path: &Path) -> (u64, u64) {
@@ -166,27 +168,69 @@ fn stamp(path: &Path) -> (u64, u64) {
     )
 }
 
-type CachedRollout = ((u64, u64), Rollout);
+type CachedRollout = ((u64, u64), Option<Rollout>);
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanDiagnostics {
+    pub files_scanned: usize,
+    pub unrecognized_files: usize,
+    pub missing_sessions_folder: bool,
+    pub errors: Vec<String>,
+}
+
+impl ScanDiagnostics {
+    fn error(&mut self, path: &Path, error: &std::io::Error) {
+        // A broken history tree must not produce an unbounded IPC response.
+        if self.errors.len() < 10 {
+            self.errors.push(format!("{}: {error}", path.display()));
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanResult {
+    pub home: String,
+    pub sessions_path: String,
+    pub sessions: Vec<TranscriptSummary>,
+    pub diagnostics: ScanDiagnostics,
+}
 
 #[derive(Default)]
 pub struct Index {
     cache: Mutex<HashMap<PathBuf, CachedRollout>>,
 }
 impl Index {
-    fn rollouts(&self, home: &Path) -> Vec<Rollout> {
-        let mut pending = vec![home.join("sessions")];
+    fn rollouts(&self, home: &Path) -> (Vec<Rollout>, ScanDiagnostics) {
+        let root = home.join("sessions");
+        let mut pending = vec![root.clone()];
+        let mut diagnostics = ScanDiagnostics::default();
         let mut cache = self.cache.lock().unwrap();
         let mut found = Vec::new();
         let mut live = std::collections::HashSet::new();
         while let Some(dir) = pending.pop() {
-            let Ok(entries) = std::fs::read_dir(dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Ok(kind) = entry.file_type() else {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    if dir == root && error.kind() == std::io::ErrorKind::NotFound {
+                        diagnostics.missing_sessions_folder = true;
+                    } else {
+                        diagnostics.error(&dir, &error);
+                    }
                     continue;
+                }
+            };
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => { diagnostics.error(&dir, &error); continue; }
                 };
                 let path = entry.path();
+                let kind = match entry.file_type() {
+                    Ok(kind) => kind,
+                    Err(error) => { diagnostics.error(&path, &error); continue; }
+                };
                 if kind.is_dir() {
                     pending.push(path);
                     continue;
@@ -194,32 +238,48 @@ impl Index {
                 if !kind.is_file() || path.extension().is_none_or(|e| e != "jsonl") {
                     continue;
                 }
+                diagnostics.files_scanned += 1;
                 live.insert(path.clone());
                 let stamp = stamp(&path);
                 if cache.get(&path).is_none_or(|(old, _)| *old != stamp) {
                     cache.remove(&path);
-                    if let Some(rollout) = parse(&path) {
-                        cache.insert(path.clone(), (stamp, rollout));
+                    match parse(&path) {
+                        Ok(rollout) => { cache.insert(path.clone(), (stamp, rollout)); }
+                        Err(error) => diagnostics.error(&path, &error),
                     }
                 }
-                if let Some((_, rollout)) = cache.get(&path) {
+                if let Some((_, Some(rollout))) = cache.get(&path) {
                     found.push(rollout.clone());
+                } else if matches!(cache.get(&path), Some((_, None))) {
+                    diagnostics.unrecognized_files += 1;
                 }
             }
         }
         cache.retain(|p, _| live.contains(p));
         found.sort_by_key(|r| std::cmp::Reverse(r.summary.modified));
-        found
+        (found, diagnostics)
     }
     pub fn scan(&self, home: &Path) -> Vec<TranscriptSummary> {
-        self.rollouts(home)
-            .into_iter()
-            .filter(|r| r.summary.prompts > 0)
-            .map(|r| r.summary)
-            .collect()
+        self.scan_with_diagnostics(home).sessions
+    }
+    pub fn scan_with_diagnostics(&self, home: &Path) -> ScanResult {
+        let (rollouts, diagnostics) = self.rollouts(home);
+        ScanResult {
+            home: home.to_string_lossy().into_owned(),
+            sessions_path: home.join("sessions").to_string_lossy().into_owned(),
+            sessions: rollouts.into_iter().filter(|r| r.summary.prompts > 0).map(|r| r.summary).collect(),
+            diagnostics,
+        }
+    }
+    pub fn usage_many(&self, home: &Path, ids: &[String]) -> Vec<Usage> {
+        let wanted: std::collections::HashSet<_> = ids.iter().map(|id| id.to_ascii_lowercase()).collect();
+        if wanted.is_empty() { return Vec::new(); }
+        self.rollouts(home).0.into_iter()
+            .filter(|r| wanted.contains(&r.summary.id))
+            .map(|r| r.usage).collect()
     }
     pub fn usage(&self, home: &Path, id: &str) -> Option<Usage> {
-        self.rollouts(home)
+        self.rollouts(home).0
             .into_iter()
             .find(|r| r.summary.id.eq_ignore_ascii_case(id))
             .map(|r| r.usage)
@@ -249,23 +309,28 @@ impl Store {
     pub fn list(&self) -> Vec<ClaudeSession> {
         self.sessions.lock().unwrap().clone()
     }
-    pub fn remember(
+    #[cfg(test)]
+    pub fn remember(&self,index:&Index,id:&str,profile:&str,cwd:Option<String>)->Result<Vec<ClaudeSession>,String>{self.remember_scoped(index,id,profile,cwd,None)}
+    pub fn remember_scoped(
         &self,
         index: &Index,
         id: &str,
         profile: &str,
         cwd: Option<String>,
+        environment:Option<String>,
     ) -> Result<Vec<ClaudeSession>, String> {
         if !valid_id(id) {
             return Err("invalid Codex session id".into());
         }
-        let summary = home().and_then(|h| {
+        let environment=crate::session_library::sighting_environment(profile,cwd.as_deref(),environment)?;
+        let summary = (environment=="native").then(home).flatten().and_then(|h| {
             index
                 .scan(&h)
                 .into_iter()
                 .find(|s| s.id.eq_ignore_ascii_case(id))
         });
         let session = ClaudeSession {
+            environment:Some(environment.clone()),
             id: id.to_ascii_lowercase(),
             profile_id: profile.into(),
             cwd: summary.as_ref().and_then(|s| s.cwd.clone()).or(cwd),
@@ -277,7 +342,7 @@ impl Store {
         };
         let mut sessions = self.sessions.lock().unwrap();
         let mut next = sessions.clone();
-        next.retain(|s| s.id != session.id);
+        next.retain(|s| s.id != session.id || crate::session_library::session_environment(s)!=environment);
         next.insert(0, session);
         next.truncate(200);
         self.save(&next)?;
@@ -285,10 +350,14 @@ impl Store {
         Ok(sessions.clone())
     }
     pub fn forget(&self, ids: &[String]) -> Result<Vec<ClaudeSession>, String> {
+        self.forget_scoped(&ids.iter().map(|id|crate::session_library::Reference{id:id.to_ascii_lowercase(),environment:"native".into()}).collect::<Vec<_>>())
+    }
+    pub fn forget_scoped(&self,references:&[crate::session_library::Reference])->Result<Vec<ClaudeSession>,String>{
+        for reference in references{reference.validate()?;}
         let mut sessions = self.sessions.lock().unwrap();
         let next: Vec<_> = sessions
             .iter()
-            .filter(|s| !ids.contains(&s.id))
+            .filter(|s| !references.iter().any(|reference|reference.matches(s)))
             .cloned()
             .collect();
         self.save(&next)?;
@@ -370,5 +439,42 @@ mod tests {
         ] {
             assert!(!valid_id(id));
         }
+    }
+
+    #[test]
+    fn scan_distinguishes_missing_empty_unrecognized_and_unreadable_data() {
+        let home = std::env::temp_dir().join(format!("qterm-codex-diagnostics-{}", std::process::id()));
+        let index = Index::default();
+        let missing = index.scan_with_diagnostics(&home);
+        assert!(missing.diagnostics.missing_sessions_folder);
+        assert!(missing.diagnostics.errors.is_empty());
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        let empty = index.scan_with_diagnostics(&home);
+        assert!(!empty.diagnostics.missing_sessions_folder);
+        assert_eq!(empty.diagnostics.files_scanned, 0);
+        std::fs::write(home.join("sessions/unknown.jsonl"), "{\"type\":\"future_format\"}\n").unwrap();
+        // Invalid UTF-8 produces an actual read error, not a JSON parse warning.
+        std::fs::write(home.join("sessions/unreadable.jsonl"), [0xff]).unwrap();
+        let partial = index.scan_with_diagnostics(&home);
+        assert_eq!(partial.diagnostics.files_scanned, 2);
+        assert_eq!(partial.diagnostics.unrecognized_files, 1);
+        assert_eq!(partial.diagnostics.errors.len(), 1);
+        assert!(partial.diagnostics.errors[0].contains("unreadable.jsonl"));
+        assert!(partial.sessions.is_empty());
+        assert_eq!(partial.home, home.to_string_lossy());
+        // A failed file remains retryable even when no successful cache entry exists.
+        std::fs::write(home.join("sessions/unreadable.jsonl"), concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"01a1690c-c7b7-7e80-9864-e6971b91db16\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"Recovered\"}}\n"
+        )).unwrap();
+        let recovered = index.scan_with_diagnostics(&home);
+        assert!(recovered.diagnostics.errors.is_empty());
+        assert_eq!(recovered.sessions.len(), 1);
+        let ids = vec!["01A1690C-C7B7-7E80-9864-E6971B91DB16".into(), "01a1690c-c7b7-7e80-9864-e6971b91db16".into()];
+        let usage = index.usage_many(&home, &ids);
+        assert_eq!(usage.len(), 1, "batch requests deduplicate IDs case-insensitively");
+        assert_eq!(usage[0].title.as_deref(), Some("Recovered"));
+        assert!(index.usage_many(&home, &[]).is_empty());
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

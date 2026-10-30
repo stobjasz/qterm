@@ -1,0 +1,18 @@
+// R65: actual provider-format files and persisted app metadata, no mocked IPC.
+import fs from "node:fs";
+import {expect,test} from "./qterm";
+import {discover,libraryFixture,openLibrary,sessionRow} from "./session-library-fixture";
+const fixture=libraryFixture();test.use({settings:fixture.settings});test.beforeAll(fixture.seed);test.beforeEach(fixture.seed);test.afterAll(fixture.cleanup);
+test("the library separates identities, filters reported branches and retains pins without reviving missing sessions",async({qterm},info)=>{
+  await qterm.waitForPrompt(await qterm.activePane());let panel=await openLibrary(qterm.page);await expect(panel.getByRole("listitem")).toHaveCount(4);await expect(panel.getByRole("combobox",{name:"Session reported branch",exact:true})).not.toContainText("feature/claude-history");
+  await discover(panel);await expect(sessionRow(panel,"claude")).toContainText("Claude library alpha");await expect(sessionRow(panel,"codex")).toContainText("Codex library beta");await expect(sessionRow(panel,"codex","wsl:alpha")).toContainText("WSL alpha reference");await expect(sessionRow(panel,"codex","wsl:beta")).toContainText("WSL beta reference");
+  await panel.getByRole("combobox",{name:"Session provider",exact:true}).selectOption("claude");await expect(panel.getByRole("listitem")).toHaveCount(1);await panel.getByRole("combobox",{name:"Session reported branch",exact:true}).selectOption("feature/claude-history");await expect(panel.getByRole("listitem")).toHaveCount(1);
+  await panel.getByRole("combobox",{name:"Session project",exact:true}).selectOption({label:`${fixture.project1} · Native Windows`});await panel.getByRole("textbox",{name:"Search session library",exact:true}).fill("library alpha");await expect(panel.getByRole("listitem")).toHaveCount(1);
+  await panel.getByRole("button",{name:"Pin selected session",exact:true}).click();await expect(panel.getByRole("button",{name:"Unpin selected session",exact:true})).toBeVisible();await qterm.page.screenshot({path:info.outputPath("session-library.png")});await panel.getByRole("button",{name:"Close session library",exact:true}).click();
+  await qterm.restart();panel=await openLibrary(qterm.page);await panel.getByRole("checkbox",{name:"Pinned sessions only",exact:true}).check();await expect(panel.getByRole("listitem")).toHaveCount(1);await expect(panel.getByRole("button",{name:"Unpin selected session",exact:true})).toBeVisible();
+  fs.unlinkSync(fixture.claudeFile);await discover(panel);await expect(sessionRow(panel,"claude")).toContainText("unavailable");await expect(panel.getByRole("button",{name:"Resume selected session in new tab",exact:true})).toBeDisabled();await expect(panel.getByRole("button",{name:"Review session handoff",exact:true})).toBeDisabled();
+});
+test("resuming a verified library session uses a new prompt-gated tab and leaves a busy source program alone",async({qterm})=>{
+  const source=await qterm.activePane();await qterm.waitForPrompt(source);await qterm.run(source,"Write-Output ('SOURCE_WAITING_' + (6*7)); $null=[Console]::ReadLine(); Write-Output ('SOURCE_RELEASED_' + (3*9))");await expect.poll(()=>qterm.terminalText(source)).toContain("SOURCE_WAITING_42");
+  const panel=await openLibrary(qterm.page);await discover(panel);await sessionRow(panel,"claude").getByRole("button").click();await panel.getByRole("button",{name:"Resume selected session in new tab",exact:true}).click();await expect(panel).toBeHidden();await expect(qterm.page.getByRole("tab")).toHaveCount(2);const resumed=await qterm.activePane();expect(resumed).not.toBe(source);await expect.poll(()=>qterm.terminalText(resumed)).toContain(`LIBRARY_RESUMED_42_${fixture.project1}`);expect(await qterm.terminalText(source)).not.toContain("SOURCE_RELEASED_27");
+});

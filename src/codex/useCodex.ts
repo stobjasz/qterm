@@ -1,43 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  codexRunning, codexSessionSeen, codexUsage, forgetCodexSessions, listCodexSessions,
+  codexRunning, codexSessionSeen, codexUsageMany, forgetCodexSessions, listCodexSessions,
   onCodexActivity, onCodexAttention, onCodexReply, onCodexSessionStart, onCodexSessionsChanged,
-  setCodexPlanSummary, showPlanWarning, type ClaudeAlert, type CodexSession, type CodexUsage, type Config, type Profile,
+  setCodexPlanSummary, showPlanWarning, type ClaudeAlert, type CodexSession, type CodexUsage, type Config,
 } from "../ipc";
-import { resumeHereCommand } from "../claude/resume";
 import type { TerminalRegistry } from "../terminal/registry";
-import { activeTab, paneIds, type Workspace } from "../workspace/workspace";
-import { sessionProfile } from "./profiles";
+import { paneIds, type Workspace } from "../workspace/workspace";
+import {nativeAgentContext,sightingContext} from "../agents/environments";
 import { planSummary } from "./usage";
 import type { CodexMenuProps } from "./CodexMenu";
+import { hookObservation, resolveObservation, type AgentObservation, type AgentStatus } from "../agents/status";
 
 interface Options {
+  resumeSession(session:CodexSession,where:"new"|"current"):void;
+  newSession(cwd:string,environment:string):void;
   config: Config | undefined;
   workspace: Workspace;
-  profiles: Profile[] | undefined;
-  defaultProfile: Profile | undefined;
   registry: TerminalRegistry;
-  newTab(profile?: string, cwd?: string): string | undefined;
-  startupInput: Map<string, string>;
   attention: ReadonlyMap<string, ClaudeAlert>;
-  raiseAlert(alert: ClaudeAlert): void;
+  raiseAlert(alert: ClaudeAlert, notify?: boolean): void;
+  clearAlert(paneId: string): void;
   focusPane(paneId: string): void;
   label(paneId: string): string;
   notice(message: string): void;
   refreshProject(paneId: string): void;
-  agentRunning(paneId: string): boolean;
 }
 
 /** Provider-specific state lives here; terminal, layout and attention UI stay shared. */
 export function useCodex(options: Options) {
   const latest = useRef(options); latest.current = options;
   const [sessions, setSessions] = useState<CodexSession[]>([]);
-  const [status, setStatus] = useState<ReadonlyMap<string, "busy" | "idle">>(new Map());
-  const statusRef = useRef(status); statusRef.current = status;
+  const [status, setStatus] = useState<ReadonlyMap<string, AgentStatus>>(new Map());
+  const [observations, setObservations] = useState<ReadonlyMap<string, AgentObservation>>(new Map());
   const [usages, setUsages] = useState<ReadonlyMap<string, CodexUsage>>(new Map());
   const [replies, setReplies] = useState<ReadonlyMap<string, string>>(new Map());
   const known = useRef(new Map<string, string>());
-  const activity = useRef(new Map<string, "busy" | "idle">());
+  const activity = useRef(new Map<string, AgentObservation>());
   const warned = useRef(new Map<string, number>());
   const seen = useCallback((paneId: string, id: string, associate = true) => {
     const o = latest.current;
@@ -47,10 +45,11 @@ export function useCodex(options: Options) {
       if (known.current.get(paneId) !== id) {
         activity.current.delete(paneId);
         setReplies((current) => { const next = new Map(current); next.delete(paneId); return next; });
+        setUsages((current) => { const next = new Map(current); next.delete(paneId); return next; });
       }
       known.current.set(paneId, id);
     }
-    if (o.config?.codexSessions) void codexSessionSeen(id, pane.profileId, pane.cwd).catch((e) => o.notice(`Could not remember Codex session: ${e}`));
+    if (o.config?.codexSessions) void codexSessionSeen(id, pane.profileId, pane.cwd,sightingContext(o.registry.environmentOf(paneId)??pane.environment,o.registry.shellKindOf(paneId))).catch((e) => o.notice(`Could not remember Codex session: ${e}`));
   }, []);
 
   useEffect(() => {
@@ -58,30 +57,36 @@ export function useCodex(options: Options) {
     void listCodexSessions().then((s) => { if (!disposed) setSessions(s); }).catch((e) => latest.current.notice(`Could not read Codex sessions: ${e}`));
     const listeners = [
       onCodexSessionsChanged(setSessions),
-      onCodexSessionStart((s) => { seen(s.paneId, s.sessionId); activity.current.set(s.paneId, "idle"); }),
-      onCodexActivity((s) => { if (s.sessionId) seenIfNew(s.paneId, s.sessionId); activity.current.set(s.paneId, s.busy ? "busy" : "idle"); }),
+      onCodexSessionStart((s) => { seen(s.paneId, s.sessionId); observe(s.paneId, "unknown", "SessionStart", s.sessionId); }),
+      onCodexActivity((s) => { if (s.sessionId) seenIfNew(s.paneId, s.sessionId); latest.current.clearAlert(s.paneId); observe(s.paneId, s.busy ? "busy" : "idle", s.busy ? "activity" : "Interrupt", s.sessionId); }),
       onCodexAttention((a) => {
         if (a.sessionId) seenIfNew(a.paneId, a.sessionId);
-        activity.current.set(a.paneId, "idle");
-        if (latest.current.config?.codexAlerts) latest.current.raiseAlert(a);
+        observe(a.paneId, "approval", "PermissionRequest", a.sessionId);
+        if (latest.current.config?.codexAlerts) latest.current.raiseAlert(a, false);
       }),
       onCodexReply((r) => {
         const o = latest.current;
         if (!o.workspace.panes[r.paneId]) return;
         if (r.sessionId) seenIfNew(r.paneId, r.sessionId);
-        activity.current.set(r.paneId, "idle");
+        o.clearAlert(r.paneId);
+        observe(r.paneId, "completed", "Stop", r.sessionId);
         setReplies((current) => new Map(current).set(r.paneId, r.message));
         o.refreshProject(r.paneId);
-        if (o.config?.codexAlerts) o.raiseAlert({ paneId: r.paneId, sessionId: r.sessionId, title: "Codex finished", message: r.message || "Codex finished its turn.", kind: "codex:reply" });
+        if (o.config?.codexAlerts && r.message.trim()) o.raiseAlert({ paneId: r.paneId, sessionId: r.sessionId, title: "Codex turn completed", message: r.message, kind: "codex:reply" });
       }),
     ];
+    function observe(paneId: string, state: AgentStatus, event: string, sessionId?: string | null) {
+      const o = latest.current;
+      if (!o.workspace.panes[paneId]) return;
+      activity.current.set(paneId, hookObservation(state, event, o.registry.submissionRevision(paneId), sessionId));
+    }
     function seenIfNew(paneId: string, id: string) { if (known.current.get(paneId) !== id) seen(paneId, id); }
     return () => { disposed = true; for (const listener of listeners) void listener.then((off) => off()); };
   }, [seen]);
 
   const enabled = Boolean(options.config?.codexSessions || options.config?.codexAlerts || options.config?.codexRestore);
   useEffect(() => {
-    if (!enabled) { setStatus(new Map()); setUsages(new Map()); return; }
+    if (!enabled) { setStatus(new Map()); setUsages(new Map()); setObservations(new Map()); return; }
     let disposed = false;
     let timer: number;
     const poll = async () => {
@@ -89,15 +94,28 @@ export function useCodex(options: Options) {
         const running = new Set(await codexRunning());
         if (disposed) return;
         const o = latest.current;
-        const next = new Map<string, "busy" | "idle">();
+        const next = new Map<string, AgentStatus>();
         const usage = new Map<string, CodexUsage>();
-        for (const pane of Object.values(o.workspace.panes)) {
+        const observed = new Map<string, AgentObservation>();
+        const livePanes = Object.values(o.workspace.panes).filter((pane) => {
           const session = o.registry.sessionOf(pane.id);
-          if (session === undefined || !running.has(session)) continue;
-          next.set(pane.id, activity.current.get(pane.id) ?? (Date.now() - o.registry.lastOutput(pane.id) < 2000 ? "busy" : "idle"));
+          return session !== undefined && (nativeAgentContext(o.registry.environmentOf(pane.id),o.registry.shellKindOf(pane.id))?running.has(session):known.current.has(pane.id)||activity.current.has(pane.id));
+        });
+        for (const pane of livePanes) {
+          const event = resolveObservation(activity.current.get(pane.id), o.registry.submissionRevision(pane.id), o.registry.lastOutput(pane.id), Date.now(), 2000);
+          next.set(pane.id, event.state); observed.set(pane.id, event);
+        }
+        setStatus(next); setObservations(observed);
+        const nativePanes=livePanes.filter(pane=>nativeAgentContext(o.registry.environmentOf(pane.id),o.registry.shellKindOf(pane.id)));
+        const ids = [...new Set(nativePanes.flatMap((pane) => known.current.has(pane.id) ? [known.current.get(pane.id)!] : []))];
+        // Usage failures cannot hide a successfully observed running process.
+        const batch = ids.length ? await codexUsageMany(ids).catch(() => []) : [];
+        if (disposed) return;
+        const bySession = new Map(batch.map((u) => [u.sessionId.toLowerCase(), u]));
+        for (const pane of nativePanes) {
           const id = known.current.get(pane.id);
           if (id) {
-            const u = await codexUsage(id);
+            const u = bySession.get(id.toLowerCase());
             if (disposed) return;
             if (u) {
               usage.set(pane.id, u);
@@ -113,12 +131,17 @@ export function useCodex(options: Options) {
           }
         }
         if (!disposed) {
-          setStatus(next); setUsages(usage);
+          setUsages(usage);
           // Forget ended process associations; never assign a new session by cwd.
           for (const id of known.current.keys()) if (!next.has(id)) { known.current.delete(id); activity.current.delete(id); }
           setReplies((current) => new Map([...current].filter(([id]) => next.has(id))));
         }
-      } catch { /* Retry transient process/transcript failures on the next poll. */ }
+      } catch {
+        if (!disposed) {
+          setStatus((current) => new Map([...current.keys()].map((id) => [id, "unknown"])));
+          setObservations((current) => new Map([...current].map(([id, value]) => [id, { ...value, state: "unknown", reason: "Process scan failed; last observation retained." }])));
+        }
+      }
       if (!disposed) timer = window.setTimeout(() => void poll(), 2500);
     };
     void poll();
@@ -126,26 +149,11 @@ export function useCodex(options: Options) {
   }, [enabled]);
 
   const resume = useCallback((session: CodexSession) => {
-    const o = latest.current;
-    const profile = sessionProfile(o.profiles, o.defaultProfile, session.cwd, session.profileId);
-    if (!profile) { o.notice("No shell can open this Codex session's folder."); return; }
-    // Only session IDs obtained from the UUID-validated backend enter a shell.
-    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(session.id)) return;
-    const id = o.newTab(profile.id, session.cwd ?? undefined);
-    if (id) o.startupInput.set(id, `codex --no-daemon resume ${session.id}\r`);
+    latest.current.resumeSession(session,"new");
   }, []);
   const resumeHere = useCallback((session: CodexSession) => {
-    const o = latest.current;
-    const paneId = activeTab(o.workspace)?.focusedPane;
-    const pane = paneId ? o.workspace.panes[paneId] : undefined;
-    const kind = o.profiles?.find((p) => p.id === pane?.profileId)?.kind ?? "other";
-    const command = resumeHereCommand(session.id, session.cwd, kind, "codex");
-    if (!paneId || !command || statusRef.current.has(paneId) || o.agentRunning(paneId) || o.registry.commandRunning(paneId) || o.registry.fullScreen(paneId)) {
-      o.notice("The current pane is busy or cannot open this session's folder, so Codex opened in a new tab.");
-      resume(session); return;
-    }
-    o.registry.focus(paneId); o.registry.typeSnippet(paneId, command, true);
-  }, [resume]);
+    latest.current.resumeSession(session,"current");
+  }, []);
   const byPane = useMemo(() => new Map([...status.keys()].flatMap((id) => known.current.has(id) ? [[id, known.current.get(id)!] as const] : [])), [status]);
   const plan = [...usages.values()].map(planSummary).find(Boolean);
   useEffect(() => { void setCodexPlanSummary(plan ?? null).catch(() => {}); }, [plan]);
@@ -153,18 +161,13 @@ export function useCodex(options: Options) {
     plan,
     sessions, onResume: resume, onResumeHere: resumeHere,
     onForget: (ids) => void forgetCodexSessions(ids).catch((e) => options.notice(String(e))),
-    onNewSession: (cwd) => {
-      const profile = sessionProfile(options.profiles, options.defaultProfile, cwd);
-      if (!profile) { options.notice("No shell can open this Codex session's folder."); return; }
-      const id = options.newTab(profile.id, cwd);
-      if (id) options.startupInput.set(id, "codex --no-daemon\r");
-    },
-    running: [...status].map(([paneId, state]) => ({ paneId, label: options.label(paneId), state, usage: usages.get(paneId) })),
+    onNewSession: options.newSession,
+    running: [...status].map(([paneId, state]) => ({ paneId, label: options.label(paneId), state, observation: observations.get(paneId), usage: usages.get(paneId) })),
     waiting: options.workspace.tabs.flatMap((t) => paneIds(t.root)).flatMap((paneId) => {
       const alert = options.attention.get(paneId);
       return alert?.kind?.startsWith("codex:") ? [{ paneId, label: options.label(paneId), message: alert.message, reply: replies.get(paneId) }] : [];
     }),
     onFocusPane: options.focusPane,
   };
-  return { sessions, status, usages, replies, byPane, menu, seen, resume, resumeHere };
+  return { sessions, status, observations, usages, replies, byPane, menu, seen, resume, resumeHere };
 }

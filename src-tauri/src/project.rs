@@ -3,15 +3,12 @@
 //! git status, and its own qterm settings (`.qterm.toml`: tab name, colour and icon,
 //! snippets and triggers for panes inside it).
 
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Snippet, Trigger, TAB_COLORS};
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The project settings file, in the project's folder or any folder above.
 pub const SETTINGS_FILE: &str = ".qterm.toml";
 /// More scripts than this are not something to pick from a list.
@@ -32,6 +29,10 @@ pub struct ProjectInfo {
 
 /// For a folder that exists; anything else (a WSL path, a removed folder) knows nothing.
 pub fn info(cwd: &Path) -> ProjectInfo {
+    let mut info=files_info(cwd);if cwd.is_dir(){info.git=git_status(cwd);}info
+}
+/// Files only: WSL callers use Linux Git, never Windows Git on a Linux worktree.
+pub fn files_info(cwd:&Path)->ProjectInfo {
     if !cwd.is_dir() {
         return ProjectInfo::default();
     }
@@ -40,7 +41,7 @@ pub fn info(cwd: &Path) -> ProjectInfo {
         Some(Err(e)) => (None, Some(e)),
         None => (None, None),
     };
-    ProjectInfo { git: git_status(cwd), tasks: tasks(cwd), settings, settings_error }
+    ProjectInfo { git: None, tasks: tasks(cwd), settings, settings_error }
 }
 
 // --- scripts ---------------------------------------------------------------------------
@@ -232,17 +233,13 @@ pub struct GitStatus {
 pub fn git_status(cwd: &Path) -> Option<GitStatus> {
     // No repository above: no git process at all.
     cwd.ancestors().find(|dir| dir.join(".git").exists())?;
-    let output = Command::new("git")
-        .args(["--no-optional-locks", "status", "--porcelain=v2", "--branch"])
-        .current_dir(cwd)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-    output.status.success().then(|| parse_status(&String::from_utf8_lossy(&output.stdout)))
+    let config = crate::repo_state::disabled_filters(cwd).ok()?;
+    let output = crate::repo_state::git_configured(cwd, &["status", "--porcelain=v2", "--branch", "--ignore-submodules=all"], None, false, &config, std::time::Duration::from_secs(10)).ok()?;
+    Some(parse_status(&String::from_utf8_lossy(&output)))
 }
 
 /// `git status --porcelain=v2 --branch` output, read.
-fn parse_status(text: &str) -> GitStatus {
+pub(crate) fn parse_status(text: &str) -> GitStatus {
     let mut status = GitStatus::default();
     let mut oid = "";
     for line in text.lines() {
@@ -272,6 +269,8 @@ fn parse_status(text: &str) -> GitStatus {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields, rename_all(deserialize = "snake_case", serialize = "camelCase"))]
 pub struct ProjectSettings {
+    /// Explicitly launched, versioned workflows; parsing never executes them.
+    pub workflows: Option<crate::recipes::Definitions>,
     /// Names tabs whose pane is in the project (a name you give a tab wins).
     pub name: Option<String>,
     pub tab_color: Option<String>,
@@ -314,6 +313,7 @@ pub(crate) fn parse_settings(text: &str) -> Result<ProjectSettings, String> {
         return Err("name is longer than 80 characters".into());
     }
     crate::config::check_triggers(&settings.triggers)?;
+    if let Some(workflows) = &settings.workflows { crate::recipes::validate(workflows)?; }
     Ok(settings)
 }
 

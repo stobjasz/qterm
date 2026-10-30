@@ -8,11 +8,12 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use crate::agent_health::{Health, Provider};
 use tauri_winrt_notification::{Sound, Toast};
 
 /// The argument that turns the exe into the hook.
@@ -80,6 +81,7 @@ enum InboxMessage {
     CodexSession(PaneSession),
     CodexReply(Reply),
     CodexActivity(CodexActivity),
+    Probe { provider: Provider, nonce: String },
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -99,6 +101,15 @@ struct HookInput {
     error: Option<String>,
     error_details: Option<String>,
     last_assistant_message: Option<String>,
+    probe_nonce: Option<String>,
+    tool_name: Option<String>,
+    tool_input: Option<serde_json::Value>,
+}
+
+fn probe(hook: &HookInput, provider: Provider) -> Option<InboxMessage> {
+    if hook.hook_event_name.as_deref() != Some("QtermDeliveryProbe") { return None; }
+    let nonce = hook.probe_nonce.as_ref().filter(|n| !n.is_empty() && n.len() <= 128 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))?;
+    Some(InboxMessage::Probe { provider, nonce: nonce.clone() })
 }
 
 /// Hook mode: never fails loudly, since a failing hook would bother Claude Code.
@@ -122,12 +133,14 @@ fn run_provider_hook(codex: bool) {
     let message = if codex { message_from_codex_hook(&pane_id, &input) } else { message_from_hook(&pane_id, &input) };
     let Some(message) = message else { return };
     if let Some(inbox) = hook_inbox() {
-        let _ = deliver(&inbox, &message);
+        let cwd = serde_json::from_str::<serde_json::Value>(&input).ok().and_then(|v| v.get("cwd").and_then(|s| s.as_str()).map(|s| s.chars().take(4096).collect::<String>()));
+        let _ = deliver_context(&inbox, &message, cwd.as_deref());
     }
 }
 
 fn message_from_codex_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
     let hook: HookInput = serde_json::from_str(input).ok()?;
+    if hook.hook_event_name.as_deref() == Some("QtermDeliveryProbe") { return probe(&hook, Provider::Codex); }
     let session_id = hook.session_id.filter(|id| crate::codex::valid_id(id));
     match hook.hook_event_name.as_deref()? {
         "SessionStart" => Some(InboxMessage::CodexSession(PaneSession {
@@ -136,10 +149,15 @@ fn message_from_codex_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
         "UserPromptSubmit" | "PostToolUse" | "Interrupt" => Some(InboxMessage::CodexActivity(CodexActivity {
             pane_id: pane_id.into(), session_id, busy: hook.hook_event_name.as_deref() != Some("Interrupt"),
         })),
-        "PermissionRequest" => Some(InboxMessage::CodexAlert(Alert {
-            pane_id: pane_id.into(), session_id, title: Some("Codex needs permission".into()),
-            message: "Codex is waiting for you to review a permission request.".into(), kind: Some("codex:permission".into()),
-        })),
+        "PermissionRequest" => {
+            let tool = hook.tool_name.as_deref().unwrap_or("a tool");
+            let mut message = format!("Codex requested an approval check for {tool}. Hooks or automatic review may handle it; a question for you has not been confirmed.");
+            for (field, label) in [("description", "Reason"), ("command", "Command")] {
+                if let Some(text) = hook.tool_input.as_ref().and_then(|v| v.get(field)).and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) { message.push_str(&format!("\n{label}: {text}")); }
+            }
+            Some(InboxMessage::CodexAlert(Alert { pane_id: pane_id.into(), session_id, title: Some("Codex approval check".into()),
+                message: message.chars().take(MAX_REPLY).collect(), kind: Some("codex:approval".into()) }))
+        }
         "Stop" => Some(InboxMessage::CodexReply(Reply {
             pane_id: pane_id.into(), session_id,
             message: hook.last_assistant_message.unwrap_or_default().chars().take(MAX_REPLY).collect(),
@@ -150,6 +168,7 @@ fn message_from_codex_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
 
 fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
     let hook: HookInput = serde_json::from_str(input).ok()?;
+    if hook.hook_event_name.as_deref() == Some("QtermDeliveryProbe") { return probe(&hook, Provider::Claude); }
     if hook.hook_event_name.as_deref() == Some("SessionStart") {
         return Some(InboxMessage::Session(PaneSession {
             pane_id: pane_id.to_string(),
@@ -158,7 +177,7 @@ fn message_from_hook(pane_id: &str, input: &str) -> Option<InboxMessage> {
         }));
     }
     if hook.hook_event_name.as_deref() == Some("Stop") {
-        let message = hook.last_assistant_message.filter(|m| !m.trim().is_empty())?;
+        let message = hook.last_assistant_message.filter(|m| !m.trim().is_empty()).unwrap_or_default();
         let message = match message.char_indices().nth(MAX_REPLY) {
             Some((cut, _)) => format!("{}…", &message[..cut]),
             None => message,
@@ -224,10 +243,16 @@ pub fn inbox_dir(app: &AppHandle) -> Option<PathBuf> {
 
 /// Written under a temporary name and renamed, so the watcher never reads half a file.
 fn deliver(inbox: &Path, message: &InboxMessage) -> std::io::Result<()> {
+    deliver_context(inbox, message, None)
+}
+
+fn deliver_context(inbox: &Path, message: &InboxMessage, cwd: Option<&str>) -> std::io::Result<()> {
     std::fs::create_dir_all(inbox)?;
     let name = format!("{}-{}", std::process::id(), uuid_like());
     let partial = inbox.join(format!("{name}.partial"));
-    std::fs::write(&partial, serde_json::to_vec(message)?)?;
+    let mut value = serde_json::to_value(message)?;
+    if let Some(cwd) = cwd { value["qtermCwd"] = cwd.into(); }
+    std::fs::write(&partial, serde_json::to_vec(&value)?)?;
     std::fs::rename(partial, inbox.join(format!("{name}.json")))
 }
 
@@ -241,34 +266,43 @@ fn uuid_like() -> String {
 
 /// Reads, deletes and returns the messages waiting in the inbox, oldest first.
 /// A bare alert is what a qterm from before SessionStart wrote.
-fn take_inbox(inbox: &Path) -> Vec<InboxMessage> {
+struct Delivery { message: InboxMessage, cwd: Option<String> }
+
+fn take_inbox(inbox: &Path) -> Vec<Delivery> {
     let Ok(entries) = std::fs::read_dir(inbox) else { return Vec::new() };
     let mut files: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
         .collect();
-    files.sort();
+    // Hook processes have different/reused PIDs. Their file names are not an
+    // event order: a Stop must not be delivered before an earlier activity event.
+    files.sort_by_cached_key(|path| (
+        path.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH),
+        path.file_name().map(|name| name.to_os_string()),
+    ));
     files
         .into_iter()
         .filter_map(|file| {
             let bytes = std::fs::read(&file).ok();
             let _ = std::fs::remove_file(&file);
             let bytes = bytes?;
+            let cwd = serde_json::from_slice::<serde_json::Value>(&bytes).ok().and_then(|v| v.get("qtermCwd").and_then(|s| s.as_str()).map(str::to_owned));
             serde_json::from_slice(&bytes)
                 .ok()
                 .or_else(|| serde_json::from_slice(&bytes).ok().map(InboxMessage::Alert))
+                .map(|message| Delivery { message, cwd })
         })
         .collect()
 }
 
 /// Watches the inbox and emits each alert to the UI as `claude-attention`, each
 /// session start as `claude-session-start`, and each finished turn as `claude-reply`.
-/// Alerts left over from before this start are stale and dropped.
+/// Recover leftover deliveries into durable history without replaying live status.
 pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     let inbox = inbox_dir(&app).ok_or_else(|| notify::Error::generic("no local data folder"))?;
     std::fs::create_dir_all(&inbox).map_err(notify::Error::io)?;
-    take_inbox(&inbox);
+    for Delivery { message, cwd } in take_inbox(&inbox) { record_attention(&app, &message, cwd.as_deref()); }
 
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let mut watcher = notify::recommended_watcher(move |_event: notify::Result<notify::Event>| {
@@ -278,7 +312,20 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     std::thread::spawn(move || {
         while rx.recv().is_ok() {
             while rx.recv_timeout(Duration::from_millis(30)).is_ok() {}
-            for message in take_inbox(&inbox) {
+            for Delivery { message, cwd } in take_inbox(&inbox) {
+                record_attention(&app, &message, cwd.as_deref());
+                let event = match &message {
+                    InboxMessage::Alert(a) => Some((Provider::Claude, "attention", a.pane_id.as_str(), a.session_id.as_deref())),
+                    InboxMessage::Session(s) => Some((Provider::Claude, "session-start", s.pane_id.as_str(), Some(s.session_id.as_str()))),
+                    InboxMessage::Usage(u) => Some((Provider::Claude, "statusline", u.pane_id.as_str(), u.session_id.as_deref())),
+                    InboxMessage::Reply(r) => Some((Provider::Claude, "reply", r.pane_id.as_str(), r.session_id.as_deref())),
+                    InboxMessage::CodexAlert(a) => Some((Provider::Codex, "attention", a.pane_id.as_str(), a.session_id.as_deref())),
+                    InboxMessage::CodexSession(s) => Some((Provider::Codex, "session-start", s.pane_id.as_str(), Some(s.session_id.as_str()))),
+                    InboxMessage::CodexReply(r) => Some((Provider::Codex, "reply", r.pane_id.as_str(), r.session_id.as_deref())),
+                    InboxMessage::CodexActivity(a) => Some((Provider::Codex, "activity", a.pane_id.as_str(), a.session_id.as_deref())),
+                    InboxMessage::Probe { .. } => None,
+                };
+                if let Some((provider, event, pane, session)) = event { app.state::<Health>().record(provider, event, pane, session); }
                 let _ = match message {
                     InboxMessage::Alert(alert) => app.emit("claude-attention", alert),
                     InboxMessage::Session(session) => app.emit("claude-session-start", session),
@@ -288,6 +335,7 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
                     InboxMessage::CodexSession(session) => app.emit("codex-session-start", session),
                     InboxMessage::CodexReply(reply) => app.emit("codex-reply", reply),
                     InboxMessage::CodexActivity(activity) => app.emit("codex-activity", activity),
+                    InboxMessage::Probe { provider, nonce } => { app.state::<Health>().acknowledge(provider, &nonce); Ok(()) }
                 };
             }
         }
@@ -295,8 +343,32 @@ pub fn watch_inbox(app: AppHandle) -> notify::Result<RecommendedWatcher> {
     Ok(watcher)
 }
 
+fn record_attention(app: &AppHandle, message: &InboxMessage, cwd: Option<&str>) {
+    use crate::agent_inbox::{Kind, Store};
+    let store = app.state::<Store>();
+    let snapshot = match message {
+        InboxMessage::Alert(a) | InboxMessage::CodexAlert(a) => {
+            let provider = if matches!(message, InboxMessage::CodexAlert(_)) { Provider::Codex } else { Provider::Claude };
+            let kind = if a.kind.as_deref().is_some_and(|k| k.starts_with("stop_failure:")) { Kind::Failure }
+                else if provider == Provider::Codex { Kind::Approval }
+                else if a.kind.as_deref() == Some("permission_prompt") { Kind::Permission } else { Kind::Input };
+            if kind == Kind::Failure { store.continued(provider, &a.pane_id, a.session_id.as_deref()); }
+            Some(store.record(provider, &a.pane_id, a.session_id.as_deref(), cwd, kind, a.title.as_deref().unwrap_or("Agent needs attention"), &a.message))
+        }
+        InboxMessage::Reply(r) | InboxMessage::CodexReply(r) => {
+            let provider = if matches!(message, InboxMessage::CodexReply(_)) { Provider::Codex } else { Provider::Claude };
+            store.continued(provider, &r.pane_id, r.session_id.as_deref());
+            Some(store.record(provider, &r.pane_id, r.session_id.as_deref(), cwd, Kind::Completed, "Turn completed", if r.message.trim().is_empty() { "The agent finished its turn without a reply." } else { &r.message }))
+        }
+        InboxMessage::CodexActivity(a) if a.busy => store.continued(Provider::Codex, &a.pane_id, a.session_id.as_deref()),
+        _ => None,
+    };
+    if let Some(snapshot) = snapshot { let _ = app.emit("agent-inbox-changed", snapshot); }
+}
+
 /// A Windows notification; clicking it brings the console up on that pane.
 pub fn show_notification(app: &AppHandle, alert: &Alert) -> Result<(), String> {
+    if let Some(result) = record_test_notification(app, serde_json::json!({ "kind": "pane", "alert": alert })) { return result; }
     let app_id = registered_app_id(app);
     let pane = alert.pane_id.clone();
     let app = app.clone();
@@ -314,6 +386,7 @@ pub fn show_notification(app: &AppHandle, alert: &Alert) -> Result<(), String> {
 
 /// A notification that isn't about a pane (plan limits); clicking it shows the console.
 pub fn show_plain_notification(app: &AppHandle, title: &str, message: &str) -> Result<(), String> {
+    if let Some(result) = record_test_notification(app, serde_json::json!({ "kind": "plain", "title": title, "message": message })) { return result; }
     let app_id = registered_app_id(app);
     let app = app.clone();
     Toast::new(&app_id)
@@ -333,7 +406,7 @@ pub fn show_plain_notification(app: &AppHandle, title: &str, message: &str) -> R
 fn registered_app_id(app: &AppHandle) -> String {
     static REGISTERED: OnceLock<bool> = OnceLock::new();
     if *REGISTERED.get_or_init(|| register_app_id(app).is_ok()) {
-        APP_ID.to_string()
+        app.config().identifier.clone()
     } else {
         Toast::POWERSHELL_APP_ID.to_string()
     }
@@ -348,22 +421,53 @@ fn register_app_id(app: &AppHandle) -> Result<(), String> {
         std::fs::write(&icon, png).map_err(|e| e.to_string())?;
     }
     let key = windows_registry::CURRENT_USER
-        .create(format!(r"Software\Classes\AppUserModelId\{APP_ID}"))
+        .create(format!(r"Software\Classes\AppUserModelId\{}", app.config().identifier))
         .map_err(|e| e.to_string())?;
     key.set_string("DisplayName", "qterm").map_err(|e| e.to_string())?;
     key.set_string("IconUri", icon.to_string_lossy()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
+/// Desktop scenarios use real hooks and notification IPC, but must never send
+/// synthetic questions to the user's desktop or register the production app ID.
+fn record_test_notification(app: &AppHandle, mut payload: serde_json::Value) -> Option<Result<(), String>> {
+    if app.config().identifier != "dev.qterm.e2e" { return None; }
+    Some((|| {
+        use std::io::Write;
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap();
+        let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        payload["suppressed"] = true.into();
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("notification-attempts.jsonl")).map_err(|e| e.to_string())?;
+        writeln!(file, "{payload}").map_err(|e| e.to_string())
+    })())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inbox_orders_events_by_write_time_instead_of_hook_process_id() {
+        let inbox = std::env::temp_dir().join(format!("qterm-inbox-order-{}", std::process::id()));
+        std::fs::create_dir_all(&inbox).unwrap();
+        let base = SystemTime::now() - Duration::from_secs(100);
+        for (name, message, offset) in [("900-first.json", "first", 1), ("100-second.json", "second", 2)] {
+            let path = inbox.join(name);
+            std::fs::write(&path, serde_json::json!({ "paneId": "pane", "message": message }).to_string()).unwrap();
+            std::fs::OpenOptions::new().write(true).open(path).unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(base + Duration::from_secs(offset))).unwrap();
+        }
+        let messages: Vec<_> = take_inbox(&inbox).into_iter().map(|m| match m.message { InboxMessage::Alert(a) => a.message, _ => panic!("unexpected message") }).collect();
+        assert_eq!(messages, ["first", "second"]);
+        std::fs::remove_dir(inbox).unwrap();
+    }
     #[test]
     fn codex_events_use_separate_provider_messages() {
         let id = "01a1690c-c7b7-7e80-9864-e6971b91db16";
         let input = |event: &str| serde_json::json!({"hook_event_name":event,"session_id":id,"last_assistant_message":"Done."}).to_string();
         assert!(matches!(message_from_codex_hook("p", &input("SessionStart")), Some(InboxMessage::CodexSession(_))));
         assert!(matches!(message_from_codex_hook("p", &input("Stop")), Some(InboxMessage::CodexReply(Reply { message, .. })) if message == "Done."));
-        assert!(matches!(message_from_codex_hook("p", &input("PermissionRequest")), Some(InboxMessage::CodexAlert(Alert { kind: Some(kind), .. })) if kind == "codex:permission"));
+        assert!(matches!(message_from_codex_hook("p", &input("PermissionRequest")), Some(InboxMessage::CodexAlert(Alert { kind: Some(kind), .. })) if kind == "codex:approval"));
         assert!(matches!(message_from_codex_hook("p", &input("UserPromptSubmit")), Some(InboxMessage::CodexActivity(CodexActivity { busy: true, .. }))));
         assert!(matches!(message_from_codex_hook("p", &input("Interrupt")), Some(InboxMessage::CodexActivity(CodexActivity { busy: false, .. }))));
         assert!(message_from_codex_hook("p", &input("SubagentStop")).is_none());
@@ -396,9 +500,9 @@ mod tests {
             message_from_hook("pane-3", input),
             Some(InboxMessage::Reply(Reply { pane_id: "pane-3".into(), session_id: Some("s1".into()), message: "Done: the tests pass.".into() }))
         );
-        // Nothing said (a turn of tool calls only): nothing to show, and never an alert.
-        assert!(message_from_hook("p", r#"{"hook_event_name":"Stop","last_assistant_message":"  "}"#).is_none());
-        assert!(message_from_hook("p", r#"{"hook_event_name":"Stop"}"#).is_none());
+        // A turn of tool calls still completed, even without a reply to display.
+        assert!(matches!(message_from_hook("p", r#"{"hook_event_name":"Stop","last_assistant_message":"  "}"#), Some(InboxMessage::Reply(Reply { message, .. })) if message.is_empty()));
+        assert!(matches!(message_from_hook("p", r#"{"hook_event_name":"Stop"}"#), Some(InboxMessage::Reply(Reply { message, .. })) if message.is_empty()));
         let long = format!(r#"{{"hook_event_name":"Stop","last_assistant_message":"{}"}}"#, "é".repeat(MAX_REPLY + 10));
         let Some(InboxMessage::Reply(reply)) = message_from_hook("p", &long) else { panic!("a reply") };
         assert_eq!(reply.message.chars().count(), MAX_REPLY + 1, "cut, with an ellipsis");
@@ -456,7 +560,7 @@ mod tests {
 
         let taken: Vec<String> = take_inbox(&inbox)
             .into_iter()
-            .map(|m| match m {
+            .map(|m| match m.message {
                 InboxMessage::Alert(a) => a.message,
                 InboxMessage::Session(s) => s.session_id,
                 InboxMessage::Usage(u) => u.pane_id,

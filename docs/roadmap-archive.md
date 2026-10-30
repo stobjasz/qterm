@@ -6,6 +6,10 @@ delivered. Open items are in [roadmap.md](roadmap.md); the design notes for each
 
 ## Round 1 (proposed 2026-10-11)
 
+The [29 October developer/agent implementation plan](developer-agent-plan.md)
+records subsequent verification and current scope. It supersedes older shorthand
+about inferring agent state from quiet output.
+
 ### Claude Code
 
 | # | Feature | Status |
@@ -31,7 +35,7 @@ delivered. Open items are in [roadmap.md](roadmap.md); the design notes for each
 | # | Feature | Status |
 |---|---|---|
 | 11 | **Automated E2E suite in CI**: turn the Playwright-over-CDP checks used during development into committed tests that run on GitHub Actions (Windows runner). | ✅ `e2e/` (5 risk-tied specs) + `.github/workflows/ci.yml`, see foundation.md §23 |
-| 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ already guaranteed by ConPTY (verified); locked in by a regression test instead of a Job Object, see foundation.md §19 |
+| 12 | **Job Objects**: shells are killed if qterm crashes (planned in M6). | ✅ Unreleased correction, 2026-10-29: a kill-on-close job now owns all descendants after testing disproved the ConPTY-only guarantee; see foundation.md §19. |
 | 13 | **Installer and auto-update** (NSIS + Tauri updater, M6). | ✅ Per-user NSIS installer and portable exe, published by `release.yml` on a version tag with a signed `latest.json` on GitHub Releases. Checks on start and daily (switchable); banner, tray and Settings offer one-click update; the portable exe replaces itself. Tested locally end to end (update and a tampered download). v0.2.0, the first public release, published 2026-10-12. |
 
 Also done outside the list: file drag and drop from Explorer, with paths quoted per shell
@@ -189,4 +193,18 @@ Found by driving the app on a 5120x720 console, outside the roadmap:
 | # | Feature | Effort | Status |
 |---|---|---|---|
 | 78 | **Different shells in one tab**: split with a chosen shell (▾ menu, palette, a key with a picker), the folder carried over between Windows, Git Bash and WSL; switch a pane to another shell; panes name their shell when a tab mixes them. | S–M | ✅ Ctrl+Alt+Shift+= / -, ▾ split buttons, palette; Switch shell… in the pane menu; labels in mixed tabs; E2E R35 |
+
+## Developer and coding-agent review (2026-10-29)
+
+| # | Feature | Status |
+|---|---|---|
+| 16 | **Ask an agent about selected output or an error** | ✅ reviewed Claude/Codex handoff in its original folder, using a bounded brief file; new or compatible idle shell. Running-session automatic follow-ups remain in the active plan. |
+| 40 | **New agent session in a Git worktree** | ✅ explicit base/branch/directory review, retained task metadata, separate named shell or agent tab and associated command results; see [worktree tasks](worktree-tasks.md). |
+| 68 | **Problems list** | ✅ diagnostics scoped to retained command runs, original-folder editor links and parsers for tsc, Rust, ESLint, Go, pytest and .NET; see [formats and boundaries](diagnostic-formats.md). |
+
+The same implementation plan adds recoverable persistence, integration health,
+accurate status, an attention inbox, repository-aware verification records,
+[session-granted local agent tasks](local-agent-interface.md) and explicitly
+launched [workflow recipes](workflow-recipes.md). Validation evidence and remaining
+scope are maintained in the [implementation checkpoints](developer-agent-plan.md).
 

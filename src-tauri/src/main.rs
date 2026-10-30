@@ -5,6 +5,9 @@ fn main() {
     // Claude Code's Notification hook runs the exe in this mode: hand the alert to
     // the running qterm and exit, without ever starting a window.
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--agent-client") {
+        return qterm_lib::run_agent_client(&args[2..]);
+    }
     if args.get(1).map(String::as_str) == Some(qterm_lib::HOOK_ARG) {
         return qterm_lib::run_claude_hook();
     }

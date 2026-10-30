@@ -153,8 +153,9 @@ pub async fn claude_session_seen(
     id: String,
     profile_id: String,
     pane_cwd: Option<String>,
+    environment:Option<String>,
 ) -> Result<Vec<ClaudeSession>, String> {
-    let sessions = store.remember(&id, &profile_id, pane_cwd)?;
+    let sessions = store.remember_scoped(&id, &profile_id, pane_cwd,environment)?;
     let _ = app.emit("claude-sessions-changed", &sessions);
     Ok(sessions)
 }
@@ -163,9 +164,10 @@ pub async fn claude_session_seen(
 pub fn forget_claude_sessions(
     app: AppHandle,
     store: State<'_, ClaudeStore>,
-    ids: Vec<String>,
+    ids: Option<Vec<String>>,
+    references:Option<Vec<crate::session_library::Reference>>,
 ) -> Result<Vec<ClaudeSession>, String> {
-    let sessions = store.forget(&ids)?;
+    let sessions = match (ids,references){(Some(ids),None)=>store.forget(&ids)?,(None,Some(references))=>store.forget_scoped(&references)?,_=>return Err("Supply scoped references or legacy native IDs, not both".into())};
     let _ = app.emit("claude-sessions-changed", &sessions);
     Ok(sessions)
 }
@@ -221,8 +223,13 @@ pub fn save_console_height(config: State<'_, ConfigState>, share: f64) -> Result
 
 /// Which of these terminal file references exist (resolved against `cwd`).
 #[tauri::command]
-pub async fn resolve_files(paths: Vec<String>, cwd: Option<String>) -> Vec<Option<String>> {
-    crate::editor::resolve_files(&paths, cwd.as_deref())
+pub async fn resolve_files(app:AppHandle,paths: Vec<String>, cwd: Option<String>,profile_id:Option<String>,environment:Option<String>) -> Result<Vec<Option<String>>,String> {
+    tauri::async_runtime::spawn_blocking(move||{
+        if paths.len()>256{return Err("At most 256 file candidates are allowed".into());}
+        let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+        if let Some(distro)=crate::wsl::context(profile_id.as_deref(),environment.as_deref(),&profiles)?{crate::wsl::resolve(&distro,cwd.as_deref().ok_or("Linux folder is unknown")?,&paths)}
+        else{if cwd.as_deref().is_some_and(|s|s.starts_with('/')&&!s.starts_with("//")){return Err("A Linux folder requires an explicit WSL environment".into());}Ok(crate::editor::resolve_files(&paths,cwd.as_deref()))}
+    }).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
@@ -355,10 +362,12 @@ pub fn delete_layout(config: State<'_, ConfigState>, name: String) -> Result<(),
 
 /// Every Claude Code session on this machine (the ✳ menu's "All" view).
 #[tauri::command]
-pub async fn list_all_claude_sessions(index: State<'_, crate::claude::TranscriptIndex>) -> Result<Vec<crate::claude::TranscriptSummary>, String> {
-    let home = crate::claude::claude_home().ok_or("no home folder for Claude Code")?;
-    Ok(index.scan(&home))
-}
+pub async fn list_all_claude_sessions(app:AppHandle) -> Result<Vec<crate::claude::TranscriptSummary>, String> {tauri::async_runtime::spawn_blocking(move||{
+    let config=app.state::<ConfigState>();
+    if !config.get().claude_sessions{return Err("Claude session history is disabled".into());}
+    let home = absolute_source_home(crate::claude::claude_home()).ok_or("no home folder for Claude Code")?;
+    let sessions=app.state::<crate::claude::TranscriptIndex>().scan(&home);if !config.get().claude_sessions{return Err("Claude session history was disabled while scanning".into());}Ok(sessions)
+}).await.map_err(|error|error.to_string())?}
 
 /// Sessions with Claude Code running inside them (per-tab status).
 /// What still runs in these panes' shells, so closing them can ask first.
@@ -397,9 +406,21 @@ pub async fn end_port_owner(port: u16, pid: u32) -> Result<Vec<String>, String> 
 
 /// The project a pane's folder is in: git status, scripts and its `.qterm.toml`.
 #[tauri::command]
-pub async fn project_info(cwd: String) -> crate::project::ProjectInfo {
-    crate::project::info(std::path::Path::new(&cwd))
+pub async fn project_info(app:AppHandle,cwd: String,profile_id:Option<String>,environment:Option<String>) -> crate::project::ProjectInfo {
+    tauri::async_runtime::spawn_blocking(move||{
+        let result=(||{let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());if let Some(distro)=crate::wsl::context(profile_id.as_deref(),environment.as_deref(),&profiles)?{crate::wsl::project(&distro,&cwd)}else{if cwd.starts_with('/')&&!cwd.starts_with("//"){return Err("A Linux folder requires an explicit WSL environment".into());}Ok(crate::project::info(std::path::Path::new(&cwd)))}})();
+        result.unwrap_or_else(|e|crate::project::ProjectInfo{settings_error:Some(format!("Project discovery: {e}")),..Default::default()})
+    }).await.unwrap_or_else(|e|crate::project::ProjectInfo{settings_error:Some(e.to_string()),..Default::default()})
 }
+
+#[tauri::command]
+pub async fn wsl_distributions()->Result<Vec<String>,String>{tauri::async_runtime::spawn_blocking(crate::wsl::distributions).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn wsl_translate_paths(distribution:String,paths:Vec<String>,to_linux:bool)->Result<Vec<String>,String>{tauri::async_runtime::spawn_blocking(move||crate::wsl::translate(&distribution,&paths,to_linux)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn create_wsl_agent_brief(distribution:String,text:String)->Result<crate::wsl::Brief,String>{tauri::async_runtime::spawn_blocking(move||crate::wsl::brief(&distribution,&text)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn validate_wsl_folder(distribution:String,cwd:String)->Result<String,String>{tauri::async_runtime::spawn_blocking(move||crate::wsl::call(&distribution,serde_json::json!({"method":"folder","cwd":cwd}))?["cwd"].as_str().map(str::to_owned).ok_or_else(||"WSL returned no validated folder".into())).await.map_err(|e|e.to_string())?}
 
 /// The image on the clipboard, saved as a PNG in the temp folder; None without one.
 /// Async: reading the clipboard must stay off the main thread.
@@ -571,21 +592,288 @@ pub fn list_codex_sessions(store: State<'_, crate::codex::Store>) -> Vec<ClaudeS
 
 #[tauri::command]
 pub async fn codex_session_seen(app: AppHandle, store: State<'_, crate::codex::Store>, index: State<'_, crate::codex::Index>,
-    id: String, profile_id: String, pane_cwd: Option<String>) -> Result<Vec<ClaudeSession>, String> {
-    let sessions = store.remember(&index, &id, &profile_id, pane_cwd)?;
+    id: String, profile_id: String, pane_cwd: Option<String>,environment:Option<String>) -> Result<Vec<ClaudeSession>, String> {
+    let sessions = store.remember_scoped(&index, &id, &profile_id, pane_cwd,environment)?;
     let _ = app.emit("codex-sessions-changed", &sessions);
     Ok(sessions)
 }
 
 #[tauri::command]
-pub fn forget_codex_sessions(app: AppHandle, store: State<'_, crate::codex::Store>, ids: Vec<String>) -> Result<Vec<ClaudeSession>, String> {
-    let sessions = store.forget(&ids)?;
+pub fn forget_codex_sessions(app: AppHandle, store: State<'_, crate::codex::Store>, ids: Option<Vec<String>>,references:Option<Vec<crate::session_library::Reference>>) -> Result<Vec<ClaudeSession>, String> {
+    let sessions = match (ids,references){(Some(ids),None)=>store.forget(&ids)?,(None,Some(references))=>store.forget_scoped(&references)?,_=>return Err("Supply scoped references or legacy native IDs, not both".into())};
     let _ = app.emit("codex-sessions-changed", &sessions); Ok(sessions)
 }
 
 #[tauri::command]
 pub async fn list_all_codex_sessions(index: State<'_, crate::codex::Index>) -> Result<Vec<crate::claude::TranscriptSummary>, String> {
     Ok(crate::codex::home().map(|h| index.scan(&h)).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn scan_codex_sessions(app: AppHandle) -> Result<crate::codex::ScanResult, String> {
+    if !app.state::<ConfigState>().get().codex_sessions{return Err("Codex session history is disabled".into());}
+    let home = absolute_source_home(crate::codex::home()).ok_or("No Codex home could be resolved from CODEX_HOME or USERPROFILE")?;
+    tauri::async_runtime::spawn_blocking(move || {let result=app.state::<crate::codex::Index>().scan_with_diagnostics(&home);if !app.state::<ConfigState>().get().codex_sessions{return Err("Codex session history was disabled while scanning".to_string());}Ok(result)})
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub fn agent_integration_health(app: AppHandle, provider: crate::agent_health::Provider) -> Result<crate::agent_health::Snapshot, String> {
+    app.state::<crate::agent_health::Health>().snapshot(&app, provider)
+}
+
+#[tauri::command]
+pub async fn test_agent_delivery(app: AppHandle, provider: crate::agent_health::Provider) -> Result<crate::agent_health::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::agent_health::test_delivery(&app, provider)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn create_agent_brief(app: AppHandle, text: String) -> Result<crate::agent_brief::Brief, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("agent-briefs");
+    tauri::async_runtime::spawn_blocking(move || crate::agent_brief::create(&dir, &text)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn agent_inbox_snapshot(app: AppHandle) -> crate::agent_inbox::Snapshot {
+    app.state::<crate::agent_inbox::Store>().snapshot()
+}
+
+#[tauri::command]
+pub fn command_runs_snapshot(app: AppHandle) -> crate::run_records::Snapshot { app.state::<crate::run_records::Store>().snapshot() }
+
+#[tauri::command]
+pub async fn record_command_run(app: AppHandle, mut run: crate::run_records::Run, ticket: Option<String>) -> Result<crate::run_records::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let access=app.state::<crate::agent_access::Access>();
+        let task_ticket=access.queue.record(&mut run)?;
+        let recipes=app.state::<crate::recipes::Store>();
+        let recipe_ticket=recipes.attest(&mut run)?;
+        let id=run.id.clone(); let exit=run.exit_code; let finished=run.finished_at;
+        let snapshot = app.state::<crate::run_records::Store>().append(run, recipe_ticket.as_deref().or(task_ticket.as_deref()).or(ticket.as_deref()))?;
+        access.completed(&id,exit,finished);
+        recipes.completed(&id,exit,finished);
+        let _=app.emit("recipe-runs-changed",recipes.snapshot());
+        let _=app.emit("agent-access-changed",access.snapshot());
+        let _ = app.emit("command-runs-changed", &snapshot); Ok(snapshot)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn command_runs_action(app: AppHandle, action: crate::run_records::Action) -> Result<crate::run_records::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = app.state::<crate::run_records::Store>().act(action)?;
+        let _ = app.emit("command-runs-changed", &snapshot); Ok(snapshot)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn prepare_verification(app: AppHandle, cwd: String, command: String) -> Result<crate::run_records::Prepared, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<crate::run_records::Store>().prepare(&cwd, &command)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_verification(app: AppHandle, ticket: String) { app.state::<crate::run_records::Store>().cancel(&ticket); }
+
+#[tauri::command]
+pub async fn refresh_verification(app: AppHandle) -> Result<crate::run_records::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = app.state::<crate::run_records::Store>().refresh();
+        let _ = app.emit("command-runs-changed", &snapshot); snapshot
+    }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn worktree_tasks_snapshot(app: AppHandle) -> Result<crate::worktree_tasks::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<crate::worktree_tasks::Store>().snapshot()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn agent_access_snapshot(app: AppHandle) -> crate::agent_access::Snapshot { app.state::<crate::agent_access::Access>().snapshot() }
+
+fn absolute_source_home(home:Option<std::path::PathBuf>)->Option<std::path::PathBuf>{home.and_then(|home|{let absolute=if home.is_absolute(){home}else{std::env::current_dir().ok()?.join(home)};Some(absolute.canonicalize().unwrap_or(absolute))})}
+fn library_snapshot(app:&AppHandle,refresh:bool)->crate::session_library::Snapshot {
+    use crate::session_library::{Enabled,Provider,Scan};let config=app.state::<ConfigState>();let mut scans=vec![];
+    if refresh && config.get().claude_sessions {
+        let home=absolute_source_home(crate::claude::claude_home());let (sessions,errors)=home.as_deref().map(|home|app.state::<crate::claude::TranscriptIndex>().scan_with_diagnostics(home)).unwrap_or((vec![],vec!["No Claude home is available".into()]));
+        scans.push(Scan{provider:Provider::Claude,home:home.map(|p|crate::repo_state::display(&p)),sessions,errors});
+    }
+    if refresh && config.get().codex_sessions {
+        let home=absolute_source_home(crate::codex::home());let (sessions,errors)=home.as_deref().map(|home|{
+            let scan=app.state::<crate::codex::Index>().scan_with_diagnostics(home);let mut errors=scan.diagnostics.errors;
+            if scan.diagnostics.missing_sessions_folder{errors.push("Codex sessions folder was not found".into());}
+            if scan.diagnostics.unrecognized_files>0{errors.push(format!("{} unrecognized Codex files",scan.diagnostics.unrecognized_files));}
+            (scan.sessions,errors)
+        }).unwrap_or((vec![],vec!["No Codex home is available".into()]));
+        scans.push(Scan{provider:Provider::Codex,home:home.map(|p|crate::repo_state::display(&p)),sessions,errors});
+    }
+    let current=config.get();let enabled=Enabled{claude:current.claude_sessions,codex:current.codex_sessions};
+    let remembered=vec![(Provider::Claude,if enabled.claude{app.state::<ClaudeStore>().list()}else{vec![]}),(Provider::Codex,if enabled.codex{app.state::<crate::codex::Store>().list()}else{vec![]})];
+    let mut scans:Vec<_>=scans.into_iter().map(|scan|crate::session_library::ScopedScan{environment:"native".into(),signature:String::new(),scan}).collect();
+    if refresh{scans.extend(app.state::<crate::wsl_sources::State>().scan(&current));}
+    let current=config.get();let enabled=Enabled{claude:current.claude_sessions,codex:current.codex_sessions};
+    app.state::<crate::wsl_sources::State>().retain(&current);
+    let mut snapshot=app.state::<crate::session_library::Store>().catalog_sources(&remembered,enabled,crate::wsl_sources::configs(&current),scans);snapshot.source_revision=serde_json::to_string(&current.wsl_sources).unwrap();snapshot
+}
+#[tauri::command]
+pub async fn load_session_library(app:AppHandle,refresh:bool)->Result<crate::session_library::Snapshot,String>{tauri::async_runtime::spawn_blocking(move||library_snapshot(&app,refresh)).await.map_err(|e|e.to_string())}
+#[tauri::command]
+pub async fn resolve_library_session(app:AppHandle,key:String,source_version:Option<String>,require_folder:Option<bool>)->Result<crate::session_library::Entry,String>{tauri::async_runtime::spawn_blocking(move||{
+    let entry=library_snapshot(&app,true).entries.into_iter().find(|e|e.key==key&&e.available).ok_or("Session is not available in the enabled transcript sources")?;
+    if source_version.is_none()||source_version!=entry.source_version{return Err("The transcript source/home changed; refresh and review the session again".into());}
+    validate_library_entry(&app,entry,require_folder.unwrap_or(true))
+}).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn resolve_provider_session(app:AppHandle,identity:crate::session_library::Identity)->Result<crate::session_library::Entry,String>{tauri::async_runtime::spawn_blocking(move||{
+    identity.validate()?;
+    if identity.environment=="unknown"{return Err("This session's environment was not captured. Use Session library to discover and review its source, or copy its UUID for a manual resume".into());}
+    let entry=library_snapshot(&app,true).entries.into_iter().find(|entry|entry.identity==identity&&entry.available).ok_or("Session is unavailable in its enabled source. Enable/discover it in Session library, or copy its resume command for a manual handoff")?;
+    validate_library_entry(&app,entry,true)
+}).await.map_err(|e|e.to_string())?}
+fn validate_library_entry(app:&AppHandle,mut entry:crate::session_library::Entry,require_folder:bool)->Result<crate::session_library::Entry,String>{
+    let config=app.state::<ConfigState>();let authorization=crate::wsl_sources::authorization(&config.get(),&entry.identity)?;
+    if entry.source_config.as_deref()!=Some(authorization.as_str()){return Err("The transcript source settings changed while scanning; review it again".into());}
+    if require_folder{let cwd=entry.cwd.as_deref().ok_or("Session folder is unknown")?;entry.launch_cwd=Some(if let Some(distro)=entry.identity.environment.strip_prefix("wsl:"){crate::wsl::call(distro,serde_json::json!({"method":"folder","cwd":cwd}))?["cwd"].as_str().ok_or("WSL returned no validated folder")?.into()}else{crate::repo_state::display(&crate::repo_state::native_folder(cwd)?)});}
+    if authorization!=crate::wsl_sources::authorization(&config.get(),&entry.identity)?{return Err("The transcript source settings changed while validating the session".into());}Ok(entry)
+}
+#[tauri::command]
+pub fn session_pins_snapshot(app:AppHandle)->crate::session_library::Pins{app.state::<crate::session_library::Store>().pins()}
+#[tauri::command]
+pub async fn pin_library_session(app:AppHandle,identity:crate::session_library::Identity,pinned:bool)->Result<crate::session_library::Pins,String>{tauri::async_runtime::spawn_blocking(move||{let pins=app.state::<crate::session_library::Store>().pin(identity,pinned)?;let _=app.emit("session-pins-changed",&pins);Ok(pins)}).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn session_pins_action(app:AppHandle,action:String)->Result<crate::session_library::Pins,String>{tauri::async_runtime::spawn_blocking(move||{let pins=app.state::<crate::session_library::Store>().pins_action(&action)?;let _=app.emit("session-pins-changed",&pins);Ok(pins)}).await.map_err(|e|e.to_string())?}
+
+#[tauri::command]
+pub async fn review_recipes(app:AppHandle,cwd:String,profile_id:String)->Result<crate::recipes::Review,String> {
+    tauri::async_runtime::spawn_blocking(move || {let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let profile=profiles.iter().find(|p|p.id==profile_id).ok_or("Shell profile not found")?;app.state::<crate::recipes::Store>().review(&cwd,profile)}).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub fn cancel_recipe_review(app:AppHandle,id:String){app.state::<crate::recipes::Store>().cancel_review(&id);}
+#[tauri::command]
+pub fn recipe_runs_snapshot(app:AppHandle)->Vec<crate::recipes::Run>{app.state::<crate::recipes::Store>().snapshot()}
+#[tauri::command]
+pub async fn start_recipe(app:AppHandle,review_id:String,name:String,bindings:std::collections::HashMap<String,String>)->Result<crate::recipes::Run,String>{
+    tauri::async_runtime::spawn_blocking(move || {let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let store=app.state::<crate::recipes::Store>();let result=store.start(&review_id,&name,bindings,&profiles,app.state::<ConfigState>().get().shell_integration);let _=app.emit("recipe-runs-changed",store.snapshot());result}).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub async fn launch_recipe_step(app:AppHandle,id:String,pane_id:String,session:u32,cwd:String)->Result<crate::recipes::Run,String>{
+    tauri::async_runtime::spawn_blocking(move || {let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let sessions=app.state::<SessionManager>();let records=app.state::<crate::run_records::Store>();let store=app.state::<crate::recipes::Store>();let result=store.launch(&id,&pane_id,session,crate::recipes::Launch{cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records});let _=app.emit("recipe-runs-changed",store.snapshot());result}).await.map_err(|e|e.to_string())?
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct RecipeOutput {id:String,pane_id:String,session:u32,sequence:u64,text:String}
+#[tauri::command]
+pub fn recipe_step_output(app:AppHandle,observation:RecipeOutput)->Result<(),String>{let store=app.state::<crate::recipes::Store>();store.output(&observation.id,&observation.pane_id,observation.session,observation.sequence,&observation.text,&app.state::<SessionManager>())}
+#[tauri::command]
+pub fn fail_recipe_step(app:AppHandle,id:String,message:String){let store=app.state::<crate::recipes::Store>();store.fail(&id,&message,&app.state::<crate::run_records::Store>());let _=app.emit("recipe-runs-changed",store.snapshot());}
+#[tauri::command]
+pub fn cancel_recipe_run(app:AppHandle,id:String)->Result<(),String>{let store=app.state::<crate::recipes::Store>();let result=store.cancel_pending(&id);let _=app.emit("recipe-runs-changed",store.snapshot());result}
+#[tauri::command]
+pub async fn stop_recipe_run(app:AppHandle,id:String)->Result<(),String>{tauri::async_runtime::spawn_blocking(move || {let store=app.state::<crate::recipes::Store>();let result=store.stop(&id,&app.state::<SessionManager>());let _=app.emit("recipe-runs-changed",store.snapshot());result}).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+pub async fn review_agent_access(app: AppHandle, cwd: String, profile_id: Option<String>) -> Result<crate::agent_access::Review, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let access=app.state::<crate::agent_access::Access>();
+        if let Some(id)=profile_id { let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()); let profile=profiles.iter().find(|p|p.id==id).ok_or("Shell profile not found")?; access.review_execution(&cwd,Some(profile)) } else { access.review(&cwd) }
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub fn cancel_agent_access_review(app: AppHandle, id: String) { app.state::<crate::agent_access::Access>().cancel_review(&id); }
+#[tauri::command]
+pub async fn grant_agent_access(app: AppHandle, review: String, client: String, task_ids: Option<Vec<String>>) -> Result<crate::agent_access::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let handler_app = app.clone();
+        let handler = std::sync::Arc::new(move |request:serde_json::Value| {
+            let access=handler_app.state::<crate::agent_access::Access>(); let modified=request.get("method").and_then(|v|v.as_str())==Some("tasks.run");
+            let profiles=all_profiles(&handler_app.state::<SessionManager>(),&handler_app.state::<ConfigState>());
+            let emit=|job:&crate::agent_tasks::Invocation| handler_app.emit("agent-task-queued",&job.id).map_err(|e|e.to_string());
+            let context=crate::agent_access::ExecutionContext { profiles:&profiles,integrate:handler_app.state::<ConfigState>().get().shell_integration,emit:&emit };
+            let result=access.request_execution(request,&handler_app.state::<crate::run_records::Store>(),Some(context));
+            if modified { let _=handler_app.emit("agent-access-changed",access.snapshot()); } result
+        });
+        let access=app.state::<crate::agent_access::Access>(); let ids=task_ids.unwrap_or_default();
+        let snapshot=if ids.is_empty() { access.grant(&review,&client,handler)? } else {
+            if !app.state::<ConfigState>().get().shell_integration { return Err("Enable shell integration before granting task execution".into()); }
+            let profile_id=access.review_profile(&review).ok_or("No shell was reviewed")?;
+            let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+            let profile=profiles.iter().find(|p|p.id==profile_id).ok_or("Reviewed shell is unavailable")?;
+            access.grant_selected(&review,&client,&ids,Some(profile),handler)?
+        };
+        let _ = app.emit("agent-access-changed", &snapshot); Ok(snapshot)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub fn revoke_agent_access(app: AppHandle, id: String) -> Result<crate::agent_access::Snapshot, String> {
+    let snapshot = app.state::<crate::agent_access::Access>().revoke(&id)?; let _ = app.emit("agent-access-changed", &snapshot); Ok(snapshot)
+}
+#[tauri::command]
+pub fn publish_agent_panes(app: AppHandle, panes: Vec<crate::agent_access::Pane>) -> Result<(), String> { app.state::<crate::agent_access::Access>().publish(panes) }
+
+#[tauri::command]
+pub async fn claim_agent_task(app:AppHandle,id:String,pane_id:String)->Result<crate::agent_tasks::Invocation,String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let access=app.state::<crate::agent_access::Access>(); let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+        let result=access.claim(&id,&pane_id,&profiles,app.state::<ConfigState>().get().shell_integration);
+        if let Err(e)=&result && access.queue.get(&id).is_ok_and(|j|j.state=="queued") { access.fail(&id,e,&app.state::<crate::run_records::Store>()); }
+        let _=app.emit("agent-access-changed",access.snapshot()); result
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub async fn launch_agent_task(app:AppHandle,id:String,pane_id:String,session:u32,cwd:String)->Result<crate::agent_tasks::Invocation,String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let access=app.state::<crate::agent_access::Access>(); let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+        let sessions=app.state::<SessionManager>(); let records=app.state::<crate::run_records::Store>();
+        let context=crate::agent_access::LaunchContext {cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records};
+        let result=access.launch(&id,&pane_id,session,context);
+        if let Err(e)=&result { access.fail(&id,e,&app.state::<crate::run_records::Store>()); }
+        let _=app.emit("agent-access-changed",access.snapshot()); result
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub fn fail_agent_task(app:AppHandle,id:String,message:String) { let access=app.state::<crate::agent_access::Access>(); access.fail(&id,&message,&app.state::<crate::run_records::Store>()); let _=app.emit("agent-access-changed",access.snapshot()); }
+#[tauri::command]
+pub async fn stop_agent_task(app:AppHandle,id:String)->Result<(),String> { tauri::async_runtime::spawn_blocking(move || { let access=app.state::<crate::agent_access::Access>(); let result=access.stop(&id,&app.state::<SessionManager>(),&app.state::<crate::run_records::Store>()); let _=app.emit("agent-access-changed",access.snapshot()); result }).await.map_err(|e|e.to_string())? }
+#[tauri::command]
+pub async fn preview_worktree_task(app: AppHandle, draft: crate::worktree_tasks::Draft) -> Result<crate::worktree_tasks::Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<crate::worktree_tasks::Store>().preview(draft)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub fn cancel_worktree_preview(app: AppHandle, token: String) { app.state::<crate::worktree_tasks::Store>().cancel(&token); }
+#[tauri::command]
+pub async fn create_worktree_task(app: AppHandle, token: String) -> Result<crate::worktree_tasks::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<crate::worktree_tasks::Store>(); let result = store.create(&token);
+        let _ = app.emit("worktree-tasks-changed", store.snapshot()); result
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn worktree_task_action(app: AppHandle, action: String, task_id: Option<String>) -> Result<crate::worktree_tasks::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<crate::worktree_tasks::Store>(); let result = store.action(&action, task_id.as_deref());
+        let _ = app.emit("worktree-tasks-changed", store.snapshot()); result
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn worktree_task_details(app: AppHandle, task_id: String) -> Result<crate::worktree_tasks::Details, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<crate::worktree_tasks::Store>().details(&task_id)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn agent_inbox_action(app: AppHandle, action: crate::agent_inbox::Action, ids: Vec<String>) -> Result<crate::agent_inbox::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = app.state::<crate::agent_inbox::Store>().act(action, &ids)?;
+        let _ = app.emit("agent-inbox-changed", &snapshot);
+        Ok(snapshot)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn codex_usage_many(app: AppHandle, ids: Vec<String>) -> Result<Vec<crate::codex::Usage>, String> {
+    if ids.len() > 256 || ids.iter().any(|id| !crate::codex::valid_id(id)) {
+        return Err("Expected at most 256 valid Codex session ids".into());
+    }
+    let home = crate::codex::home().ok_or("No home folder for Codex")?;
+    tauri::async_runtime::spawn_blocking(move || app.state::<crate::codex::Index>().usage_many(&home, &ids))
+        .await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]

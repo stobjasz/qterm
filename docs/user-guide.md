@@ -44,6 +44,11 @@ follows the copy you ran last.
 
 **The tray icon** (bottom right of the taskbar):
 
+Quitting or force-closing qterm ends its descendant processes, including detached
+tools started from its shells. This includes newly launched editors and browsers
+when they remain descendants of qterm. A verified update's installer/replacement
+is allowed to survive the old instance so updating can finish.
+
 | Item | What it does |
 |---|---|
 | Left click | Shows or hides the console. |
@@ -138,9 +143,10 @@ hides it. A restart unpins it.
   which shell; press its number, or pick it with the arrows and Enter. The ▾ menu has two
   split buttons next to each shell, and the palette has "Split right with" / "Split down
   with" (type, say, "split right wsl"). The new pane opens in the same folder, written the
-  way its shell needs: `C:\work` becomes `/mnt/c/work` in WSL, a WSL folder opens in
-  PowerShell as `\\wsl.localhost\<distro>\...`. Command Prompt can't start in a WSL
-  folder, so it opens in your home folder, and qterm says so.
+  way its shell needs: WSL uses the selected distribution's actual filesystem
+  mapping; a Linux folder opens in PowerShell through its distribution-specific
+  UNC path. Command Prompt cannot start in a WSL UNC folder. Failed conversion
+  reports an error and preserves the original pane.
 - **Switch a pane to another shell:** Shift+right-click the pane → **Switch shell…**, or
   "Switch this pane to" in the palette. The new shell takes the pane's place and folder;
   if a program still runs there, qterm asks first. Picking the same shell starts it afresh.
@@ -265,8 +271,11 @@ Windows 11 it is under **Show more options**.
 **Dropping files**
 
 Drag files from Explorer onto a pane: their paths are typed at the prompt, quoted the way
-that shell needs (and translated to `/c/...` for Git Bash and `/mnt/c/...` for WSL).
-Enter is not pressed, so you can finish the command first.
+that shell needs. Git Bash uses its `/c/...` spelling; WSL asks the selected
+distribution for its actual mount mapping. In broadcast mode each pane receives
+its own translated and quoted path. A failed translation or changed destination
+cancels preparation before any path is typed. Enter is not pressed, so you can
+finish the command first. Clipboard image paths use the same delivery rules.
 
 **Pictures and ligatures**
 
@@ -415,6 +424,79 @@ many lines to keep.
 
 ## Notifications
 
+**Agent inbox** in the tab bar keeps Claude permission requests, Codex approval activity, input
+requests, failures and completed turns together. Filter by provider, type, status
+or project folder; use Up/Down to move through events. Select an event to mark it
+read, then **Go to pane** or **Resolve event**. Reading and resolving are separate:
+looking at a request never grants permission. Provider permissions stay in the
+agent's terminal. The palette action is `agent_inbox` (unbound by default).
+
+Events remain after panes close and qterm restarts. Previous-run events are
+labelled, and cannot jump to a new session. Hook-reported work/completion settles
+an earlier request from the same provider, pane and session; completed replies and
+failures remain open until you resolve them. Notifications settings control
+pop-ups; installed hooks still supply the local inbox.
+
+The inbox lives in `agent-inbox.json` in qterm's local data folder. It keeps all
+open events and the newest 200 resolved events, with messages limited to 4000
+characters. **Clear resolved events** leaves open events intact. Failed saves show
+**Save problem** and retry automatically. If saved history cannot be read,
+**Recover saved inbox** preserves it as a backup before saving this run's events.
+
+**Problems and command runs** in the tab bar (or the `problems` palette action)
+shows up to 100 saved completed commands across restarts. Shell integration must
+be enabled. TypeScript, Rust, ESLint, Go, pytest and .NET diagnostics include file/line links, resolved from
+the command's original folder even after the pane changes directories. Missing
+files show an error. WSL links use the run's captured distribution and the actual
+Linux file; see [WSL support](wsl-support.md).
+
+The latest view supersedes earlier results only for the same command, folder and
+shell. **Show superseded runs** keeps those earlier results available. Filter runs
+by command/folder and diagnostics by severity; expand **Captured output** for
+unsupported messages. Capture is bounded to 128000 UTF-16 units without splitting
+Unicode characters, and 500 diagnostics. Truncated or lost output is labelled
+incomplete. An exit code describes that command's result; it does not verify edits
+made afterward. **Run with repository tracking** previews the exact command and
+original folder before launching a new native shell tab. It captures repository
+state before launch and watches for edits during the check. Later comparisons
+label matching, stale or unknown evidence; edits restored during a check still
+invalidate it. Ignored files, external dependencies and environment are outside
+this evidence. See [verification records](verification-records.md) for scope,
+limits and save recovery.
+
+**Worktrees** in the tab bar (or the `worktrees` palette action) creates a task on
+a new branch in a separate checkout. Preview its exact commit and directory,
+then explicitly create it and open its agent or shell in a new tab. Task details
+retain the request, show changes and link saved command runs. Completing a task
+changes its label; files and branches remain. See [worktree tasks](worktree-tasks.md)
+for checkout scope, limits and recovery.
+
+**Access** in the tab bar (or `agent_access` in the palette) creates an explicit
+session-only read grant for a local coding agent. Review its canonical project,
+then share the private connection-file path. The CLI can list that project's
+native panes, read saved command results and inspect task definitions. Revoke a
+grant in the panel; all grants and credentials expire when qterm exits. Separately
+select reviewed named tasks and a shell to allow execution in new visible tabs.
+Requester/run IDs, status and explicit Stop controls stay in Access; completed
+results persist in command history. See [local agent access](local-agent-interface.md).
+
+**Recipes** in the tab bar (or `recipes` in the palette) reviews a versioned
+workflow from `.qterm.toml`. Inspect commands, folders, dependencies, readiness,
+shell and layout, then explicitly launch once. Steps run in new reserved panes.
+A failed or unknown exit blocks dependents; service steps can declare a literal
+output marker and a deadline. Cancel prevents pending launches; Stop explicitly
+ends this workflow's programs. Restoring panes never replays recipe commands.
+See [workflow recipes](workflow-recipes.md) for the format and boundaries.
+
+**Sessions** combines remembered Claude/Codex sessions with provider, project,
+reported branch and environment filters. Explicit discovery checks transcript
+availability; pins persist only references. Review an editable session handoff
+with goals, findings, files, saved checks and next steps before exporting it or
+opening a new destination agent. Explicitly enabled WSL sources support resume
+and reviewed session handoffs in a matching distribution profile. Provider
+history settings still apply. See
+[session library and handoffs](session-library.md).
+
 qterm can tell you when something needs you while the console is hidden or you're
 looking at another tab: the tab gets a marker, and if you're in another app, a Windows
 notification appears. Clicking the notification opens the console on that pane.
@@ -484,7 +566,7 @@ message.
   with its folder. Click it later to reopen it in a new tab, in the right folder, or
   click **here** on its row to reopen it in the tab you're in (the tab goes to the
   session's folder first). If that tab is busy, a new tab is used instead.
-- **All on this PC:** every Claude Code session on this computer, grouped by folder,
+- **Native Windows:** Claude Code transcripts in the native Windows home, grouped by folder,
   with a **+** per folder to start a new session there.
 
 ## Codex CLI
@@ -495,7 +577,7 @@ folder, with search, branch and prompt counts. Start a fresh session in a folder
 resume in a new tab, or choose **here** to resume in the current pane. A busy pane
 opens the session in a new tab. The palette also offers remembered sessions.
 
-For permission alerts, last replies and reliable session identification, choose
+For approval activity, last replies and reliable session identification, choose
 **Set up Codex hooks**, then review and trust them using `/hooks` in Codex. Start a
 new Codex session afterwards. The setup preserves other hooks and backs up
 `hooks.json`; removing it removes only qterm's entries. Hooks act only inside qterm.
@@ -505,9 +587,12 @@ launches too, so hook processes inherit the correct pane information.
 The tab's ⬡ spins while Codex works and dims while idle. When available, its context
 percentage appears beside it; hovering shows the model, context, output tokens and
 reported plan limits. Tabs take the session's first prompt as a title and show the
-last reply in their tooltip. Permission requests and completed turns mark background
-tabs and can show Windows notifications. **Alt+Shift+W** visits waiting Claude or
-Codex panes. Plan limits appear in the menu and tray, with warnings at 80% and 95%.
+last reply in their tooltip. Approval-routing hooks mark informational activity;
+they do not prove a question exists, since hooks or automatic review may handle
+the approval. They do not send a Windows toast or add to waiting counts. Actual
+questions remain in Codex. Nonempty completed replies can notify; identical alerts
+are deduplicated for 30 seconds. Plan limits appear in the menu and tray, with
+warnings at 80% and 95%.
 
 Enable **Resume Codex sessions on start** together with **Reopen tabs and layout on
 start** to resume each identified session in its restored pane. This is independent
@@ -722,6 +807,13 @@ toggle_broadcast = ""                                 # off
 | `show_help` | Shortcuts and tips | `ctrl+shift+/` |
 | `stop_programs` | Stop what runs in this pane (keeps the shell) | (none) |
 | `view_json` | View the selection or last output as JSON | (none) |
+| `ask_agent` | Review selected text or the last command's output and open Claude or Codex with it | (none) |
+| `agent_inbox` | Open the persistent inbox for agent permissions, failures and completed turns | (none) |
+| `problems` | Inspect compiler diagnostics and completed command runs | (none) |
+| `worktrees` | Create and inspect worktree tasks | (none) |
+| `agent_access` | Review session-only project grants for local agents | (none) |
+| `recipes` | Review and launch project workflow recipes | (none) |
+| `session_library` | Search sessions, pin references and review handoffs | (none) |
 | `toggle_size` | Full size console / back | `f11` |
 | `split_right_with` | Split right with another shell… | `ctrl+alt+shift+=` |
 | `split_down_with` | Split down with another shell… | `ctrl+alt+shift+-` |
@@ -867,6 +959,52 @@ pick a key you never type (Scroll Lock, Pause, F13–F24).
 **Restored panes look empty.** The earlier output is above the "restored" line; scroll
 up. A pane where you never ran anything isn't kept on purpose.
 
+**"Changes could not be saved."** The persistent banner identifies the affected store
+and its error. qterm retries every five seconds; **Retry saving** tries immediately.
+Failed saves stay pending even when you make no further changes. Free disk space or
+restore access to the folder, then retry. An update or quit waits for successful final
+saves; if saving fails, fix the error and try updating or quitting again.
+After a failed quit, **Quit without saving** is available if you accept losing
+unsaved changes.
+
+**An agent says "status unknown".** Its process is running, but qterm has no lifecycle
+event confirming the current activity. A quiet agent may still be working. Recent
+terminal output is an activity hint, and Codex hooks can report working/idle directly.
+Unknown status does not prevent reported usage or cache-expiry information appearing.
+
+Agent markers distinguish **working**, **waiting for input**, **turn completed**,
+**turn failed**, **idle after interruption**, and **unknown**. Hover a marker or a
+running session row for its source and time. A completed turn does not establish
+that code passed checks. Submitting new input invalidates the previous event;
+working events older than ten minutes become unknown until refreshed.
+
+Settings → Claude Code / Codex CLI → **Local delivery health** shows the last event,
+its time, session and receiving pane. **Test local delivery** starts qterm's own hook
+process and checks its inbox/watch route. It does not contact a model, install hooks,
+or establish that a provider has enabled or trusted them. Keep provider setup and
+trust checks separate. Health history resets when qterm restarts.
+
+**Ask an agent about output.** Click a command's ✓/✗ bar → **Ask an agent about this**,
+or select text and find the same action in the palette (`ask_agent`, unbound by
+default). Review the request, command, original folder, exit code and output; choose
+Claude or Codex and a shell, then **Open agent with brief**. A new tab is the default.
+Reusing the source shell requires it to be idle, in the original folder and outside
+broadcast mode. Running agents and other programs are never typed into by this action.
+New tabs wait for an empty shell prompt and cancel the launch if the shell starts
+in another folder. Shell integration is required. Native PowerShell, cmd, Git Bash
+and matching WSL distribution profiles are supported. WSL command folders are
+validated in that distribution, and the brief is written in its Linux cache.
+Reusing a source pane rechecks its prompt and input after preparation; intervening
+input, folder or broadcast changes cancel delivery.
+**Copy brief** prepares the same text for a manual handoff to an existing session.
+
+The output is limited to 16000 characters, with a truncation label. Requests are
+limited to 8000. The CLI receives a file reference, while the reviewed text is kept
+in qterm's local data folder under `agent-briefs` (or the selected distribution's
+cache for WSL); briefs older than seven days are
+eligible for opportunistic cleanup when another is created. Provider approvals and
+permissions stay in effect.
+
 **No Claude alerts.** Check Settings → Claude Code: the hook should say "✓ Set up" (click
 **Update** if offered), and Claude sessions started before that don't use it. Claude
 Code only asks for attention after about a minute of idling, or when it needs a
@@ -889,8 +1027,10 @@ folder the exe is in isn't writable for you (e.g. under Program Files). Move the
 folder of your own, or use the installer.
 
 **Command marks or ✓/✗ alerts don't appear.** They need Settings → Terminal → Shell
-integration (on by default) and a tab opened after it was switched on. WSL tabs and
-custom profiles running other programs (ssh, python) don't report commands.
+integration (on by default) and a tab opened after it was switched on. WSL Bash
+profiles with an explicit distribution can now report commands and folders; see
+[WSL support and current limits](wsl-support.md). Custom profiles running other
+programs (ssh, python) don't report commands.
 
 **A settings change didn't apply.** If the settings file has a mistake, qterm shows it at
 the top of the console and keeps the previous settings until it is fixed.

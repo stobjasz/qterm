@@ -15,11 +15,12 @@ interface Props {
   onSelectOutput(): void;
   onRunAgain(): void;
   onViewJson(): void;
+  onAskAgent(): void;
   onClose(): void;
 }
 
 /** A click on a command's ✓/✗ bar: what can be done with that command and its output. */
-export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onSelectOutput, onRunAgain, onViewJson, onClose }: Props) {
+export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onSelectOutput, onRunAgain, onViewJson, onAskAgent, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const position = useFitInViewport(ref, x, y);
 
@@ -57,6 +58,7 @@ export function CommandBlockMenu({ block, x, y, onCopyOutput, onCopyCommand, onS
       <button role="menuitem" disabled={!block.hasOutput} onClick={act(onViewJson)}>
         View output as JSON
       </button>
+      <button role="menuitem" disabled={!block.hasOutput} onClick={act(onAskAgent)}>Ask an agent about this</button>
     </div>
   );
 }

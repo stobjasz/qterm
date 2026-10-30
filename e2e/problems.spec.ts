@@ -1,0 +1,61 @@
+// R49: real compilers -> ConPTY -> completed command capture -> diagnostics -> editor.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { expect, test } from "./qterm";
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qterm-problems-"));
+const project = path.join(dir, "project one");
+const elsewhere = path.join(dir, "elsewhere");
+const editor = path.join(dir, "editor.cjs");
+const opened = path.join(dir, "opened.json");
+const root = process.cwd();
+const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
+test.use({ settings: { values: { editor: JSON.stringify(`"${process.execPath}" "${editor}" "{file}" "{line}" "{col}"`) } } });
+test.beforeAll(() => {
+  fs.mkdirSync(project); fs.mkdirSync(elsewhere);
+  fs.writeFileSync(path.join(project, "bad file.ts"), 'const n: number = "wrong";\n');
+  fs.writeFileSync(path.join(project, "main.rs"), 'fn main() { let _n: u32 = "wrong"; }\n');
+  fs.writeFileSync(editor, `require('node:fs').writeFileSync(${JSON.stringify(opened)}, JSON.stringify(process.argv.slice(2)));`);
+});
+test.afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+test("compiler errors link from their original folder and reruns supersede only their own problems", async ({ qterm }, info) => {
+  const pane = await qterm.activePane(); await qterm.waitForPrompt(pane);
+  await qterm.run(pane, `Set-Location ${quote(project)}`);
+  await expect.poll(async () => (await qterm.workspace()).panes[pane]?.cwd).toBe(project);
+  const tsc = `& ${quote(process.execPath)} ${quote(path.join(root, "node_modules/typescript/bin/tsc"))} 'bad file.ts' --noEmit --pretty false --skipLibCheck`;
+  await qterm.run(pane, tsc);
+  const toggle = qterm.page.getByRole("button", { name: "Problems and command runs", exact: true });
+  await expect(toggle).toHaveAccessibleDescription("Problems: 1 error in latest command runs");
+  const rustc = `& ${quote(path.join(process.env.USERPROFILE!, ".cargo/bin/rustc.exe"))} main.rs --color never --emit metadata`;
+  await qterm.run(pane, rustc);
+  await expect(toggle).toHaveAccessibleDescription("Problems: 2 errors in latest command runs");
+  await qterm.run(pane, `Set-Location ${quote(elsewhere)}`);
+  await expect.poll(async () => (await qterm.workspace()).panes[pane]?.cwd).toBe(elsewhere);
+  await toggle.click();
+  const dialog = qterm.page.getByRole("dialog", { name: "Problems and command runs", exact: true });
+  await dialog.getByRole("button", { name: /Inspect run:.*typescript.*tsc/ }).click();
+  await expect(dialog.getByRole("list", { name: "Diagnostics", exact: true })).toContainText("error TS2322");
+  await expect(dialog.getByLabel("Run details", { exact: true })).toContainText(project);
+  await dialog.getByRole("button", { name: "Open bad file.ts:1", exact: true }).click();
+  await expect.poll(() => { try { return JSON.parse(fs.readFileSync(opened, "utf8")); } catch { return []; } }).toEqual([path.join(project, "bad file.ts"), "1", "7"]);
+  await dialog.getByRole("button", { name: /Inspect run:.*rustc/ }).click();
+  await expect(dialog.getByRole("list", { name: "Diagnostics", exact: true })).toContainText("error E0308: mismatched types");
+  await expect(dialog.getByRole("button", { name: "Open main.rs:1", exact: true })).toBeVisible();
+  await qterm.page.screenshot({ path: info.outputPath("problems-panel.png") });
+  await dialog.getByRole("button", { name: "Close problems", exact: true }).click();
+  fs.writeFileSync(path.join(project, "bad file.ts"), "const n: number = 42;\n");
+  await qterm.run(pane, `Set-Location ${quote(project)}`);
+  await expect.poll(async () => (await qterm.workspace()).panes[pane]?.cwd).toBe(project);
+  await qterm.run(pane, tsc);
+  await expect(toggle).toHaveAccessibleDescription("Problems: 1 error in latest command runs");
+  await toggle.click();
+  await dialog.getByLabel("Search command runs", { exact: true }).fill("typescript");
+  await expect(dialog.getByRole("list", { name: "Command runs", exact: true }).getByRole("listitem")).toHaveCount(1);
+  await dialog.getByRole("button", { name: /Inspect run:.*typescript.*tsc/ }).click();
+  await expect(dialog.getByRole("list", { name: "Diagnostics", exact: true }).getByRole("listitem")).toHaveCount(0);
+  await expect(dialog.getByLabel("Run details", { exact: true })).toContainText("Exit 0");
+  await dialog.getByRole("checkbox", { name: "Show superseded runs", exact: true }).check();
+  await expect(dialog.getByRole("list", { name: "Command runs", exact: true }).getByRole("listitem")).toHaveCount(2);
+});

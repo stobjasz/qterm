@@ -22,6 +22,11 @@ describe("command marks", () => {
     expect(formatDuration(0)).toBe("0.0s");
     expect(formatDuration(960)).toBe("1s");
   });
+  it("keeps malformed or unrepresentable exit codes unknown for command recording", () => {
+    for (const code of ["Infinity", "1.5", "9007199254740991", "-2147483649"]) expect(parseMark(`D;${code}`)).toEqual({ kind: "D", exitCode: undefined });
+    expect(parseMark("D;4294967295")).toEqual({ kind: "D", exitCode: 4294967295 });
+    expect(parseMark("D;-1")).toEqual({ kind: "D", exitCode: -1 });
+  });
 
   it("says when: the time today, the weekday this week, else the date", () => {
     // In whatever locale runs the tests (14:32 or 2:32 PM).

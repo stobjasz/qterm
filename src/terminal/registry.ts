@@ -2,6 +2,8 @@
 // terminal's wrapper element in its container, so switching tabs or re-parenting
 // a pane during a split never recreates a terminal or loses its scrollback.
 import { Terminal, type IDecoration, type IMarker } from "@xterm/xterm";
+import { limitText } from "../text";
+import {isTerminalReply} from "./inputRouting";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -26,6 +28,7 @@ import {
   ptyWrite,
   resolveFiles,
   type SessionId,
+  type ShellKind,
 } from "../ipc";
 import { buildKeymap, keyInput, resolveKey, type Command, type Keymap } from "../keybindings";
 import type { PaneId } from "../workspace/workspace";
@@ -33,6 +36,7 @@ import { hasContent, plainLines } from "./content";
 import { parseOsc7, parseOsc9 } from "./cwd";
 import { formatClock, formatDuration, parseMark } from "./marks";
 import { findDevServerUrl } from "./devServer";
+import { sameCommandFolder } from "../agents/handoff";
 import { matching, type Trigger } from "./triggers";
 import { findInLines, SEARCH_ALL_LIMIT, type SearchHit, type SearchOptions } from "./searchAll";
 import { findFileLinks } from "./links";
@@ -53,6 +57,9 @@ const CLAUDE_SCAN_MAX_LINES = 2000;
 const BELL_INTERVAL_MS = 1000;
 
 export interface RegistryEvents {
+  onValidateStartup?(paneId:PaneId,session:number,cwd:string):Promise<void>;
+  onAuthorizeStartup?(paneId: PaneId, session: number, cwd: string): Promise<void>;
+  onStartupError?(paneId: PaneId, message: string): void;
   onCommand(paneId: PaneId, command: Command): void;
   onTitle(paneId: PaneId, title: string): void;
   onExit(paneId: PaneId, code: number): void;
@@ -91,6 +98,7 @@ export interface CommandBlock {
   /** Its prompt marker's id. */
   id: number;
   command: string;
+  cwd?: string;
   exitCode?: number;
   hasOutput: boolean;
   /** Date.now() of the Enter that ran it, and how long it ran. */
@@ -99,6 +107,12 @@ export interface CommandBlock {
 }
 
 export interface FinishedCommand {
+  shellKind?:ShellKind;
+  environment?: string;
+  blockId: number;
+  cwd?: string;
+  output: string;
+  outputTruncated: boolean;
   command: string;
   /** Undefined when the shell doesn't say (cmd). */
   exitCode?: number;
@@ -134,19 +148,29 @@ interface CommandMark {
   /** Where typing starts (B), and its column. */
   input?: IMarker;
   inputCol: number;
+  cwd?: string;
   /** Date.now() of the Enter that ran it. */
   startedAt?: number;
   /** Where it ended (D): output is between the command line and this. */
   end?: IMarker;
+  endCol?: number;
   /** Date.now() when it ended. */
   finishedAt?: number;
   exitCode?: number;
   command?: string;
+  commandCaptured?: boolean;
   decoration?: IDecoration;
 }
 
 /** How to start a pane's shell. */
 export interface PaneSpec {
+  startupValidation?:boolean;
+  shellKind?:ShellKind;
+  environment?: string;
+  distribution?: string | null;
+  startupAuthorization?: boolean;
+  /** Agent handoffs wait for an empty prompt and verify the actual start folder. */
+  startupAtPrompt?: boolean;
   profileId: string;
   /** Start in this folder (else the profile's default). */
   cwd?: string;
@@ -178,6 +202,11 @@ export interface FontSettings {
 }
 
 interface Entry {
+  keyboardData?:string;
+  shellKind:ShellKind;
+  environment: string;
+  startupAuthorizing?: boolean;
+  cancelStartup?: () => void;
   term: Terminal;
   fit: FitAddon;
   search: SearchAddon;
@@ -207,8 +236,13 @@ interface Entry {
   background: boolean;
   activityReported: boolean;
   lastBell: number;
-  /** Date.now() of the latest output (busy/idle status). */
+  /** Date.now() of the latest output (activity hints). */
   lastOutput: number;
+  /** Monotonic output revision: multiple chunks can arrive in one millisecond. */
+  outputRevision: number;
+  submissionRevision: number;
+  /** Every non-protocol input, including edits that never submit a command. */
+  inputRevision: number;
   /** Input produced before the shell's session id was known, e.g. the reply to ConPTY's cursor query. */
   earlyInput: string[];
   /** Lines sent to the shell (Enter, pasted lines, startup input) since it started. */
@@ -254,6 +288,7 @@ export class TerminalRegistry {
   private behavior: Behavior = { copyOnSelect: false, rightClickPaste: true, claudeSessions: false, inlineImages: true, ligatures: false };
   /** Pane → every pane its typing goes to (broadcasting tabs only). */
   private broadcast = new Map<PaneId, PaneId[]>();
+  private directPaste = new Set<PaneId>();
 
   constructor(private events: RegistryEvents) {
     void onPtyExit(({ id, code }) => {
@@ -401,6 +436,14 @@ export class TerminalRegistry {
     return this.entries.get(paneId)?.lastOutput ?? 0;
   }
 
+  outputRevision(paneId: PaneId): number {
+    return this.entries.get(paneId)?.outputRevision ?? 0;
+  }
+
+  submissionRevision(paneId: PaneId): number {
+    return this.entries.get(paneId)?.submissionRevision ?? 0;
+  }
+
   setKeymap(keymap: Keymap): void {
     this.keymap = keymap;
   }
@@ -487,6 +530,12 @@ export class TerminalRegistry {
     return Boolean(last && last.startedAt !== undefined && !last.end);
   }
 
+  atEmptyPrompt(paneId: PaneId): boolean {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks[entry.marks.length - 1];
+    return Boolean(entry && entry.term.buffer.active.type === "normal" && mark?.input && !mark.end && mark.startedAt === undefined && !commandAt(entry.term, mark).trim());
+  }
+
   /** Scrolls to the previous (-1) or next (1) command's prompt; past the last one, to the bottom. */
   scrollToCommand(paneId: PaneId, direction: -1 | 1): void {
     const entry = this.entries.get(paneId);
@@ -501,6 +550,9 @@ export class TerminalRegistry {
     else term.scrollToBottom();
   }
 
+  /** Captured at pane creation; later profile edits cannot retarget old results. */
+  environmentOf(paneId:PaneId):string|undefined {return this.entries.get(paneId)?.environment;}
+  shellKindOf(paneId:PaneId):ShellKind|undefined {return this.entries.get(paneId)?.shellKind;}
   /** Copies the output of the last finished command; false when there is none. */
   copyLastOutput(paneId: PaneId): boolean {
     const text = this.lastCommandOutput(paneId);
@@ -514,6 +566,29 @@ export class TerminalRegistry {
     const entry = this.entries.get(paneId);
     const mark = entry?.marks.filter((m) => m.end && m.input && m.end.line >= 0 && m.input.line >= 0).pop();
     return entry && mark ? outputOf(entry.term, mark) : "";
+  }
+
+  /** Current command output only: excludes its echoed input and old scrollback. */
+  runningCommandOutput(paneId: PaneId): { command:string; output:string } | undefined {
+    const entry=this.entries.get(paneId), mark=entry?.marks.slice(-1)[0];
+    if (!entry || !mark?.input || mark.input.isDisposed || mark.end || mark.startedAt===undefined || entry.term.buffer.active!==entry.term.buffer.normal) return undefined;
+    const buffer=entry.term.buffer.normal;
+    let start=mark.input.line+1;
+    while(buffer.getLine(start)?.isWrapped) start++;
+    const end=buffer.baseY+buffer.cursorY;
+    start=Math.max(start,end-255);
+    let text="";
+    for(let i=start;i<=end;i++) { const row=buffer.getLine(i); if(row) text+=(row.isWrapped || !text ? "" : "\n")+row.translateToString(!buffer.getLine(i+1)?.isWrapped); }
+    return {command:mark.command ?? commandAt(entry.term,mark),output:text.slice(-16384).trimEnd()};
+  }
+
+  lastCommandBlock(paneId: PaneId): CommandBlock | undefined {
+    const entry = this.entries.get(paneId);
+    const mark = entry?.marks.filter((m) => m.end && m.command).pop();
+    if (!entry || !mark?.command) return undefined;
+    return { id: mark.prompt.id, command: mark.command, cwd: mark.cwd, exitCode: mark.exitCode,
+      hasOutput: outputOf(entry.term, mark) !== "", startedAt: mark.startedAt,
+      durationMs: mark.finishedAt !== undefined && mark.startedAt !== undefined ? mark.finishedAt - mark.startedAt : undefined };
   }
 
   /** The selected text ("" when nothing is selected). */
@@ -564,16 +639,43 @@ export class TerminalRegistry {
    * as a keystroke of its own when `run`, since a bracketed paste never runs.
    */
   typeSnippet(paneId: PaneId, command: string, run: boolean): void {
+    if (this.entries.get(paneId)?.startupAuthorizing) return;
     const term = this.entries.get(paneId)?.term;
     if (!term) return;
     term.paste(command);
     if (run) term.input("\r", true);
   }
 
+  /** Captures a usable prompt, not merely a quiet process. Recheck after awaits. */
+  handoffPrompt(paneId:PaneId):string{
+    const entry=this.entries.get(paneId);
+    if(!entry||entry.sessionId===undefined||entry.startupAuthorizing||this.fullScreen(paneId)||this.commandRunning(paneId))throw Error("The source pane is busy. Open a new tab instead.");
+    if(this.broadcast.has(paneId))throw Error("Turn off broadcast input before reusing this pane.");
+    if(!this.atEmptyPrompt(paneId))throw Error("The source pane has unfinished input or no confirmed empty prompt. Open a new tab instead.");
+    return JSON.stringify([entry.sessionId,entry.environment,entry.shellKind,entry.cwd,entry.inputRevision,entry.marks[entry.marks.length-1]?.prompt.id]);
+  }
+
+  submitHandoff(paneId:PaneId,prompt:string,command:string):void{
+    if(this.handoffPrompt(paneId)!==prompt)throw Error("The source pane changed while the brief was being prepared. Review it again or open a new tab.");
+    const entry=this.entries.get(paneId)!;
+    this.directPaste.add(paneId);try{entry.term.paste(command);entry.term.input("\r",true);}finally{this.directPaste.delete(paneId);}
+  }
+
   /** Types `text` as a paste: broadcast like typing, and bracketed when the shell asked for it. */
   pasteText(paneId: PaneId, text: string): void {
+    if (this.entries.get(paneId)?.startupAuthorizing) return;
     this.entries.get(paneId)?.term.paste(text);
   }
+
+  inputTargets(paneId:PaneId):PaneId[]{return [...(this.broadcast.get(paneId)??[paneId])];}
+  acceptsPaste(paneId:PaneId):boolean{const entry=this.entries.get(paneId);return entry?.sessionId!==undefined&&!entry.startupAuthorizing;}
+  /** Per-target file delivery still uses xterm's bracketed-paste protocol. */
+  pasteTextToPane(paneId:PaneId,text:string):void{
+    if(!this.acceptsPaste(paneId))return;
+    this.directPaste.add(paneId);try{this.entries.get(paneId)?.term.paste(text);}finally{this.directPaste.delete(paneId);}
+  }
+
+  cancelStartup(paneId: PaneId): void { const entry = this.entries.get(paneId); if (entry) { entry.spec.startupInput = undefined; entry.spec.startupAuthorization = false; entry.cancelStartup?.(); } }
 
   /** Finds the next (or previous) match; results arrive through onSearchResults. */
   find(paneId: PaneId, query: string, options: { caseSensitive: boolean; regex: boolean }, backwards = false): void {
@@ -617,6 +719,8 @@ export class TerminalRegistry {
       theme: xtermTheme(spec.theme ?? this.theme),
     });
     const entry: Entry = {
+      shellKind:spec.shellKind??"other",
+      environment: spec.environment??(spec.distribution?`wsl:${spec.distribution.toLowerCase()}`:"native"),
       term,
       fit: new FitAddon(),
       search: new SearchAddon(),
@@ -635,6 +739,9 @@ export class TerminalRegistry {
       activityReported: false,
       lastBell: 0,
       lastOutput: 0,
+      outputRevision: 0,
+      submissionRevision: 0,
+      inputRevision: 0,
       earlyInput: [],
       commands: 0,
       marks: [],
@@ -673,15 +780,22 @@ export class TerminalRegistry {
       if (e.type === "keydown") this.events.onCommand(paneId, command);
       return false;
     });
+    term.onKey(({key})=>{entry.keyboardData=key;queueMicrotask(()=>{entry.keyboardData=undefined;});});
     term.onData((data) => {
+      const reply=isTerminalReply(data,entry.keyboardData);entry.keyboardData=undefined;
       // A broadcasting tab sends keystrokes to every pane in it.
-      for (const target of this.broadcast.get(paneId) ?? [paneId]) {
+      for (const target of this.directPaste.has(paneId)||reply?[paneId]:this.broadcast.get(paneId) ?? [paneId]) {
         const targetEntry = this.entries.get(target);
+        // Reserve task input, but keep cursor/device replies flowing to ConPTY.
+        if (targetEntry?.startupAuthorizing && !reply) continue;
+        if(targetEntry&&!reply)targetEntry.inputRevision++;
+        // Bracketed paste contains literal newlines without submitting a turn.
+        if (targetEntry && !data.startsWith("\x1b[200~") && /[\r\n\x03]/.test(data)) targetEntry.submissionRevision++;
         if (targetEntry && data.includes("\r")) {
           targetEntry.commands++;
           // Enter at a prompt starts the command typed there (its duration counts from now).
           const mark = targetEntry.marks[targetEntry.marks.length - 1];
-          if (mark?.input && mark.startedAt === undefined) mark.startedAt = Date.now();
+          if (mark?.input && mark.startedAt === undefined) { mark.startedAt = Date.now(); mark.command = commandAt(targetEntry.term, mark) || undefined; }
         }
         const session = targetEntry?.sessionId;
         if (session !== undefined) void ptyWrite(session, data);
@@ -711,6 +825,11 @@ export class TerminalRegistry {
       return true;
     });
     term.onLineFeed(() => {
+      const mark = entry.marks[entry.marks.length - 1];
+      if (mark?.input && mark.startedAt !== undefined && !mark.end && !mark.commandCaptured) {
+        const command = commandAt(term, mark);
+        if (command) { mark.command = command; mark.commandCaptured = true; }
+      }
       // Only the shell's own output: not the restored lines written before it started.
       if (entry.sessionId !== undefined) {
         if (this.triggers.length || this.paneTriggers.has(paneId)) this.checkTriggers(paneId, entry);
@@ -734,26 +853,59 @@ export class TerminalRegistry {
     const { term } = entry;
     // Acknowledge only after xterm has parsed the data, so a slow renderer slows the shell.
     let pendingInput = entry.spec.startupInput;
+    let cancelled=false;
+    if (entry.spec.startupAuthorization) entry.startupAuthorizing = true;
+    entry.cancelStartup = () => { cancelled=true;pendingInput = undefined; entry.startupAuthorizing = false; };
+    const tryStartup = () => {
+      if (cancelled||!pendingInput || entry.sessionId === undefined) return;
+      if (entry.spec.startupAtPrompt) {
+        if (!this.atEmptyPrompt(paneId)) return;
+        if (entry.spec.cwd && (!entry.cwd || !sameCommandFolder(entry.spec.cwd, entry.cwd,entry.environment))) {
+          entry.cancelStartup?.();
+          this.events.onStartupError?.(paneId, `Startup command cancelled: the shell started in a different folder (${entry.cwd ?? "not reported"}; expected ${entry.spec.cwd}). Choose another shell or folder.`);
+          return;
+        }
+      }
+      const input = pendingInput;
+      pendingInput = undefined;
+      const mark = entry.marks[entry.marks.length - 1];
+      const capture=()=>{if (entry.spec.startupAtPrompt && mark?.input && mark.startedAt === undefined && input.endsWith("\r")) {
+        mark.startedAt = Date.now(); mark.command = input.trim(); mark.commandCaptured = true;
+      }};
+      if(entry.spec.startupValidation){
+        entry.startupAuthorizing=true;const session=entry.sessionId,validate=this.events.onValidateStartup;
+        void(async()=>{
+          if(!validate)throw new Error("Source startup validator is unavailable");await validate(paneId,session,entry.cwd??"");
+          if(cancelled||this.entries.get(paneId)!==entry||entry.sessionId!==session||!this.atEmptyPrompt(paneId)||(entry.spec.cwd&&(!entry.cwd||!sameCommandFolder(entry.spec.cwd,entry.cwd,entry.environment))))throw new Error("The source launch was cancelled or its prompt/folder changed");
+          capture();await ptyWrite(session,input);
+        })().catch(e=>this.events.onStartupError?.(paneId,`Source startup failed: ${e}`)).finally(()=>{entry.startupAuthorizing=false;});
+      }else if (entry.spec.startupAuthorization) {
+        capture();
+        const authorize = this.events.onAuthorizeStartup;
+        void (authorize ? authorize(paneId, entry.sessionId, entry.cwd ?? "") : Promise.reject(new Error("Task launch authorizer is unavailable"))).catch((e) => {
+          if (mark && !mark.end) { mark.startedAt = undefined; mark.command = undefined; mark.commandCaptured = false; }
+          this.events.onStartupError?.(paneId, `Task startup failed: ${e}`);
+        }).finally(() => { entry.startupAuthorizing = false; });
+      } else {capture();void ptyWrite(entry.sessionId, input);}
+      entry.commands++;
+    };
     const onOutput = (data: Uint8Array) =>
       term.write(data, () => {
         this.processed(entry, data.length);
         entry.lastOutput = Date.now();
+        entry.outputRevision++;
         if (entry.background && !entry.activityReported) {
           entry.activityReported = true;
           this.events.onActivity(paneId);
         }
         // The shell has started talking, so it is up: type the startup input now.
-        if (pendingInput && entry.sessionId !== undefined) {
-          void ptyWrite(entry.sessionId, pendingInput);
-          entry.commands++;
-          pendingInput = undefined;
-        }
+        tryStartup();
       });
     // Earlier output first: ConPTY asks where the cursor is and starts the shell there.
     (entry.spec.restored ? showRestored(term, entry.spec.restored) : Promise.resolve())
       .then(() => {
         entry.markReady();
-        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput, entry.spec.elevated);
+        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput, entry.spec.elevated,entry.environment,entry.shellKind);
       })
       .then((id) => {
         // The pane may have been closed while the shell was starting.
@@ -761,8 +913,9 @@ export class TerminalRegistry {
         entry.sessionId = id;
         this.flushAck(entry); // output may have arrived before the id did
         for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
+        if (entry.spec.startupAtPrompt) tryStartup();
       })
-      .catch((err) => term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`));
+      .catch((err) => { entry.cancelStartup?.(); term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`); this.events.onStartupError?.(paneId, `Could not start shell: ${err}`); });
   }
 
   /** Turns ligatures on or off for an open terminal; the renderer is reloaded after. */
@@ -831,6 +984,7 @@ export class TerminalRegistry {
         if (last && !last.input) {
           last.input = term.registerMarker(0);
           last.inputCol = term.buffer.active.cursorX;
+          last.cwd = entry.cwd;
         }
         return;
       case "C":
@@ -839,7 +993,7 @@ export class TerminalRegistry {
         // D comes before the next prompt's A, so it closes the latest prompt, if a
         // command was run there.
         if (!last?.input || last.startedAt === undefined || last.end) return;
-        const command = commandAt(term, last);
+        const command = commandAt(term, last) || last.command || "";
         if (!command) {
           // Enter on an empty prompt: nothing ran.
           entry.marks.pop();
@@ -847,17 +1001,19 @@ export class TerminalRegistry {
           return;
         }
         last.end = term.registerMarker(0);
+        last.endCol = term.buffer.active.cursorX;
         last.exitCode = mark.exitCode;
         last.command = command;
         last.finishedAt = Date.now();
         const startedAt = last.startedAt;
-        const durationMs = last.finishedAt - startedAt;
+        const durationMs = Math.max(0, last.finishedAt - startedAt);
         last.decoration = decorate(term, last, (x, y) =>
-          this.events.onCommandBlock(paneId, { id: last.prompt.id, command, exitCode: mark.exitCode, hasOutput: outputOf(term, last) !== "", startedAt, durationMs }, x, y),
+          this.events.onCommandBlock(paneId, { id: last.prompt.id, command, cwd: last.cwd, exitCode: mark.exitCode, hasOutput: outputOf(term, last) !== "", startedAt, durationMs }, x, y),
         );
         // Its server, if it ran one, has stopped: a later run may announce the same address again.
         entry.devUrls.clear();
-        this.events.onCommandFinished(paneId, { command, exitCode: mark.exitCode, durationMs, startedAt });
+        const captured = captureOutput(term, last, 128_000);
+        this.events.onCommandFinished(paneId, { blockId: last.prompt.id, cwd: last.cwd, environment:entry.environment,shellKind:entry.shellKind,...captured, command, exitCode: mark.exitCode, durationMs, startedAt });
         return;
       }
     }
@@ -907,6 +1063,7 @@ export class TerminalRegistry {
         resolveFiles(
           found.map((f) => f.path),
           entry.cwd,
+          entry.spec.profileId,entry.environment,
         ).then(
           (resolved) =>
             callback(
@@ -1037,7 +1194,7 @@ function outputRange(term: Terminal, mark: CommandMark): { start: number; end: n
   const buffer = term.buffer.normal;
   let start = mark.input.line + 1;
   while (buffer.getLine(start)?.isWrapped) start++;
-  let end = mark.end.line - 1;
+  let end = mark.end.line - (mark.endCol ? 0 : 1);
   while (end >= start && !buffer.getLine(end)?.translateToString(true).trim()) end--;
   return end >= start ? { start, end } : undefined;
 }
@@ -1051,9 +1208,26 @@ function outputOf(term: Terminal, mark: CommandMark): string {
   for (let line = range.start; line <= range.end; line++) {
     const row = buffer.getLine(line);
     if (!row) break;
-    text += (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped);
+    text += (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped, 0, line === mark.end?.line ? mark.endCol : undefined);
   }
   return text.replace(/\s+$/, "");
+}
+
+/** Bounded run capture; lost scrollback is never represented as complete output. */
+function captureOutput(term: Terminal, mark: CommandMark, limit: number): { output: string; outputTruncated: boolean } {
+  const lost = !mark.input || mark.input.isDisposed || !mark.end || mark.end.isDisposed;
+  const range = outputRange(term, mark);
+  if (!range) return { output: "", outputTruncated: lost };
+  const buffer = term.buffer.normal;
+  let text = "";
+  for (let line = range.start; line <= range.end; line++) {
+    const row = buffer.getLine(line);
+    if (!row) return { output: text, outputTruncated: true };
+    const next = (row.isWrapped || !text ? "" : "\n") + row.translateToString(!buffer.getLine(line + 1)?.isWrapped, 0, line === mark.end?.line ? mark.endCol : undefined);
+    if (text.length + next.length > limit) return { output: limitText(text + next, limit), outputTruncated: true };
+    text += next;
+  }
+  return { output: text.trimEnd(), outputTruncated: lost };
 }
 
 /**

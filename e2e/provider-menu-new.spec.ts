@@ -1,0 +1,8 @@
+// R86: real CLI fixture records actual cwd, provider home and destination identity.
+import {expect,test} from "./qterm";
+import {providerMenuFixture} from "./provider-menu-fixture";
+const fixture=providerMenuFixture();test.skip(!fixture.distro,"Requires an installed WSL distribution");test.use({settings:fixture.settings});test.beforeAll(fixture.seed);test.afterAll(fixture.cleanup);test.beforeEach(()=>fixture.reset());
+for(const provider of ["claude","codex"] as const)test(`a fresh ${provider} menu session preserves its WSL group environment without native fallback`,async({qterm})=>{
+  await fixture.ready(qterm);let menu=await fixture.menu(qterm,provider);await fixture.group(menu).getByRole("button",{name:`New ${provider==="claude"?"Claude":"Codex"} session in Case`,exact:true}).click();await expect(qterm.page.getByRole("tab")).toHaveCount(2);const pane=await qterm.activePane();await expect.poll(()=>qterm.terminalText(pane)).toContain("WSL_AGENT_RESULT_42");expect((await qterm.workspace()).panes[pane].environment).toBe(fixture.environment);expect(fixture.record()).toMatchObject({provider,mode:"fresh",cwd:fixture.project,home:`${fixture.root}/wrong/${provider}`});
+  menu=await fixture.menu(qterm,provider);await fixture.group(menu,fixture.other).getByRole("button",{name:`New ${provider==="claude"?"Claude":"Codex"} session in Case`,exact:true}).click();await expect.poll(async()=>await qterm.page.getByRole("status").count()>0||(await qterm.workspace()).tabs.length!==2).toBe(true);expect((await qterm.workspace()).tabs).toHaveLength(2);await expect(qterm.page.getByRole("status")).toContainText("No supported shell matches");
+});
