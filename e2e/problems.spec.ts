@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, test } from "./qterm";
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qterm-problems-"));
+const dir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "qterm-problems-"));
 const project = path.join(dir, "project one");
 const elsewhere = path.join(dir, "elsewhere");
 const editor = path.join(dir, "editor.cjs");

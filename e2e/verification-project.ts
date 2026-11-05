@@ -5,7 +5,8 @@ import { execFileSync } from "node:child_process";
 
 export const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 export function verificationProject() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qterm-verification-"));
+  // Canonical like qterm's reported cwd: %TEMP% can be an 8.3 short path (CI runners).
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "qterm-verification-"));
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=qterm-test", "-c", "user.email=qterm-test@example.invalid", "-c", "commit.gpgSign=false", ...args], { cwd: dir, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "NUL", GIT_CONFIG_NOSYSTEM: "1" } });
   fs.writeFileSync(path.join(dir, ".gitignore"), "target/\n");
   fs.writeFileSync(path.join(dir, "value.cjs"), "module.exports = 42;\n");
@@ -15,6 +16,7 @@ export function verificationProject() {
   return { dir, command, cleanup: () => {
     const target = fs.realpathSync.native(dir), temp = fs.realpathSync.native(os.tmpdir());
     if (path.dirname(target).toLowerCase() !== temp.toLowerCase() || !path.basename(target).startsWith("qterm-verification-")) throw new Error("Refusing to clean an unexpected verification fixture path");
-    fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    // Up to ~2s: shells restored into the project can still be exiting after qterm.stop().
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
   } };
 }
