@@ -14,9 +14,9 @@ Copyable layouts, profiles, snippets and other configuration:
 
 ## Download
 
-**Latest release: [qterm 0.2.8](https://github.com/stobjasz/qterm/releases/tag/v0.2.8)**:
-[installer](https://github.com/stobjasz/qterm/releases/download/v0.2.8/qterm_0.2.8_x64-setup.exe) ·
-[portable exe](https://github.com/stobjasz/qterm/releases/download/v0.2.8/qterm-0.2.8-portable-x64.exe) ·
+**Latest release: [qterm 0.3.0](https://github.com/stobjasz/qterm/releases/tag/v0.3.0)**:
+[installer](https://github.com/stobjasz/qterm/releases/download/v0.3.0/qterm_0.3.0_x64-setup.exe) ·
+[portable exe](https://github.com/stobjasz/qterm/releases/download/v0.3.0/qterm-0.3.0-portable-x64.exe) ·
 [all releases](https://github.com/stobjasz/qterm/releases)
 
 Two ways to run it:
