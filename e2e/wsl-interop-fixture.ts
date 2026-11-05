@@ -5,7 +5,10 @@ import {wslLaunchFixture} from "./wsl-launch-fixture";
 
 /** Inspect/clean only this unique fixture's exact Windows executable/script/tags. */
 export function wslInteropFixture(){
-  const linux=wslLaunchFixture(),parent=fs.realpathSync.native(path.resolve(".tools.local"));
+  // Only a configured distribution uses the folder; resolving it eagerly fails spec
+  // collection on clean checkouts (CI) before test.skip can apply.
+  const linux=wslLaunchFixture(),local=path.resolve(".tools.local");
+  const parent=linux.distro?(fs.mkdirSync(local,{recursive:true}),fs.realpathSync.native(local)):local;
   const root=path.join(parent,`wsl-interop-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`);
   const script=path.join(root,"interop.mjs"),control=path.join(root,"control.ps1"),node=fs.realpathSync.native(process.execPath);
   let linuxNode="";
