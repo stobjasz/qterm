@@ -13,6 +13,9 @@ it has extras for working with Claude Code and Codex CLI.
 - [Command palette, snippets, layouts and profiles](#command-palette-snippets-layouts-and-profiles)
 - [Picking up where you left off](#picking-up-where-you-left-off)
 - [Notifications](#notifications)
+- [Developer and coding-agent workflows](#developer-and-coding-agent-workflows)
+- [Detailed scenarios and configuration examples](developer-workflows.md)
+- [Layouts and everyday feature samples](feature-samples.md)
 - [Claude Code](#claude-code)
 - [Codex CLI](#codex-cli)
 - [Administrator tabs](#administrator-tabs)
@@ -48,6 +51,8 @@ Quitting or force-closing qterm ends its descendant processes, including detache
 tools started from its shells. This includes newly launched editors and browsers
 when they remain descendants of qterm. A verified update's installer/replacement
 is allowed to survive the old instance so updating can finish.
+Linux cleanup runs as the normal WSL user. Descendants that gain privilege through
+`sudo` may survive; qterm does not start a root supervisor.
 
 | Item | What it does |
 |---|---|
@@ -168,7 +173,7 @@ hides it. A restart unpins it.
 |---|---|
 | Dot | A background tab printed something new. |
 | Bell | A program in a background tab rang the bell. |
-| ✳ (spinning / dim) | Claude Code runs in the tab: working / idle at its prompt. |
+| Provider activity marker | Working, waiting, completed or unknown, with the event source available on hover. A quiet process alone does not establish idle. |
 | 44% | How full Claude's context is in that tab (red from 80%). Hover for details. |
 | ⏱4m / cold | Claude is idle there and its prompt cache stays warm this long / has gone cold. |
 | ↗5173 | A dev server runs in the tab: click to open it in the browser. |
@@ -177,7 +182,9 @@ hides it. A restart unpins it.
 | ADMIN | A pane in the tab runs as administrator. |
 | Coloured edge, icon | The colour and icon you gave the tab, or its shell's. |
 
-Markers disappear when you look at the tab.
+Unread-output, bell and completion-attention markers clear when you view the tab.
+Provider status and usage remain visible while available. Viewing an inbox event
+marks it read; resolving it is a separate action.
 
 ## Working in the terminal
 
@@ -286,6 +293,10 @@ finish the command first. Clipboard image paths use the same delivery rules.
   Fira Code (Cascadia Mono has none).
 
 ## Command palette, snippets, layouts and profiles
+
+For worked setups and copyable TOML files, see
+[layouts and everyday feature samples](feature-samples.md), including nested
+layouts, Windows/WSL comparisons, named workspaces, snippets and project triggers.
 
 **Command palette:** Ctrl+Shift+P lists everything qterm can do, plus your tabs,
 shells, themes, layouts, snippets and Claude sessions. Type a few letters of anything
@@ -443,6 +454,34 @@ characters. **Clear resolved events** leaves open events intact. Failed saves sh
 **Save problem** and retry automatically. If saved history cannot be read,
 **Recover saved inbox** preserves it as a backup before saving this run's events.
 
+qterm can notify you while hidden or while another app has focus. Clicking a
+notification opens the console on the relevant pane. Long commands use
+`long_command_alert` (30 seconds by default; `0` disables these alerts).
+Codex approval-routing activity is informational: it does not claim that a human
+question exists or create a needs-input toast. Repeated identical completion
+notifications are deduplicated. Actual provider questions stay in the agent UI.
+
+## Developer and coding-agent workflows
+
+Use these features together to move from a failed command to an isolated change
+and a recorded check. For full setup, copyable examples and expected outcomes,
+see the [developer workflow scenarios](developer-workflows.md).
+If a named button is missing, your installed build may predate these features.
+
+| You want to… | Start here | Worked scenario |
+|---|---|---|
+| Find which agent needs attention and diagnose missing events | **Inbox** and Settings → **Local delivery health** | [Agent health and attention](developer-workflows.md#2-understand-agent-status-and-handle-attention) |
+| Explain a compiler failure without losing its original context | **Problems** → inspect the run, or **Ask an agent about this** | [Failure to reviewed brief](developer-workflows.md#3-turn-a-build-failure-into-a-reviewed-agent-brief) |
+| Check whether a result still applies after edits | **Run with repository tracking** | [Tracked validation](developer-workflows.md#4-record-a-check-that-becomes-stale-after-edits) |
+| Work on a second task without disturbing dirty files | **Worktrees** | [Parallel checkout](developer-workflows.md#5-work-on-a-second-fix-without-disturbing-your-checkout) |
+| Start a server and unlock checks only when it reports ready | **Recipes** | [Dependency and readiness recipe](developer-workflows.md#6-start-a-development-stack-with-explicit-readiness) |
+| Let a local coding agent inspect results or request selected tasks | **Access** | [Session-only agent access](developer-workflows.md#7-give-a-local-agent-selected-project-capabilities) |
+| Resume work or transfer reviewed context to another provider | **Sessions** | [Session discovery and handoff](developer-workflows.md#8-resume-or-hand-off-a-session-with-reviewed-context) |
+| Run those workflows in Linux without mixing environments | Select the exact WSL profile/environment | [WSL configuration](developer-workflows.md#9-use-the-same-workflows-inside-a-specific-wsl-distribution) |
+| Recover after a failed save or restart | **Save problem** → retry/recovery | [Recovery](developer-workflows.md#10-recover-from-save-failures-and-restarts) |
+
+### Problems and recorded checks
+
 **Problems and command runs** in the tab bar (or the `problems` palette action)
 shows up to 100 saved completed commands across restarts. Shell integration must
 be enabled. TypeScript, Rust, ESLint, Go, pytest and .NET diagnostics include file/line links, resolved from
@@ -457,12 +496,14 @@ unsupported messages. Capture is bounded to 128000 UTF-16 units without splittin
 Unicode characters, and 500 diagnostics. Truncated or lost output is labelled
 incomplete. An exit code describes that command's result; it does not verify edits
 made afterward. **Run with repository tracking** previews the exact command and
-original folder before launching a new native shell tab. It captures repository
+original folder before launching a new matching native or WSL shell tab. It captures repository
 state before launch and watches for edits during the check. Later comparisons
 label matching, stale or unknown evidence; edits restored during a check still
 invalidate it. Ignored files, external dependencies and environment are outside
 this evidence. See [verification records](verification-records.md) for scope,
 limits and save recovery.
+
+### Worktree tasks
 
 **Worktrees** in the tab bar (or the `worktrees` palette action) creates a task on
 a new branch in a separate checkout. Preview its exact commit and directory,
@@ -471,14 +512,21 @@ retain the request, show changes and link saved command runs. Completing a task
 changes its label; files and branches remain. See [worktree tasks](worktree-tasks.md)
 for checkout scope, limits and recovery.
 
+### Local agent access
+
 **Access** in the tab bar (or `agent_access` in the palette) creates an explicit
-session-only read grant for a local coding agent. Review its canonical project,
+session-only read grant for a local coding agent. Select Windows or an explicit
+WSL distribution and review its canonical project,
 then share the private connection-file path. The CLI can list that project's
-native panes, read saved command results and inspect task definitions. Revoke a
+panes in that environment, read saved command results and inspect task definitions. Revoke a
 grant in the panel; all grants and credentials expire when qterm exits. Separately
 select reviewed named tasks and a shell to allow execution in new visible tabs.
 Requester/run IDs, status and explicit Stop controls stay in Access; completed
 results persist in command history. See [local agent access](local-agent-interface.md).
+There is no persistent-grant or arbitrary-command configuration switch. Named
+tasks require their own explicit selection and consent in Access for each session.
+
+### Workflow recipes
 
 **Recipes** in the tab bar (or `recipes` in the palette) reviews a versioned
 workflow from `.qterm.toml`. Inspect commands, folders, dependencies, readiness,
@@ -487,6 +535,8 @@ A failed or unknown exit blocks dependents; service steps can declare a literal
 output marker and a deadline. Cancel prevents pending launches; Stop explicitly
 ends this workflow's programs. Restoring panes never replays recipe commands.
 See [workflow recipes](workflow-recipes.md) for the format and boundaries.
+
+### Session library and handoffs
 
 **Sessions** combines remembered Claude/Codex sessions with provider, project,
 reported branch and environment filters. Explicit discovery checks transcript
@@ -497,14 +547,17 @@ and reviewed session handoffs in a matching distribution profile. Provider
 history settings still apply. See
 [session library and handoffs](session-library.md).
 
-qterm can tell you when something needs you while the console is hidden or you're
-looking at another tab: the tab gets a marker, and if you're in another app, a Windows
-notification appears. Clicking the notification opens the console on that pane.
+### Environment and delivery boundaries
 
-- **Long commands:** a command that ran at least 30 seconds and finished while you
-  weren't looking gets ✓ or ✗ on its tab and a notification. Change the time in
-  Settings → Terminal → "Notify when a long command finishes" (0 switches it off).
-- **Claude Code waiting for you:** see below.
+WSL projects, checks, recipes, worktrees and grants keep their original
+distribution and Linux folder. A missing or edited profile cannot silently use
+Windows or another distribution. Library transcript discovery additionally needs
+explicit source and provider-history opt-in; scoped project grants do not.
+
+Managed conversation/approval UI and automatic follow-ups to running agents are
+deferred. Use **Copy brief** for a manual follow-up in an existing agent.
+New/idle-shell handoffs remain available. Privileged Linux descendants may survive
+user-level cleanup. See [WSL support and limits](wsl-support.md).
 
 ## Claude Code
 
@@ -584,7 +637,8 @@ new Codex session afterwards. The setup preserves other hooks and backs up
 Sessions launched by qterm use `codex --no-daemon`; use that command for manual
 launches too, so hook processes inherit the correct pane information.
 
-The tab's ⬡ spins while Codex works and dims while idle. When available, its context
+The tab's ⬡ shows reported activity, completion, waiting or unknown status. A quiet
+process without lifecycle evidence stays unknown. When available, its context
 percentage appears beside it; hovering shows the model, context, output tokens and
 reported plan limits. Tabs take the session's first prompt as a title and show the
 last reply in their tooltip. Approval-routing hooks mark informational activity;
@@ -713,6 +767,9 @@ Top-level settings, as the panel names them:
 | `long_command_alert` | seconds; `0` turns it off | `30` |
 | `editor` | a command with `{file}`, `{line}`, `{col}` (below) | VS Code |
 | `claude_sessions`, `claude_alerts`, `claude_restore` | `true` / `false` | `false`, `true`, `false` |
+| `codex_sessions`, `codex_alerts`, `codex_restore` | `true` / `false` | `false`, `true`, `false` |
+| `wsl_sources` | Named-distribution source entries; each defaults disabled | `[]` |
+| `[scrollback]` `restore`, `lines`, `profiles` | Restore output, 100–10000 lines per pane, per-profile overrides | `true`, `1000`, `{}` |
 | `check_updates`, `explorer_menu` | `true` / `false` | `true`, `false` |
 | `[font]` `family`, `size`, `ligatures` | a CSS font list, `6`…`72`, `true` / `false` | Cascadia Mono, `14`, `false` |
 
@@ -916,6 +973,12 @@ characters, qterm leaves AltGr combinations to the shell.
 | qterm's hooks and status line in Claude Code (if set up) | `%USERPROFILE%\.claude\settings.json`; the previous version is kept as `settings.json.qterm-backup` |
 | Log file | `%LOCALAPPDATA%\dev.qterm.app\logs\qterm.log` (moved to `qterm.log.1` past 1 MB) |
 | Saved pane output | `%LOCALAPPDATA%\dev.qterm.app\scrollback\` |
+| Agent inbox | `%LOCALAPPDATA%\dev.qterm.app\agent-inbox.json` |
+| Completed command results and repository evidence | `%LOCALAPPDATA%\dev.qterm.app\command-runs.json` |
+| Worktree task metadata | `%LOCALAPPDATA%\dev.qterm.app\worktree-tasks.json` |
+| Session pin references | `%LOCALAPPDATA%\dev.qterm.app\session-pins.json` |
+| Temporary native agent briefs | `%LOCALAPPDATA%\dev.qterm.app\agent-briefs\` |
+| Session-only agent connection files | `%LOCALAPPDATA%\dev.qterm.app\agent-connections\`; removed when their grants end |
 | Pictures pasted from the clipboard | `%TEMP%\qterm-images\`, each removed after a week |
 | Console host and browser data | `%LOCALAPPDATA%\dev.qterm.app\` |
 

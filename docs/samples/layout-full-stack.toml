@@ -1,0 +1,10 @@
+# Merge into global config.toml. Requires PowerShell 7, Node and this checkout.
+# Nested layout: agent shell left; server above a check shell on the right.
+# Only the server pane starts a command. npm's dev script must already exist.
+[[layouts]]
+name = "Shop full stack"
+split = "row"
+panes = [
+  { profile = "pwsh", cwd = 'C:\work\shop' },
+  { split = "column", panes = [{ profile = "pwsh", cwd = 'C:\work\shop', command = "npm run dev" }, { profile = "pwsh", cwd = 'C:\work\shop' }] },
+]

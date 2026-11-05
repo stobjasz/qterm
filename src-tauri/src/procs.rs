@@ -31,6 +31,10 @@ fn process_image(pid:u32)->Option<std::path::PathBuf> {
 
 /// All running processes (one ToolHelp snapshot). Empty if the snapshot fails.
 pub fn snapshot() -> Vec<Process> {
+    snapshot_result().unwrap_or_default()
+}
+
+pub fn snapshot_result() -> Result<Vec<Process>,String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -42,7 +46,7 @@ pub fn snapshot() -> Vec<Process> {
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE || snap.is_null() {
-            return processes;
+            return Err(std::io::Error::last_os_error().to_string());
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -56,9 +60,11 @@ pub fn snapshot() -> Vec<Process> {
             });
             ok = Process32NextW(snap, &mut entry);
         }
+        let error=std::io::Error::last_os_error();
         CloseHandle(snap);
+        if error.raw_os_error()!=Some(18) { return Err(format!("Windows process snapshot failed: {error}")); }
     }
-    processes
+    Ok(processes)
 }
 
 /// Whether a process named `name` is `root` or runs anywhere below it.

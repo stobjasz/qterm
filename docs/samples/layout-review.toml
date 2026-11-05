@@ -1,0 +1,9 @@
+# Merge into global config.toml. Both folders and PowerShell 7 must exist.
+# This opens shells only; it does not create or switch Git worktrees.
+[[layouts]]
+name = "Review two checkouts"
+split = "row"
+panes = [
+  { profile = "pwsh", cwd = 'C:\work\shop' },
+  { profile = "pwsh", cwd = 'C:\work\shop-parser-fix' },
+]

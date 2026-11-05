@@ -1,0 +1,20 @@
+# Merge into global config.toml. Requires PowerShell 7 and the local checkout.
+[[profiles]]
+id = "custom:Shop development"
+name = "Shop development"
+command = "pwsh.exe -NoLogo -NoProfile"
+cwd = 'C:\work\shop'
+env = { NODE_ENV = "development", SHOP_API_URL = "http://127.0.0.1:4000" }
+tab_color = "green"
+icon = "DEV"
+font_size = 14
+background = "#15251c"
+
+# Optional: replace the SSH alias with a host already configured in ~/.ssh/config.
+[[profiles]]
+id = "custom:Staging inspection"
+name = "Staging inspection"
+command = "ssh shop-staging"
+tab_color = "orange"
+icon = "STG"
+background = "#2b2118"

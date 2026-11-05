@@ -16,6 +16,12 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
+    #[serde(default)]
+    pub environment: Option<String>,
+    #[serde(default)]
+    pub profile_key: Option<String>,
+    #[serde(default)]
+    pub common_identity: Option<[u64; 2]>,
     pub id: String,
     pub title: String,
     pub request: String,
@@ -56,6 +62,7 @@ mod tests {
         }
         fn draft(&self) -> Draft {
             Draft {
+                environment:None,
                 cwd: repo_state::display(&self.repo.dir),
                 title: "Fix parser".into(),
                 request: "Inspect this worktree; don't install dependencies".into(),
@@ -90,6 +97,33 @@ mod tests {
                 fs::remove_dir_all(p).unwrap();
             }
         }
+    }
+    #[test]
+    fn legacy_native_history_remains_readable_without_environment_or_profile_fields(){
+        let c=Case::new();let task=c.create();
+        let mut saved:serde_json::Value=serde_json::from_slice(&fs::read(&c.store.path).unwrap()).unwrap();
+        let record=saved["tasks"][0].as_object_mut().unwrap();
+        for key in ["environment","profileKey","commonIdentity"]{record.remove(key);}
+        fs::write(&c.store.path,serde_json::to_vec(&saved).unwrap()).unwrap();
+        let restored=Store::load(c.store.path.clone());assert!(restored.snapshot().error.is_none());
+        assert!(restored.task(&task.id).unwrap().environment.is_none());
+        assert_eq!(restored.details(&task.id).unwrap().branch,task.branch);
+    }
+    #[test]
+    fn exact_profile_changes_cancel_creation_and_open_without_storing_secrets(){
+        let c=Case::new();
+        let profile=|secret:&str|crate::pty::Profile::custom(&serde_json::from_value(serde_json::json!({"id":"powershell","name":"Worktree shell","command":"powershell.exe -NoProfile","env":{"TASK_SECRET":secret}})).unwrap());
+        let original=profile("private-profile-setting");let changed=profile("changed-setting");
+        let preview=c.store.preview_profile(c.draft(),&original).unwrap();
+        assert!(c.store.create_reviewed(&preview.token,&||vec![changed.clone()]).unwrap_err().contains("profile changed"));assert!(!c.target.exists());
+        let preview=c.store.preview_profile(c.draft(),&original).unwrap();
+        let snapshot=c.store.create_reviewed(&preview.token,&||vec![original.clone()]).unwrap();
+        assert!(!String::from_utf8(fs::read(&c.store.path).unwrap()).unwrap().contains("private-profile-setting"));
+        let restored=Store::load(c.store.path.clone());let id=&snapshot.tasks[0].id;
+        assert!(restored.prepare_open(id,true,&||vec![changed.clone()]).is_err());
+        assert_eq!(restored.prepare_open(id,true,&||vec![original.clone()]).unwrap().profile_key,Some(original.launch_key()));
+        let wsl=crate::pty::Profile::custom(&serde_json::from_value(serde_json::json!({"id":"powershell","name":"WSL replacement","command":"wsl.exe --distribution Ubuntu --exec /bin/bash -i"})).unwrap());
+        assert!(wsl.automation_key().is_none());assert!(Store::validate_profile(&snapshot.tasks[0],&[wsl]).is_err());
     }
     #[test]
     fn preview_is_read_only_and_created_task_preserves_dirty_source_and_survives_restart() {
@@ -239,6 +273,8 @@ mod tests {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Draft {
+    #[serde(default)]
+    pub environment: Option<String>,
     pub cwd: String,
     pub title: String,
     pub request: String,
@@ -258,6 +294,15 @@ pub struct Preview {
 struct Pending {
     preview: Preview,
     prepared: Instant,
+    linux: Option<LinuxPreview>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinuxPreview {
+    repository: String, common_dir: String, directory: String,
+    branch: String, base: String, commit: String,
+    source_identity: [u64; 2], common_identity: [u64; 2], parent_identity: [u64; 2],
+    source_dirty: bool,
 }
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -285,7 +330,7 @@ pub struct Snapshot {
     pub recovery_required: bool,
     pub backup_path: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Details {
     pub branch: String,
@@ -387,7 +432,12 @@ fn destination(value: &str, repository: &Path) -> Result<PathBuf, String> {
     Ok(target)
 }
 fn valid_task(t: &Task) -> bool {
-    bounded(&t.id, 100)
+    let environment=t.environment.as_deref().unwrap_or("native");
+    let linux=environment.strip_prefix("wsl:");
+    (environment=="native" || linux.is_some_and(crate::wsl::valid_distribution))
+        && t.profile_key.as_ref().is_none_or(|key|key.len()==64&&key.bytes().all(|b|b.is_ascii_hexdigit()))
+        && (linux.is_none() || (t.common_identity.is_some()&&t.profile_key.is_some()&&t.directory.starts_with('/')&&t.repository.starts_with('/')&&t.common_dir.starts_with('/')))
+        && bounded(&t.id, 100)
         && bounded(&t.title, 200)
         && bounded(&t.request, 8000)
         && bounded(&t.repository, 16384)
@@ -531,7 +581,10 @@ impl Store {
         let _ = self.persist(&mut i);
         Ok(Self::view(&i))
     }
-    pub fn preview(&self, draft: Draft) -> Result<Preview, String> {
+    #[cfg(test)]
+    fn preview(&self,draft:Draft)->Result<Preview,String>{self.preview_impl(draft,None)}
+    pub fn preview_profile(&self,draft:Draft,profile:&crate::pty::Profile)->Result<Preview,String>{self.preview_impl(draft,Some(profile))}
+    fn preview_impl(&self, draft: Draft, profile:Option<&crate::pty::Profile>) -> Result<Preview, String> {
         if !bounded(&draft.title, 200)
             || !bounded(&draft.request, 8000)
             || !bounded(&draft.base, 500)
@@ -541,6 +594,24 @@ impl Store {
         {
             return Err("Provide a title, request, base, branch and supported agent/shell".into());
         }
+        let profile_key=profile.map(crate::pty::Profile::launch_key);
+        let distribution=if let Some(profile)=profile {
+            if profile.id!=draft.profile_id{return Err("The selected shell changed; review the task again".into());}
+            profile.check_environment(draft.environment.as_deref())?;
+            if profile.distribution.is_none()&&!profile.native_agent_context(){return Err("Choose a supported native or WSL shell".into());}
+            crate::wsl::profile_distribution(&profile.id,std::slice::from_ref(profile))?
+        }else{None};
+        if let Some(distribution)=distribution{
+            let environment=format!("wsl:{}",distribution.to_lowercase());
+            if draft.environment.as_deref()!=Some(&environment){return Err("Review this task in its explicit WSL environment".into());}
+            let linux:LinuxPreview=serde_json::from_value(crate::wsl::call(&distribution,serde_json::json!({"method":"worktree_preview","cwd":draft.cwd,"directory":draft.directory,"base":draft.base,"branch":draft.branch}))?).map_err(|e|e.to_string())?;
+            let preview=Preview{token:unique(),source_dirty:linux.source_dirty,task:Task{
+                environment:Some(environment),profile_key,common_identity:Some(linux.common_identity),
+                id:unique(),title:draft.title.trim().into(),request:draft.request,repository:linux.repository.clone(),common_dir:linux.common_dir.clone(),directory:linux.directory.clone(),branch:linux.branch.clone(),base:linux.base.clone(),commit:linux.commit.clone(),provider:draft.provider,profile_id:draft.profile_id,created_at:repo_state::now(),status:"creating".into(),error:None,
+            }};
+            return self.remember(preview,Some(linux));
+        }
+        if draft.environment.as_deref().is_some_and(|e|e!="native"){return Err("The task environment is unavailable; native Git was not substituted".into());}
         let root = repo_state::root(&repo_state::native_folder(&draft.cwd)?)?;
         let branch = field(&root, &["check-ref-format", "--branch", &draft.branch])?;
         if branch != draft.branch || draft.branch.starts_with('-') {
@@ -577,6 +648,7 @@ impl Store {
             )?
             .is_empty(),
             task: Task {
+                environment:Some("native".into()),profile_key,common_identity:None,
                 id: unique(),
                 title: draft.title.trim().into(),
                 request: draft.request,
@@ -593,6 +665,10 @@ impl Store {
                 error: None,
             },
         };
+        self.remember(preview,None)
+    }
+    fn remember(&self,preview:Preview,linux:Option<LinuxPreview>)->Result<Preview,String>{
+        let token=preview.token.clone();
         let mut pending = self.pending.lock().unwrap();
         pending.retain(|_, p| p.prepared.elapsed() < Duration::from_secs(600));
         if pending.len() >= 16 {
@@ -603,6 +679,7 @@ impl Store {
             Pending {
                 preview: preview.clone(),
                 prepared: Instant::now(),
+                linux,
             },
         );
         Ok(preview)
@@ -610,7 +687,10 @@ impl Store {
     pub fn cancel(&self, token: &str) {
         self.pending.lock().unwrap().remove(token);
     }
-    pub fn create(&self, token: &str) -> Result<Snapshot, String> {
+    #[cfg(test)]
+    fn create(&self,token:&str)->Result<Snapshot,String>{self.create_checked(token,None)}
+    pub fn create_reviewed(&self,token:&str,profiles:&dyn Fn()->Vec<crate::pty::Profile>)->Result<Snapshot,String>{self.create_checked(token,Some(profiles))}
+    fn create_checked(&self, token: &str, profiles:Option<&dyn Fn()->Vec<crate::pty::Profile>>) -> Result<Snapshot, String> {
         let pending = self
             .pending
             .lock()
@@ -621,14 +701,14 @@ impl Store {
             return Err("Preview expired; review the task again".into());
         }
         let mut task = pending.preview.task;
-        let root = fs::canonicalize(&task.repository).map_err(|e| e.to_string())?;
-        if common(&root)? != task.common_dir || resolve(&root, &task.base)? != task.commit {
-            return Err("Repository or base changed; review a new preview".into());
-        }
-        let target = destination(&task.directory, &root)?;
-        if repo_state::display(&target) != task.directory {
-            return Err("Destination parent changed; review a new preview".into());
-        }
+        if let Some(profiles)=profiles{Self::validate_profile(&task,&profiles())?;}
+        let native=if pending.linux.is_none(){
+            let root = fs::canonicalize(&task.repository).map_err(|e| e.to_string())?;
+            if common(&root)? != task.common_dir || resolve(&root, &task.base)? != task.commit {return Err("Repository or base changed; review a new preview".into());}
+            let target = destination(&task.directory, &root)?;
+            if repo_state::display(&target) != task.directory {return Err("Destination parent changed; review a new preview".into());}
+            Some((root,target))
+        }else{None};
         let mut i = self.inner.lock().unwrap();
         if i.tasks.len() >= 200 {
             return Err("Worktree history is full (200 tasks); no worktree was created".into());
@@ -641,7 +721,13 @@ impl Store {
             i.tasks.remove(0);
             return Err(format!("No worktree created: {e}"));
         }
-        let outcome = self.checkout(&root, &target, &task);
+        let outcome=(||{
+            if let Some(profiles)=profiles{Self::validate_profile(&task,&profiles())?;}
+            if let Some(linux)=pending.linux{
+                let distro=task.environment.as_deref().and_then(|e|e.strip_prefix("wsl:")).ok_or("Missing WSL task environment")?;
+                crate::wsl::call_checked(distro,serde_json::json!({"method":"worktree_create","preview":linux}),&||{if let Some(profiles)=profiles{Self::validate_profile(&task,&profiles())?;}Ok(())})?;Ok(())
+            }else{let (root,target)=native.ok_or("Missing native task destination")?;self.checkout(&root,&target,&task)}
+        })();
         task.status = if outcome.is_ok() { "active" } else { "failed" }.into();
         task.error = outcome.err().map(|e| {
             format!("{e}. Branch and directory were preserved; inspect them before retrying")
@@ -706,6 +792,9 @@ impl Store {
             .find(|t| t.id == id)
             .cloned()
             .ok_or("Worktree task not found")?;
+        if let Some(distro)=task.environment.as_deref().and_then(|e|e.strip_prefix("wsl:")){
+            return serde_json::from_value(crate::wsl::call(distro,serde_json::json!({"method":"worktree_details","task":task}))?).map_err(|e|e.to_string());
+        }
         let root = repo_state::root(&repo_state::native_folder(&task.directory)?)?;
         if repo_state::display(&root) != task.directory || common(&root)? != task.common_dir {
             return Err("This directory is no longer the recorded worktree".into());
@@ -757,5 +846,18 @@ impl Store {
             summary_truncated: summary.chars().count() > 12000,
             summary: summary.chars().take(12000).collect(),
         })
+    }
+    pub fn task(&self,id:&str)->Result<Task,String>{self.inner.lock().unwrap().tasks.iter().find(|t|t.id==id).cloned().ok_or("Worktree task not found".into())}
+    pub fn prepare_open(&self,id:&str,agent:bool,profiles:&dyn Fn()->Vec<crate::pty::Profile>)->Result<Task,String>{
+        let task=self.task(id)?;Self::validate_profile(&task,&profiles())?;
+        let details=self.details(id)?;
+        if agent&&(task.status=="failed"||task.status=="creating"||details.branch!=task.branch){return Err("The task failed or its branch changed; open a shell to inspect it before launching its agent".into());}
+        Self::validate_profile(&task,&profiles())?;Ok(task)
+    }
+    pub fn validate_profile(task:&Task,profiles:&[crate::pty::Profile])->Result<(),String>{
+        let profile=profiles.iter().find(|p|p.id==task.profile_id).ok_or("The recorded shell profile is unavailable")?;
+        profile.check_environment(Some(task.environment.as_deref().unwrap_or("native")))?;
+        if task.profile_key.as_ref().is_some_and(|key|*key!=profile.launch_key())||(!profile.native_agent_context()&&profile.distribution.is_none()){return Err("The recorded shell profile changed; restore its reviewed command and environment before using this task".into());}
+        Ok(())
     }
 }

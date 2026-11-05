@@ -2,7 +2,7 @@
 
 Open **Worktrees** in the tab bar or the `worktrees` palette action. Choose **New
 worktree task**, then enter the source folder, title, request, base revision, new
-branch and a new directory with an existing parent. Choose a native shell and
+branch and a new directory with an existing parent. Choose a native or WSL shell and
 Codex, Claude Code or **Shell only**.
 
 **Preview worktree task** resolves the source repository and exact base commit.
@@ -12,6 +12,12 @@ directory, commit, shell and request, then choose **Create reviewed worktree**.
 The destination must not already exist, be inside the source checkout, or be
 inside that repository's shared Git metadata. A moved base or changed destination
 parent requires a new preview. Previews expire after ten minutes.
+
+WSL tasks retain the chosen distribution and show it in the preview and details.
+Git, path validation and inspection run inside that distribution. Changing the
+shell to another environment clears the source and destination fields for a fresh
+review. A changed profile command or environment prevents creation or opening;
+an unavailable distribution cannot fall back to native Git or the default distro.
 
 Creation saves task metadata first, reserves the new directory, creates a new
 branch at the reviewed commit, then checks out its files. Git hooks, filesystem
@@ -47,7 +53,11 @@ initial metadata save. Unreadable history stays untouched until explicit backup
 recovery. If qterm stops or checkout fails after creation starts, the record says
 so and preserves any branch/directory for inspection; it never tries destructive
 rollback. A missing or replaced checkout reports unavailable inspection and
-cannot silently open an unrelated repository. WSL worktree tasks remain planned.
+cannot silently open an unrelated repository. WSL tasks also retain Linux Git
+metadata identity. Agent startup rechecks the actual session, profile, branch and
+folder after the shell reaches its prompt. WSL tracked verification is available
+on supported local Linux filesystems through Problems → **Run with repository
+tracking**. Ordinary retained command results alone are not repository evidence.
 
 Git behavior references: [worktrees](https://git-scm.com/docs/git-worktree),
 [hooks](https://git-scm.com/docs/githooks),

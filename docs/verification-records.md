@@ -15,11 +15,14 @@ run and an existing pane.
 ## Run a check with evidence
 
 Select a previous command and choose **Run with repository tracking**. Review the
-exact command, original folder and shell, then choose **Run reviewed command**.
+exact command, original folder, environment and shell, then choose **Run reviewed command**.
 Opening this preview runs nothing. qterm captures repository state and starts the
-command in a new tab using the original native shell profile. The profile must
-still exist with the same shell kind and shell integration enabled. WSL and
-unclassified shells are not supported by this action yet.
+command in a new tab using the original native or WSL shell profile. The profile
+must still match the recorded environment and shell kind, with shell integration
+enabled. WSL checks additionally retain the exact reviewed launch configuration
+and distribution, then authorize their actual pane/session at an empty prompt in
+the captured folder. A changed profile or folder cancels startup. Unclassified
+shells are unsupported.
 
 The before-run snapshot includes canonical repository root, HEAD, branch, staged
 entries, tracked and nonignored untracked paths, and SHA-256 of their actual
@@ -46,3 +49,11 @@ are included; linked-worktree Git metadata is watched as well. Snapshot limits a
 deadline. Non-Git folders, symbolic links, submodule directories, watcher failures,
 moving snapshots and exceeded limits produce errors or unknown evidence instead
 of a match. A timestamp describes a comparison, not continuous proof of freshness.
+
+WSL tracking requires supported local Linux filesystems for both source and
+shared Git metadata. Windows-mounted drvfs/9p and remote filesystems are refused:
+Linux-only event observation cannot establish coverage of host or remote edits.
+Ordinary command history remains available. Losing the monitor before launch
+prevents automatic execution; losing it during a check produces unknown evidence
+even if the check exits zero. Closing the pane, shell exit or a direct qterm crash
+ends its owned monitor. See [implementation and acceptance](wsl-verification-implementation.md).

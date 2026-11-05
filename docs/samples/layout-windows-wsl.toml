@@ -1,0 +1,17 @@
+# Merge into global config.toml. Requires PowerShell 7 and WSL Ubuntu.
+# These are independent checkouts; qterm does not synchronize their files.
+[[profiles]]
+id = "custom:Sample Ubuntu Bash"
+name = "Sample Ubuntu Bash"
+command = "wsl.exe --distribution Ubuntu --exec /bin/bash -i"
+cwd = "/home/alex/work/shop"
+tab_color = "orange"
+icon = "LIN"
+
+[[layouts]]
+name = "Windows and Linux checks"
+split = "row"
+panes = [
+  { profile = "pwsh", cwd = 'C:\work\shop' },
+  { profile = "custom:Sample Ubuntu Bash", cwd = "/home/alex/work/shop" },
+]

@@ -46,7 +46,7 @@ export function agentStatusLabel(provider: string, state: AgentStatus): string {
 
 export function agentStatusDetail(state: AgentStatus, observed = false): string {
   if (state === "approval") return "Codex requested an approval check. Hooks or automatic review may handle it; qterm has not confirmed a question for you.";
-  if (state === "unknown") return "The process is running, but no lifecycle event confirms its current activity. Silence does not mean it is idle.";
+  if (state === "unknown") return "qterm cannot confirm the agent's current activity. Silence does not mean it is idle.";
   if (state === "idle") return "The last provider lifecycle event reported an idle session.";
   if (state === "waiting") return "A provider hook reported that input or permission is needed.";
   if (state === "completed") return "The provider reported that its turn completed; this does not establish that the changes passed checks.";

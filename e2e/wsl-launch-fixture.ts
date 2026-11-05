@@ -5,7 +5,9 @@ import {LIBRARY_ID,libraryFixture,openLibrary,discover,sessionRow} from "./sessi
 export function wslLaunchFixture(){
   const distro=process.env.QTERM_E2E_WSL_DISTRIBUTION,native=libraryFixture();
   const root=`/tmp/qterm-wsl-launch-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,project=`${root}/Case`,home=`${root}/source home it's 🦀`,environment=`wsl:${distro?.toLowerCase()}`;
-  const python=(code:string)=>execFileSync("wsl.exe",["--distribution",distro!,"--exec","/usr/bin/python3","-c",code],{encoding:"utf8",timeout:30000,windowsHide:true}).trim();
+  // Embedded supervisor checks can exceed Windows' command-line limit. Keep the
+  // code on stdin, independently of shell quoting and Python startup settings.
+  const python=(code:string)=>execFileSync("wsl.exe",["--distribution",distro!,"--exec","/usr/bin/python3","-I","-S","-"],{input:code,encoding:"utf8",timeout:30000,windowsHide:true}).trim();
   const settings:Settings={env:{...native.settings.env,XDG_CACHE_HOME:`${root}/cache`,WSLENV:"XDG_CACHE_HOME/u"},values:{default_profile:'"custom:WSL launch"',claude_sessions:"true",codex_sessions:"true",wsl_sources:`[{distribution=${JSON.stringify(distro??"unavailable")},enabled=true,claude_home=${JSON.stringify(`${home}/claude`)},codex_home=${JSON.stringify(`${home}/codex`)}}]`},extra:['[[profiles]]','id="custom:WSL launch"','name="WSL launch"',`command=${JSON.stringify(`wsl.exe --distribution "${distro}" --exec /bin/bash --noprofile --rcfile "${root}/rc" -i`)}`,`cwd=${JSON.stringify(project)}`].join("\n")};
   function seed(){if(!distro)return;native.seed();fs.rmSync(native.claudeFile);fs.rmSync(native.codexFile);
     const stub=`#!/usr/bin/python3
@@ -45,7 +47,7 @@ for name in ('record.json','hold','wrong-case'):
     p=${JSON.stringify(root)}+'/'+name
     if os.path.exists(p):os.unlink(p)`);}
   const record=()=>JSON.parse(python(`import json,os;p=${JSON.stringify(`${root}/record.json`)};print(open(p,encoding='utf8').read() if os.path.exists(p) else 'null')`));
-  async function ready(qterm:Qterm){const pane=await qterm.activePane();await expect.poll(async()=>(await qterm.workspace()).panes[pane]?.cwd).toBe(project);await expect.poll(()=>qterm.terminalText(pane)).toContain(`${project}$`);return pane;}
+  async function ready(qterm:Qterm){const pane=await qterm.activePane();await expect.poll(async()=>({cwd:(await qterm.workspace()).panes[pane]?.cwd,terminal:await qterm.terminalText(pane)})).toMatchObject({cwd:project});await expect.poll(()=>qterm.terminalText(pane)).toContain(`${project}$`);return pane;}
   async function select(qterm:Qterm,provider:"codex"|"claude"){const panel=await openLibrary(qterm.page);await discover(panel);const row=sessionRow(panel,provider,environment);await expect(row).toContainText(`WSL launch ${provider==="codex"?"Codex":"Claude"}`);await row.getByRole("button").click();return panel;}
   return{distro,root,project,home,environment,settings,seed,cleanup,flag,reset,record,python,ready,select};
 }

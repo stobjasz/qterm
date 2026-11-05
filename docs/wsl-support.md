@@ -1,7 +1,7 @@
 # WSL project and diagnostic support
 
-WSL project, path and explicit session discovery support is implemented. Full agent/session parity remains
-in progress; see [the remaining plan](wsl-parity-proposal.md).
+WSL project, path, session and developer workflows are implemented within the
+user-accepted unprivileged cleanup limit; see [the contract](wsl-parity-proposal.md).
 
 Detected distribution profiles carry their distribution explicitly. Custom
 `wsl.exe` profiles participate when their command names `-d`/`--distribution`
@@ -106,6 +106,14 @@ inferred from a Windows process scan.
 Native process/usage lookups exclude WSL and unknown custom shells; explicit hook
 reports retain their provenance.
 
+The Claude/Codex menus retain environment identity for remembered rows, folder
+groups, palette entries and forgetting. Native transcript browsing is explicitly
+labelled **Native Windows**. Resume verifies the source, provider home and folder
+through the session library before launch. Reusing an idle shell rechecks its
+captured environment, shell kind, focus and prompt/input state after preparation.
+Fresh sessions from a WSL folder group require a matching distribution profile.
+Missing sources or profiles fail visibly without selecting another environment.
+
 Each recognized WSL pane has a private Windows lifetime file and a Linux
 supervisor. Its file handle is non-inheritable and Windows deletes it on close or
 process termination. The supervisor leaves Bash's original terminal handles and
@@ -115,10 +123,64 @@ detached double-forked children. Unrelated Linux processes remain running. Clean
 pinned process handles and only the supervisor's own children. No distribution
 is terminated, and no helper is installed in the distribution.
 
-Still open: Linux live-process/lifecycle probes, Windows interoperability process
-ownership validation, older provider-menu scoping and running-session follow-ups.
-Full agent parity is not yet complete.
+Closing or switching a WSL pane now checks its actual Linux program tree and
+names running programs before confirmation. **Stop what runs in this pane** ends
+that pane's same-user programs while keeping its shell, including background,
+worker-thread children and descendants adopted after a double fork. It leaves
+other panes alone. A failed probe asks before closing; a failed Stop reports the
+error instead of claiming the pane is idle. Expired queued requests cannot target
+programs started after a timeout.
+
+A profile may run a program directly with `--exec`, or its shell may replace
+itself with a program. qterm names that root program before close. Shell-preserving
+Stop is unavailable when the root executable is not the user's configured shell
+or one listed in `/etc/shells`; interrupt the program or close its pane explicitly.
+The supervisor control channel accepts only authenticated list/Stop/presence operations
+for its own tree; it provides no arbitrary command or PID endpoint. These operations
+remain at the normal Linux user's privilege level.
+
+Close/switch actions also retain their original terminal/input context and, for
+a whole tab, its exact pane membership. Typing, a replaced session or an added
+split while inspection is pending cancels the obsolete action. Confirmation
+acceptance rechecks that context. Shell classification checks invocation data:
+`bash -c ...` and script launches are root programs, while declared interactive
+shell names and supported flags can retain their shell. Shared executable images
+also require a declared shell/app name; unknown long flags conservatively refuse
+shell-preserving Stop.
+
+Linux provider presence is now inspected within each captured pane's owned tree.
+A quiet recognized Claude/Codex image gives process-sourced unknown status, never
+idle. Node script matching checks the script position rather than searching prompt
+arguments. Probe errors remain explicit for associated panes and cannot remove
+another pane's evidence. Unknown wrappers with an existing hook association stay
+unknown until an empty shell prompt confirms the provider ended. Native usage
+indexes remain separate from WSL process evidence. This does not supply Linux
+provider lifecycle hooks or infer turn completion from a running process.
+
+WSL checks can now use **Run with repository tracking** in Problems. The preview
+retains their original environment and command; launch validates the exact
+profile/session/folder. Evidence stays stale after edits restored during the
+check. Windows-mounted/remote source or shared Git metadata cannot acquire
+Linux-only event coverage; monitor loss produces cancellation or unknown evidence.
+See [verification scope](verification-records.md).
+
+Workflow recipes now support explicitly selected WSL distribution profiles with
+integrated Bash. Review the environment and commands; dependencies, live readiness,
+timeouts and Stop retain the reviewed context. Changed definitions/profiles/folders
+block delayed launches. Restart restores fresh shells without replaying running
+or pending steps. See [workflow recipes](workflow-recipes.md).
+
+Scoped WSL task execution and the actual Linux CLI route pass all 162 desktop
+cases in checkpoint 38; see [the grant audit](wsl-scoped-grants-audit.md).
+Real BusyBox process/classifier evidence is recorded in checkpoint 39, using
+temporary declared aliases without changing Ubuntu's system shell registry.
+The user explicitly accepted unprivileged Linux cleanup limits with “limits” on
+5 November 2026. No root supervisor is approved or implemented.
+Managed sessions and running-session follow-ups were explicitly deferred by the
+user on 5 November 2026. Windows
+interoperability ownership, provider-menu scoping and the close/Stop slice are
+implemented; current validation and open regressions are recorded in
+[the implementation plan](developer-agent-plan.md).
 The current user-level supervisor cannot signal descendants that become root
-through `sudo`. Full privileged-descendant ownership is pending the security
-decision in [the root-supervisor proposal](wsl-ownership-proposal.md); it is not
-claimed complete by the same-user cleanup tests.
+through `sudo`. This is an accepted delivery limitation, documented with
+[the deferred root-supervisor proposal](wsl-ownership-proposal.md).

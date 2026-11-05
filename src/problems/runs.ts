@@ -40,7 +40,7 @@ export function addRun(runs: readonly CommandRun[], run: CommandRun): CommandRun
 export function latestRuns(runs: readonly CommandRun[]): CommandRun[] {
   const seen = new Set<string>();
   return runs.filter((run) => {
-    const key = JSON.stringify(run.commandTruncated ? [run.id] : [run.command, run.cwd, run.profileId]);
+    const key = JSON.stringify(run.commandTruncated ? [run.id] : [run.command, run.cwd, run.profileId, run.environment ?? "native"]);
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });

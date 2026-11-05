@@ -13,7 +13,7 @@ pub(crate) use profiles::parse_wsl_list;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
@@ -35,7 +35,13 @@ struct Session {
     // Drop the lifetime before the PTY handles: closing a console can block while
     // its Linux tree is alive and still holding output handles.
     wsl_owner: Option<crate::wsl_owner::Owner>,
+    // Release before the PTY can block, ending this pane's Windows interop tree.
+    windows_job: Option<crate::wsl_windows_job::Job>,
+    stop_state:Arc<AtomicU8>,
+    boot_state:Arc<AtomicU8>,
+    environment: Option<String>,
     binding: Option<(String, String)>,
+    launch_binding: Option<(String, String)>,
     shell_proxy: Option<std::path::PathBuf>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -47,6 +53,19 @@ struct Session {
 
 type Sessions = Arc<Mutex<HashMap<SessionId, Session>>>;
 
+impl Drop for Session {
+    fn drop(&mut self){
+        self.stop_state.store(2,Ordering::Release);
+        drop(self.wsl_owner.take());
+        drop(self.windows_job.take());
+    }
+}
+
+struct StopGuard(Arc<AtomicU8>);
+impl Drop for StopGuard {
+    fn drop(&mut self){let _=self.0.compare_exchange(1,0,Ordering::AcqRel,Ordering::Acquire);}
+}
+
 /// What the UI asks for when it opens a pane.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +75,7 @@ pub struct SpawnRequest {
     /// Captured pane identity. Never launch its saved cwd in an edited environment.
     pub expected_environment: Option<String>,
     pub expected_kind: Option<String>,
+    pub expected_profile_key: Option<String>,
     /// Start here when the folder exists (else the profile's home).
     pub cwd: Option<String>,
     /// Exported to the shell as QTERM_PANE, so tools in it (Claude Code's
@@ -98,7 +118,8 @@ impl SessionManager {
         };
         profile.check_environment(request.expected_environment.as_deref())?;
         profile.check_kind(request.expected_kind.as_deref())?;
-        let owner=profile.distribution.as_ref().map(|_|crate::wsl_owner::Owner::new()).transpose()?;
+        if request.expected_profile_key.as_ref().is_some_and(|key|*key!=profile.launch_key()){return Err("The reviewed shell profile changed before this pane started".into());}
+        let owner=profile.distribution.as_deref().map(crate::wsl_owner::Owner::new).transpose()?;
         let mut cmd = if let Some(owner)=&owner{profile.owned_command(request.cwd.as_deref(),integrate,owner)?}else{profile.command(request.cwd.as_deref(), integrate)};
         if let Some(pane_id) = &request.pane_id {
             cmd.env(crate::alerts::PANE_ENV, pane_id);
@@ -112,15 +133,18 @@ impl SessionManager {
             }
             crate::elevation::elevate(&mut cmd);
         }
-        let id = self.spawn(cmd, request.cols, request.rows, on_output, on_exit)?;
-        if let Some(session)=self.sessions.lock().unwrap().get_mut(&id) { session.shell_proxy=profile.shell_proxy();session.wsl_owner=owner; }
+        let windows_job=owner.as_ref().map(|_|crate::wsl_windows_job::Job::new()).transpose()?;
+        let id = self.spawn_with_job(cmd, request.cols, request.rows, on_output, on_exit, windows_job)?;
+        if let Some(session)=self.sessions.lock().unwrap().get_mut(&id) { session.environment=profile.distribution.as_ref().map(|d|format!("wsl:{}",d.to_lowercase())).or_else(||profile.native_agent_context().then(||"native".into()));session.shell_proxy=profile.shell_proxy();session.wsl_owner=owner; }
         if !request.elevated && integrate && let (Some(pane), Some(key)) = (&request.pane_id, profile.automation_key()) && let Some(session) = self.sessions.lock().unwrap().get_mut(&id) { session.binding = Some((pane.clone(), key)); }
+        if !request.elevated&&integrate&&let Some(pane)=&request.pane_id&&let Some(session)=self.sessions.lock().unwrap().get_mut(&id){session.launch_binding=Some((pane.clone(),profile.launch_key()));}
         Ok(id)
     }
 
     /// `on_output` receives batched bytes and returns `false` once nobody is listening;
     /// the receiver must `ack` them as it processes them, or reading pauses.
     /// `on_exit` gets the id and exit code after the session has been removed.
+    #[cfg(test)]
     pub fn spawn(
         &self,
         cmd: CommandBuilder,
@@ -129,12 +153,26 @@ impl SessionManager {
         on_output: impl FnMut(Vec<u8>) -> bool + Send + 'static,
         on_exit: impl FnOnce(SessionId, u32) + Send + 'static,
     ) -> Result<SessionId, String> {
+        self.spawn_with_job(cmd,cols,rows,on_output,on_exit,None)
+    }
+
+    fn spawn_with_job(
+        &self,mut cmd:CommandBuilder,cols:u16,rows:u16,
+        on_output:impl FnMut(Vec<u8>)->bool+Send+'static,
+        on_exit:impl FnOnce(SessionId,u32)+Send+'static,
+        windows_job:Option<crate::wsl_windows_job::Job>,
+    )->Result<SessionId,String>{
         crate::process_owner::ensure()?;
+        if let Some(job)=&windows_job {cmd.set_windows_job_handle(job.handle());}
         allow_ctrl_c_in_children();
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
             .map_err(|e| e.to_string())?;
+        // A local declared after the PTY also releases the job first on setup
+        // errors, before Session exists and its explicit Drop can enforce order.
+        let mut pane_job=windows_job;
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+        if let Some(job)=&mut pane_job {job.retain_client(child.as_raw_handle().ok_or("The WSL client has no Windows process handle")?)?;}
         drop(pair.slave);
 
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -146,7 +184,7 @@ impl SessionManager {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         self.sessions.lock().unwrap().insert(
             id,
-            Session { wsl_owner:None,binding: None, shell_proxy: None, master: pair.master, writer, killer, flow: Arc::clone(&flow), pid },
+            Session { wsl_owner:None,windows_job:pane_job,stop_state:Arc::new(AtomicU8::new(0)),boot_state:Arc::new(AtomicU8::new(0)),environment:None,binding: None,launch_binding:None, shell_proxy: None, master: pair.master, writer, killer, flow: Arc::clone(&flow), pid },
         );
 
         pump_output(reader, flow, on_output);
@@ -163,9 +201,33 @@ impl SessionManager {
         Ok(id)
     }
 
+    /// Called after the frontend attaches and flushes early terminal replies.
+    pub fn ready(&self,id:SessionId)->Result<(),String>{
+        let (owner,mut job,boot,state)={
+            let sessions=self.sessions.lock().unwrap();let session=sessions.get(&id).ok_or("The starting pane closed")?;
+            let Some(owner)=session.wsl_owner.as_ref()else{return Ok(());};
+            match session.boot_state.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire){Ok(_)=>{},Err(2)=>return Ok(()),Err(_)=>return Err("Pane startup is already being prepared".into())}
+            (owner.control(),session.windows_job.clone().ok_or("Windows pane ownership is unavailable")?,session.boot_state.clone(),session.stop_state.clone())
+        };
+        let prepared=(||{
+            owner.bootstrap(false,||state.load(Ordering::Acquire)!=2)?;
+            job.capture_transport()?;
+            {let mut sessions=self.sessions.lock().unwrap();let session=sessions.get_mut(&id).ok_or("The pane closed during startup")?;session.windows_job=Some(job);}
+            owner.bootstrap(true,||state.load(Ordering::Acquire)!=2)
+        })();
+        boot.store(if prepared.is_ok(){2}else{3},Ordering::Release);
+        if prepared.is_err(){self.kill(id);}
+        prepared
+    }
+
     pub fn write(&self, id: SessionId, data: &str) -> Result<(), String> {
+        self.write_input(id,data,false)
+    }
+
+    pub fn write_input(&self,id:SessionId,data:&str,protocol_reply:bool)->Result<(),String>{
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions.get_mut(&id).ok_or("no such session")?;
+        if !protocol_reply&&session.stop_state.load(Ordering::Acquire)!=0{return Err("This pane is stopping programs; try input again when Stop finishes".into());}
         session
             .writer
             .write_all(data.as_bytes())
@@ -176,6 +238,7 @@ impl SessionManager {
     pub fn automation_binding(&self, id: SessionId) -> Option<(String, String)> {
         self.sessions.lock().unwrap().get(&id)?.binding.clone()
     }
+    pub fn launch_binding(&self,id:SessionId)->Option<(String,String)>{self.sessions.lock().unwrap().get(&id).and_then(|s|s.launch_binding.clone())}
 
     pub fn resize(&self, id: SessionId, cols: u16, rows: u16) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
@@ -184,32 +247,42 @@ impl SessionManager {
     }
 
     /// What runs inside these sessions' shells (closing them would end it).
-    pub fn programs(&self, ids: &[SessionId]) -> Vec<String> {
-        let shells: Vec<(u32, Option<std::path::PathBuf>)> = {
+    pub fn programs(&self, ids: &[SessionId]) -> Result<Vec<String>, String> {
+        let shells: Vec<_> = {
             let sessions = self.sessions.lock().unwrap();
-            ids.iter().filter_map(|id| { let session=sessions.get(id)?; Some((session.pid?,session.shell_proxy.clone())) }).collect()
+            ids.iter().filter_map(|id| { let session=sessions.get(id)?; Some((session.pid?,session.shell_proxy.clone(),session.wsl_owner.as_ref().map(|owner|owner.control()),session.windows_job.clone())) }).collect()
         };
         if shells.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let processes = crate::procs::snapshot();
+        let processes = crate::procs::snapshot_result()?;
         let mut all: Vec<String> = Vec::new();
-        for (shell,proxy) in shells {
+        for (shell,proxy,owner,job) in shells {
             let shell=crate::procs::interactive_shell(&processes,shell,proxy.as_deref());
-            for name in crate::procs::programs_below(&processes, shell) {
+            let mut programs=if let Some(owner)=owner { owner.request(false)? } else {crate::procs::programs_below(&processes, shell)};
+            if let Some(job)=job {programs.extend(job.programs()?);}
+            for name in programs {
                 if !all.contains(&name) {
                     all.push(name);
                 }
             }
         }
-        all
+        Ok(all)
     }
 
     /// Ends everything running inside the session's shell, keeping the shell; returns
     /// the names of what ended.
     pub fn stop_programs(&self, id: SessionId) -> Result<Vec<String>, String> {
-        let (shell,proxy)={ let sessions=self.sessions.lock().unwrap(); let session=sessions.get(&id).ok_or("no such session")?; (session.pid.ok_or("the shell's process isn't known")?,session.shell_proxy.clone()) };
-        let processes = crate::procs::snapshot();
+        let (shell,proxy,owner,job,guard)={ let sessions=self.sessions.lock().unwrap(); let session=sessions.get(&id).ok_or("no such session")?;session.stop_state.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).map_err(|_|"This pane already has a Stop in progress")?;let guard=StopGuard(session.stop_state.clone()); (session.pid.ok_or("the shell's process isn't known")?,session.shell_proxy.clone(),session.wsl_owner.as_ref().map(|owner|owner.control()),session.windows_job.clone(),guard) };
+        if let Some(owner)=owner {
+            owner.ensure_shell()?;
+            let plan=job.as_ref().map(|job|job.prepare_stop()).transpose()?;
+            let mut names=Vec::new();
+            if let Some(plan)=plan {for name in plan.finish(||guard.0.load(Ordering::Acquire)==1)? {if !names.contains(&name){names.push(name);}}}
+            for name in owner.request(true)?{if !names.contains(&name){names.push(name);}}
+            return Ok(names);
+        }
+        let processes = crate::procs::snapshot_result()?;
         let shell=crate::procs::interactive_shell(&processes,shell,proxy.as_deref());
         Ok(crate::procs::terminate(&crate::procs::tree_below(&processes, shell)))
     }
@@ -217,6 +290,14 @@ impl SessionManager {
     /// Each session and its shell's process id.
     pub fn shells(&self) -> Vec<(SessionId, u32)> {
         self.sessions.lock().unwrap().iter().filter_map(|(id, s)| Some((*id, s.pid?))).collect()
+    }
+
+    pub(crate) fn process_targets(&self,ids:&[SessionId])->Vec<crate::agent_process::Target>{
+        let sessions=self.sessions.lock().unwrap();
+        ids.iter().map(|id|{
+            let session=sessions.get(id);
+            crate::agent_process::Target {id:*id,pid:session.and_then(|s|s.pid),environment:session.and_then(|s|s.environment.clone()).unwrap_or_else(||"unknown".into()),owner:session.and_then(|s|s.wsl_owner.as_ref().map(|owner|owner.control())),ended:session.is_none()}
+        }).collect()
     }
 
     /// Sessions with `program` (e.g. "claude.exe") running inside their shell.

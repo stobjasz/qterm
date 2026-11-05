@@ -33,10 +33,13 @@ pub fn info(cwd: &Path) -> ProjectInfo {
 }
 /// Files only: WSL callers use Linux Git, never Windows Git on a Linux worktree.
 pub fn files_info(cwd:&Path)->ProjectInfo {
+    files_info_environment(cwd,false)
+}
+pub(crate) fn files_info_environment(cwd:&Path,linux:bool)->ProjectInfo {
     if !cwd.is_dir() {
         return ProjectInfo::default();
     }
-    let (settings, settings_error) = match find_settings(cwd) {
+    let (settings, settings_error) = match if linux {find_settings_environment(cwd,true)}else{find_settings(cwd)} {
         Some(Ok(file)) => (Some(file), None),
         Some(Err(e)) => (None, Some(e)),
         None => (None, None),
@@ -81,6 +84,15 @@ pub fn tasks(cwd: &Path) -> Option<Tasks> {
 
 /// The scripts defined by the manifests in `dir` itself.
 fn tasks_in(dir: &Path) -> Vec<Task> {
+    tasks_from_sources(&|name|read_json(&dir.join(name)),&|name|read_text(&dir.join(name)),&|name|dir.join(name).is_file(),&|json|package_manager(dir,json))
+}
+/// Shared format parsing; filesystem and environment policy stay with the reader.
+pub(crate) fn tasks_from_sources(
+    json:&dyn Fn(&str)->Option<serde_json::Value>,
+    text:&dyn Fn(&str)->Option<String>,
+    exists:&dyn Fn(&str)->bool,
+    package_manager:&dyn Fn(&serde_json::Value)->&'static str,
+) -> Vec<Task> {
     let mut tasks = Vec::new();
     let mut add = |source: &str, names: Vec<String>, command: &dyn Fn(&str) -> String| {
         for name in names {
@@ -89,24 +101,24 @@ fn tasks_in(dir: &Path) -> Vec<Task> {
             }
         }
     };
-    if let Some(json) = read_json(&dir.join("package.json")) {
-        let pm = package_manager(dir, &json);
-        add("package.json", object_keys(&json, "/scripts"), &|name| format!("{pm} run {name}"));
+    if let Some(package) = json("package.json") {
+        let pm = package_manager(&package);
+        add("package.json", object_keys(&package, "/scripts"), &|name| format!("{pm} run {name}"));
     }
-    if dir.join("Cargo.toml").is_file() {
+    if exists("Cargo.toml") {
         let names = ["build", "check", "test", "run", "clippy"].map(String::from).to_vec();
         add("Cargo.toml", names, &|name| format!("cargo {name}"));
     }
-    if let Some((file, text)) = ["Makefile", "makefile", "GNUmakefile"].iter().find_map(|f| Some((*f, read_text(&dir.join(f))?))) {
+    if let Some((file, text)) = ["Makefile", "makefile", "GNUmakefile"].iter().find_map(|f| Some((*f, text(f)?))) {
         add(file, make_targets(&text), &|name| format!("make {name}"));
     }
-    if let Some((file, text)) = ["justfile", "Justfile", ".justfile"].iter().find_map(|f| Some((*f, read_text(&dir.join(f))?))) {
+    if let Some((file, text)) = ["justfile", "Justfile", ".justfile"].iter().find_map(|f| Some((*f, text(f)?))) {
         add(file, just_recipes(&text), &|name| format!("just {name}"));
     }
-    if let Some(json) = read_json(&dir.join("composer.json")) {
-        add("composer.json", object_keys(&json, "/scripts"), &|name| format!("composer run-script {name}"));
+    if let Some(package) = json("composer.json") {
+        add("composer.json", object_keys(&package, "/scripts"), &|name| format!("composer run-script {name}"));
     }
-    if let Some(toml) = read_text(&dir.join("pyproject.toml")).and_then(|t| t.parse::<toml::Table>().ok()) {
+    if let Some(toml) = text("pyproject.toml").and_then(|t| t.parse::<toml::Table>().ok()) {
         let keys = |path: &[&str]| -> Vec<String> {
             let mut value: Option<&toml::Value> = None;
             for (i, key) in path.iter().enumerate() {
@@ -118,9 +130,9 @@ fn tasks_in(dir: &Path) -> Vec<Task> {
         add("pyproject.toml", keys(&["tool", "pdm", "scripts"]), &|name| format!("pdm run {name}"));
         add("pyproject.toml", keys(&["tool", "hatch", "envs", "default", "scripts"]), &|name| format!("hatch run {name}"));
         // Entry points: run through the project's environment.
-        let runner = if dir.join("uv.lock").is_file() {
+        let runner = if exists("uv.lock") {
             "uv run "
-        } else if dir.join("poetry.lock").is_file() || toml.get("tool").and_then(|t| t.get("poetry")).is_some() {
+        } else if exists("poetry.lock") || toml.get("tool").and_then(|t| t.get("poetry")).is_some() {
             "poetry run "
         } else {
             ""
@@ -135,24 +147,26 @@ fn tasks_in(dir: &Path) -> Vec<Task> {
 /// pnpm, yarn or bun when the project says so (`packageManager`, or its lockfile
 /// here or in a folder above, up to the repository's root), else npm.
 fn package_manager(dir: &Path, package: &serde_json::Value) -> &'static str {
+    package_manager_from_sources(package,&||{
+        for folder in dir.ancestors(){
+            if let Some(pm)=package_manager_lock(&|name|folder.join(name).is_file()){return Some(pm);}
+            if folder.join(".git").exists(){break;}
+        }
+        None
+    })
+}
+pub(crate) fn package_manager_from_sources(package:&serde_json::Value,fallback:&dyn Fn()->Option<&'static str>)->&'static str{
     const KNOWN: [(&str, &str); 4] = [("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("bun", "bun.lock"), ("npm", "package-lock.json")];
     if let Some(declared) = package.get("packageManager").and_then(|v| v.as_str())
         && let Some((pm, _)) = KNOWN.iter().find(|(pm, _)| declared.starts_with(&format!("{pm}@")))
     {
         return pm;
     }
-    for folder in dir.ancestors() {
-        if let Some((pm, _)) = KNOWN.iter().find(|(_, lock)| folder.join(lock).is_file()) {
-            return pm;
-        }
-        if folder.join("bun.lockb").is_file() {
-            return "bun";
-        }
-        if folder.join(".git").exists() {
-            break;
-        }
-    }
-    "npm"
+    fallback().unwrap_or("npm")
+}
+pub(crate) fn package_manager_lock(exists:&dyn Fn(&str)->bool)->Option<&'static str>{
+    const KNOWN: [(&str, &str); 4] = [("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("bun", "bun.lock"), ("npm", "package-lock.json")];
+    KNOWN.iter().find(|(_,lock)|exists(lock)).map(|(pm,_)|*pm).or_else(||exists("bun.lockb").then_some("bun"))
 }
 
 /// A Makefile's explicit targets: not pattern rules, special targets or variables.
@@ -291,17 +305,23 @@ pub struct ProjectSettingsFile {
 
 /// The nearest `.qterm.toml` at or above `cwd`, read and checked.
 pub fn find_settings(cwd: &Path) -> Option<Result<ProjectSettingsFile, String>> {
+    find_settings_environment(cwd,false)
+}
+fn find_settings_environment(cwd:&Path,linux:bool)->Option<Result<ProjectSettingsFile,String>>{
     let path: PathBuf = cwd.ancestors().map(|dir| dir.join(SETTINGS_FILE)).find(|p| p.is_file())?;
     let shown = path.to_string_lossy().into_owned();
     Some(
         read_text(&path)
             .ok_or_else(|| format!("{shown}: could not read it"))
-            .and_then(|text| parse_settings(&text).map_err(|e| format!("{shown}: {e}")))
+            .and_then(|text| parse_settings_environment(&text,linux).map_err(|e| format!("{shown}: {e}")))
             .map(|settings| ProjectSettingsFile { path: shown, settings }),
     )
 }
 
 pub(crate) fn parse_settings(text: &str) -> Result<ProjectSettings, String> {
+    parse_settings_environment(text,false)
+}
+pub(crate) fn parse_settings_environment(text: &str, linux:bool) -> Result<ProjectSettings, String> {
     let settings: ProjectSettings = toml::from_str(text).map_err(|e| e.to_string().trim().to_string())?;
     if let Some(color) = settings.tab_color.as_deref().filter(|c| !TAB_COLORS.contains(c)) {
         return Err(format!("tab_color \"{color}\" is not one of {}", TAB_COLORS.join(", ")));
@@ -313,7 +333,7 @@ pub(crate) fn parse_settings(text: &str) -> Result<ProjectSettings, String> {
         return Err("name is longer than 80 characters".into());
     }
     crate::config::check_triggers(&settings.triggers)?;
-    if let Some(workflows) = &settings.workflows { crate::recipes::validate(workflows)?; }
+    if let Some(workflows) = &settings.workflows { if linux{crate::recipes::validate_environment(workflows,true)?;}else{crate::recipes::validate(workflows)?;} }
     Ok(settings)
 }
 

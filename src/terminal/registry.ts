@@ -26,6 +26,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  ptyReady,
   resolveFiles,
   type SessionId,
   type ShellKind,
@@ -164,6 +165,7 @@ interface CommandMark {
 
 /** How to start a pane's shell. */
 export interface PaneSpec {
+  profileKey?:string;
   startupValidation?:boolean;
   shellKind?:ShellKind;
   environment?: string;
@@ -206,6 +208,7 @@ interface Entry {
   shellKind:ShellKind;
   environment: string;
   startupAuthorizing?: boolean;
+  stopReserved?:symbol;
   cancelStartup?: () => void;
   term: Terminal;
   fit: FitAddon;
@@ -244,7 +247,7 @@ interface Entry {
   /** Every non-protocol input, including edits that never submit a command. */
   inputRevision: number;
   /** Input produced before the shell's session id was known, e.g. the reply to ConPTY's cursor query. */
-  earlyInput: string[];
+  earlyInput: {data:string;reply:boolean}[];
   /** Lines sent to the shell (Enter, pasted lines, startup input) since it started. */
   commands: number;
   /** Prompts and commands, oldest first (needs shell integration). */
@@ -431,6 +434,12 @@ export class TerminalRegistry {
     return this.entries.get(paneId)?.sessionId;
   }
 
+  /** Closing must not act on a replaced terminal or input entered after inspection began. */
+  closeToken(paneId:PaneId):string|undefined {
+    const entry=this.entries.get(paneId);
+    return entry?JSON.stringify([entry.sessionId,entry.environment,entry.shellKind,entry.inputRevision]):undefined;
+  }
+
   /** Date.now() of the pane's latest output, 0 if none. */
   lastOutput(paneId: PaneId): number {
     return this.entries.get(paneId)?.lastOutput ?? 0;
@@ -532,8 +541,17 @@ export class TerminalRegistry {
 
   atEmptyPrompt(paneId: PaneId): boolean {
     const entry = this.entries.get(paneId);
+    if(entry?.stopReserved)return false;
     const mark = entry?.marks[entry.marks.length - 1];
     return Boolean(entry && entry.term.buffer.active.type === "normal" && mark?.input && !mark.end && mark.startedAt === undefined && !commandAt(entry.term, mark).trim());
+  }
+
+  /** Reserve user input while Stop drains old programs; protocol replies still flow. */
+  reserveStop(paneId:PaneId):(()=>void)|undefined{
+    const entry=this.entries.get(paneId);
+    if(!entry||entry.sessionId===undefined||entry.stopReserved||entry.startupAuthorizing)return;
+    const token=Symbol();entry.stopReserved=token;
+    return()=>{if(this.entries.get(paneId)===entry&&entry.stopReserved===token)entry.stopReserved=undefined;};
   }
 
   /** Scrolls to the previous (-1) or next (1) command's prompt; past the last one, to the bottom. */
@@ -639,7 +657,7 @@ export class TerminalRegistry {
    * as a keystroke of its own when `run`, since a bracketed paste never runs.
    */
   typeSnippet(paneId: PaneId, command: string, run: boolean): void {
-    if (this.entries.get(paneId)?.startupAuthorizing) return;
+    if (this.entries.get(paneId)?.startupAuthorizing||this.entries.get(paneId)?.stopReserved) return;
     const term = this.entries.get(paneId)?.term;
     if (!term) return;
     term.paste(command);
@@ -663,12 +681,12 @@ export class TerminalRegistry {
 
   /** Types `text` as a paste: broadcast like typing, and bracketed when the shell asked for it. */
   pasteText(paneId: PaneId, text: string): void {
-    if (this.entries.get(paneId)?.startupAuthorizing) return;
+    if (this.entries.get(paneId)?.startupAuthorizing||this.entries.get(paneId)?.stopReserved) return;
     this.entries.get(paneId)?.term.paste(text);
   }
 
   inputTargets(paneId:PaneId):PaneId[]{return [...(this.broadcast.get(paneId)??[paneId])];}
-  acceptsPaste(paneId:PaneId):boolean{const entry=this.entries.get(paneId);return entry?.sessionId!==undefined&&!entry.startupAuthorizing;}
+  acceptsPaste(paneId:PaneId):boolean{const entry=this.entries.get(paneId);return entry?.sessionId!==undefined&&!entry.startupAuthorizing&&!entry.stopReserved;}
   /** Per-target file delivery still uses xterm's bracketed-paste protocol. */
   pasteTextToPane(paneId:PaneId,text:string):void{
     if(!this.acceptsPaste(paneId))return;
@@ -787,7 +805,7 @@ export class TerminalRegistry {
       for (const target of this.directPaste.has(paneId)||reply?[paneId]:this.broadcast.get(paneId) ?? [paneId]) {
         const targetEntry = this.entries.get(target);
         // Reserve task input, but keep cursor/device replies flowing to ConPTY.
-        if (targetEntry?.startupAuthorizing && !reply) continue;
+        if ((targetEntry?.startupAuthorizing||targetEntry?.stopReserved) && !reply) continue;
         if(targetEntry&&!reply)targetEntry.inputRevision++;
         // Bracketed paste contains literal newlines without submitting a turn.
         if (targetEntry && !data.startsWith("\x1b[200~") && /[\r\n\x03]/.test(data)) targetEntry.submissionRevision++;
@@ -798,8 +816,8 @@ export class TerminalRegistry {
           if (mark?.input && mark.startedAt === undefined) { mark.startedAt = Date.now(); mark.command = commandAt(targetEntry.term, mark) || undefined; }
         }
         const session = targetEntry?.sessionId;
-        if (session !== undefined) void ptyWrite(session, data);
-        else if (target === paneId) entry.earlyInput.push(data);
+        if (session !== undefined) void ptyWrite(session, data,reply).catch(()=>{});
+        else if (target === paneId) entry.earlyInput.push({data,reply});
       }
     });
     term.onBell(() => {
@@ -905,17 +923,18 @@ export class TerminalRegistry {
     (entry.spec.restored ? showRestored(term, entry.spec.restored) : Promise.resolve())
       .then(() => {
         entry.markReady();
-        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput, entry.spec.elevated,entry.environment,entry.shellKind);
+        return ptySpawn(paneId, entry.spec.profileId, term.cols, term.rows, entry.spec.cwd, onOutput, entry.spec.elevated,entry.environment,entry.shellKind,entry.spec.profileKey);
       })
-      .then((id) => {
+      .then(async(id) => {
         // The pane may have been closed while the shell was starting.
         if (this.entries.get(paneId) !== entry) return void ptyKill(id);
         entry.sessionId = id;
         this.flushAck(entry); // output may have arrived before the id did
-        for (const data of entry.earlyInput.splice(0)) void ptyWrite(id, data);
+        for (const input of entry.earlyInput.splice(0)) await ptyWrite(id, input.data,input.reply);
+        await ptyReady(id);
         if (entry.spec.startupAtPrompt) tryStartup();
       })
-      .catch((err) => { entry.cancelStartup?.(); term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`); this.events.onStartupError?.(paneId, `Could not start shell: ${err}`); });
+      .catch((err) => {if(this.entries.get(paneId)!==entry)return;entry.cancelStartup?.(); term.write(`\r\n\x1b[31mqterm: could not start shell: ${err}\x1b[0m\r\n`); this.events.onStartupError?.(paneId, `Could not start shell: ${err}`); });
   }
 
   /** Turns ligatures on or off for an open terminal; the renderer is reloaded after. */

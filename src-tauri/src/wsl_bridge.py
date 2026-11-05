@@ -1,10 +1,14 @@
 """qterm's fixed WSL data bridge. JSON is data; no caller supplies Python/shell code."""
 import json
+import hashlib
+import hmac
 import os
 import pwd
 import re
 import resource
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -168,8 +172,182 @@ def brief(text):
     return {"path": target}
 
 
+def worktree_filters(cwd):
+    names = git(cwd, ["config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|smudge|process|required)$"], allow_missing=True)
+    return [name + ("=false" if name.endswith(".required") else "=") for name in names.split("\0") if name]
+
+
+def worktree_field(cwd, args):
+    return git(cwd, args).rstrip("\r\n")
+
+
+def worktree_commit(cwd, base):
+    if not isinstance(base, str) or not base.strip() or len(base) > 500 or "\0" in base:
+        raise ValueError("Expected a bounded literal base revision")
+    return worktree_field(cwd, ["rev-parse", "--verify", "--end-of-options", base + "^{commit}"])
+
+
+def worktree_repository(cwd):
+    cwd = folder(cwd)
+    root = folder(worktree_field(cwd, ["rev-parse", "--show-toplevel"]))
+    common = folder(worktree_field(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
+    return root, common
+
+
+def worktree_identity(value):
+    info = os.stat(value)
+    return [info.st_dev, info.st_ino]
+
+
+def worktree_destination(value, root, common):
+    value = path(value)
+    if any(part in (".", "..") for part in value.split("/")) or value.endswith("/"):
+        raise ValueError("Choose an absolute new directory without dot components")
+    parent, name = os.path.split(value)
+    if not name:
+        raise ValueError("A new directory name is required")
+    parent = folder(parent)
+    target = os.path.join(parent, name)
+    if os.path.lexists(target):
+        raise ValueError("The destination already exists; choose a new directory")
+    if any(os.path.commonpath([target, boundary]) == boundary for boundary in (root, common)):
+        raise ValueError("Choose a directory outside the source checkout and Git metadata")
+    identity = os.stat(parent)
+    return target, [identity.st_dev, identity.st_ino]
+
+
+def worktree_preview(request):
+    root, common = worktree_repository(request["cwd"])
+    branch = request["branch"]
+    if not isinstance(branch, str) or not branch or len(branch) > 240 or branch.startswith("-") or "\0" in branch:
+        raise ValueError("Enter a literal new branch name")
+    if worktree_field(root, ["check-ref-format", "--branch", branch]) != branch:
+        raise ValueError("Enter a literal new branch name")
+    if git(root, ["for-each-ref", "--format=%(refname)", "refs/heads/" + branch]):
+        raise ValueError("That branch already exists; choose a new branch")
+    target, parent_identity = worktree_destination(request["directory"], root, common)
+    return {"repository": root, "commonDir": common, "directory": target,
+            "sourceIdentity": worktree_identity(root), "commonIdentity": worktree_identity(common),
+            "branch": branch, "base": request["base"], "commit": worktree_commit(root, request["base"]),
+            "parentIdentity": parent_identity,
+            "sourceDirty": bool(git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=all"], worktree_filters(root)))}
+
+
+def worktree_create(request):
+    # Only backend-retained preview data may reach this operation; no generic Git
+    # arguments, shell input, overwrite, rollback or cleanup operation is exposed.
+    expected = request["preview"]
+    current = worktree_preview({"cwd": expected["repository"], "directory": expected["directory"], "base": expected["base"], "branch": expected["branch"]})
+    for key in ("repository", "commonDir", "sourceIdentity", "commonIdentity", "directory", "branch", "base", "commit", "parentIdentity"):
+        if current[key] != expected[key]:
+            raise ValueError("Repository, base or destination parent changed; review a new preview")
+    target = current["directory"]
+    # Pin the reviewed parent through reservation; mkdir is exclusive, including
+    # dangling symlinks. Preserve the reservation and any partial Git state on error.
+    parent = os.open(os.path.dirname(target), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        identity = os.fstat(parent)
+        if [identity.st_dev, identity.st_ino] != current["parentIdentity"]:
+            raise ValueError("Destination parent changed; review a new preview")
+        os.mkdir(os.path.basename(target), dir_fd=parent)
+        after = os.stat(os.path.dirname(target))
+        if (after.st_dev, after.st_ino) != (identity.st_dev, identity.st_ino):
+            raise ValueError("Destination parent changed after reservation; reserved directory was preserved")
+        git(current["repository"], ["worktree", "add", "--no-checkout", "-b", current["branch"], "--", target, current["commit"]], ["core.symlinks=false"])
+        actual_root, actual_common = worktree_repository(target)
+        if actual_root != target or actual_common != current["commonDir"] or worktree_identity(actual_common) != current["commonIdentity"]:
+            raise ValueError("The reserved directory is no longer the reviewed worktree")
+        git(target, ["reset", "--hard", current["commit"], "--"], ["core.symlinks=false", *worktree_filters(target)])
+    finally:
+        os.close(parent)
+    return {"directory": target}
+
+
+def worktree_details(request):
+    expected = request["task"]
+    root, common = worktree_repository(expected["directory"])
+    if root != expected["directory"] or common != expected["commonDir"] or worktree_identity(common) != expected["commonIdentity"]:
+        raise ValueError("This directory is no longer the recorded worktree")
+    # Match the text checkout policy without changing shared repository config.
+    filters = ["core.symlinks=false", *worktree_filters(root)]
+    entries = iter(git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=all"], filters).split("\0"))
+    changed, untracked = 0, 0
+    for entry in entries:
+        if not entry:
+            continue
+        if entry.startswith("??"):
+            untracked += 1
+        else:
+            changed += 1
+            if "R" in entry[:2] or "C" in entry[:2]:
+                next(entries, None)
+    commit = worktree_commit(root, expected["commit"])
+    if commit != expected["commit"]:
+        raise ValueError("The recorded task commit is invalid")
+    summary = git(root, ["diff", "--no-ext-diff", "--no-textconv", "--stat", commit, "--"], filters).rstrip("\r\n")
+    return {"branch": worktree_field(root, ["rev-parse", "--abbrev-ref", "HEAD"]),
+            "head": worktree_commit(root, "HEAD"), "changed": changed, "untracked": untracked,
+            "commits": worktree_field(root, ["rev-list", "--count", commit + "..HEAD"]),
+            "summary": summary[:12000], "summaryTruncated": len(summary) > 12000}
+
+
 def main(request):
     method = request.get("method")
+    if method == "repository_snapshot":
+        return repository_capture(request["cwd"])
+    if method == "verification_start":
+        value = dict(request)
+        value["lifetime"] = os.path.realpath(path(wslpath(request["lifetime"], "-u")), strict=True)
+        return verification_start(value)
+    if method == "verification_request":
+        return verification_request(request)
+    if method == "worktree_preview":
+        return worktree_preview(request)
+    if method == "worktree_create":
+        return worktree_create(request)
+    if method == "worktree_details":
+        return worktree_details(request)
+    if method == 'owner_presence':
+        tokens = request['tokens']
+        if not isinstance(tokens, list) or not 1 <= len(tokens) <= 4:
+            raise ValueError('Expected one to four captured Linux owners')
+        results = []
+        for token in tokens:
+            try:
+                results.append({'providers': main({'method': 'owner', 'token': token, 'action': 'presence'})})
+            except Exception as error:
+                results.append({'error': str(error)[:2000]})
+        return results
+    if method == 'owner':
+        token, action = request['token'], request['action']
+        if not isinstance(token, str) or not re.fullmatch('[0-9a-f]{64}', token) or action not in ('programs', 'stop', 'presence', 'ready', 'launch', 'can_stop'):
+            raise ValueError('Invalid Linux owner request')
+        nonce = os.urandom(16).hex()
+        expires = time.monotonic_ns() + 2_500_000_000
+        proof = hmac.new(token.encode(), (nonce + '\n' + action + '\n' + str(expires)).encode(), hashlib.sha256).hexdigest()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(3)
+            client.connect('\0qterm-owner-' + hashlib.sha256(token.encode()).hexdigest())
+            _, uid, _ = struct.unpack('3i', client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            if uid != os.getuid():
+                raise ValueError('Linux supervisor user does not match this distribution user')
+            client.sendall((json.dumps({'nonce': nonce, 'method': action, 'expires': expires, 'proof': proof}) + '\n').encode())
+            raw = b''
+            while b'\n' not in raw:
+                chunk = client.recv(8192)
+                if not chunk:
+                    raise ValueError('Linux supervisor closed its response')
+                raw += chunk
+                if len(raw) > 4 * 1024 * 1024:
+                    raise ValueError('Linux supervisor response exceeded its bound')
+            envelope = json.loads(raw)
+            expected = hmac.new(token.encode(), (nonce + '\n' + envelope['payload']).encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, envelope['proof']):
+                raise ValueError('Linux supervisor response could not be authenticated')
+            response = json.loads(envelope['payload'])
+            if 'error' in response:
+                raise ValueError(response['error'])
+            return response['result']
     if method == "environment":
         home = os.path.expanduser("~")
         return {"home": home, "shell": pwd.getpwuid(os.getuid()).pw_shell, "claudeHome": os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude"), "codexHome": os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")}
@@ -182,6 +360,23 @@ def main(request):
         return {"home": home}
     if method == "folder":
         return {"cwd": folder(request["cwd"])}
+    if method == "workflow_source":
+        return workflow_source(request)
+    if method == "task_project":
+        return task_project(request)
+    if method == "task_validate_project":
+        task_validate_project(request["project"], time.monotonic() + 10)
+        return {"valid": True}
+    if method == "task_scope_paths":
+        return task_scope_paths(request)
+    if method == "task_directory":
+        return task_directory(request)
+    if method == "task_source":
+        return task_source(request)
+    if method == "workflow_directories":
+        return workflow_directories(request)
+    if method == "workflow_validate":
+        return workflow_validate(request)
     if method == "project":
         return project(request["cwd"])
     if method == "resolve":
@@ -194,10 +389,14 @@ def main(request):
 
 
 try:
-    raw = sys.stdin.buffer.read(1_048_577)
-    if len(raw) > 1_048_576:
-        raise ValueError("WSL data request exceeds 1 MiB")
-    result = {"result": main(json.loads(raw))}
+    if "QTERM_REQUEST" in globals():
+        request = QTERM_REQUEST
+    else:
+        raw = sys.stdin.buffer.read(1_048_577)
+        if len(raw) > 1_048_576:
+            raise ValueError("WSL data request exceeds 1 MiB")
+        request = json.loads(raw)
+    result = {"result": main(request)}
 except Exception as error:
     result = {"error": str(error)[:4000]}
 print(json.dumps(result, ensure_ascii=True))

@@ -24,7 +24,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-portable-pty = "0.9.0"
+portable-pty = { version = "0.9.0", path = "vendor/portable-pty" }
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-single-instance = "2.5.3"
 tauri-plugin-autostart = "2.7.0"

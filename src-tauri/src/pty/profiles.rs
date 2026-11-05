@@ -118,6 +118,9 @@ impl Profile {
         let actual=match self.kind{Kind::PowerShell=>"powershell",Kind::Cmd=>"cmd",Kind::Bash=>"bash",Kind::Wsl=>"wsl",Kind::Other=>"other"};
         if expected.is_some_and(|expected|expected!=actual){return Err("The shell profile kind changed while preparing this pane; choose the profile again before sending startup input".into());}Ok(())
     }
+    pub(crate) fn native_agent_context(&self)->bool {
+        self.distribution.is_none() && matches!(self.kind,Kind::PowerShell|Kind::Cmd|Kind::Bash)
+    }
     pub fn check_environment(&self,expected:Option<&str>)->Result<(),String>{
         let actual=self.distribution.as_ref().map(|d|format!("wsl:{}",d.to_lowercase())).unwrap_or_else(||"native".into());
         if expected.is_some_and(|expected|expected!=actual){return Err(format!("This pane belongs to {}, but its profile now uses {actual}. Switch the pane to an appropriate profile explicitly; its saved folder was not opened.",expected.unwrap()));}Ok(())
@@ -275,12 +278,16 @@ fn powershell_integration(args: &mut Vec<String>) {
 impl Profile {
     /// Exact launch configuration, including environment, without exposing secrets.
     pub fn automation_key(&self) -> Option<String> {
+        if matches!(self.kind, Kind::Wsl | Kind::Other) { return None; }
+        Some(self.launch_key())
+    }
+    /// Exact launch identity, including WSL; this does not grant task execution.
+    pub fn launch_key(&self) -> String {
         use std::os::windows::ffi::OsStrExt;
         use sha2::{Digest, Sha256};
-        if matches!(self.kind, Kind::Wsl | Kind::Other) { return None; }
         let program: Vec<u16> = self.program.encode_wide().collect();
-        let bytes = serde_json::to_vec(&(&self.id, program, &self.args, &self.cwd, &self.env, self.kind)).ok()?;
-        Some(format!("{:x}", Sha256::digest(bytes)))
+        let bytes = serde_json::to_vec(&(&self.id, program, &self.args, &self.cwd, &self.env, self.kind)).expect("profile identity serializes");
+        format!("{:x}", Sha256::digest(bytes))
     }
     /// Program file name and arguments, lower-cased (see wt_import::command_key).
     pub fn command_key(&self) -> String {

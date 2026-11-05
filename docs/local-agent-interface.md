@@ -6,12 +6,13 @@ named tasks. All authority expires with the qterm session; see
 
 ## Create a session grant
 
-Open **Access** in the tab bar or the `agent_access` palette action. Enter a native
-Git project folder and a client label, then choose **Review project access**.
-Review the canonical repository root, select the read-access checkbox, and choose
+Open **Access** in the tab bar or the `agent_access` palette action. Select Windows
+or an explicit WSL distribution, enter its Git project folder and a client label,
+then choose **Review project access**. Review the environment and canonical
+repository root, select the read-access checkbox, and choose
 **Create session read grant**. Reviewing alone opens no listener or credentials.
 
-A read grant permits native pane metadata, retained completed command results and
+A read grant permits pane metadata, retained completed command results and
 named task definitions for that project. It includes output that can contain
 source code or secrets. It does not grant terminal input or execution authority.
 The client label identifies the grant you created; it is not a verified provider
@@ -20,10 +21,14 @@ identity. Programs running as your Windows user can read the connection file.
 Command metadata includes the captured environment when available (older records
 can report null). WSL and unknown-environment results are excluded from native
 grants even if their shell label or reported cwd looks native. Editing a shell
-profile does not change an existing WSL pane's eligibility.
+profile does not change an existing WSL pane's eligibility. A Linux grant requires
+the matching captured distribution and WSL shell kind; canonical, case-sensitive
+Linux containment excludes other projects and escaping symlinks. Linux grants
+also bind the current user and project/Git filesystem identities. They do not
+require provider transcript indexing to be enabled.
 
-For execution, select **Review named-task execution too** and choose a native
-shell before reviewing. Inspect each command, original directory, source manifest
+For execution, select **Review named-task execution too** and choose a supported
+shell in that environment before reviewing. Inspect each command, original directory, source manifest
 preview and SHA-256. Select the individual tasks, then explicitly allow them for
 this session and choose **Create session task grant**. Leaving all tasks unselected
 creates a read grant. Manifest previews are bounded and labelled if truncated;
@@ -54,9 +59,22 @@ object with `version`, optional request `id`, and either `result` or an `error`
 containing `code` and `message`. Errors use a nonzero process exit code. An expired
 connection file requires a new grant; no command automatically recreates one.
 
+From WSL, invoke the same executable through Windows interop. Convert the
+executable path to Linux spelling and retain the copied connection path in
+Windows spelling because the Windows executable opens it:
+
+```bash
+exe="$(wslpath -u 'C:\path\qterm.exe')"
+"$exe" --agent-client 'C:\path\copied-connection-file.json' tasks.list '{}'
+```
+
+The real Linux-client route is covered by the desktop test with provider indexing
+disabled. It uses the same private Windows named pipe; there is no Linux TCP
+listener. WSL interop must be enabled for this invocation.
+
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `panes.list` | `{}` | Scoped native pane IDs, labels, cwd/profile/kind and observation time |
+| `panes.list` | `{}` | Scoped pane IDs, labels, cwd/profile/kind/environment and observation time |
 | `commands.list` | Optional `paneId`, `after` command ID, `limit` (1–25) | Completed command metadata/previews and next cursor |
 | `commands.result` | `commandId`, optional UTF-8 byte `offset` and `limit` | Full recorded command, bounded output, next byte offset, incomplete-capture flag and historical repository comparison |
 | `tasks.list` | Optional `after` task ID and `limit` (1–25) | Read grants discover root tasks; execution grants list their selected tasks, source/directory and bounded command previews |
@@ -107,8 +125,11 @@ States include `queued`, `launching`, `running`, `stopping`, `finished`, `cancel
 and `unknown`. `finished` means the shell reported completion; inspect its exit
 code and captured output. Command Prompt can omit the exit code, which remains
 unknown. A failed/uncertain PTY write stays unknown and is never automatically
-retried. The stable invocation ID is also the completed command-record ID.
-Saved results retain the native requester label, task and request ID across
+retried. If the shell exits before reaching its startup prompt, qterm clears the
+input reservation and cancels the task; a failed shell remains visible. Retrying
+that request ID returns the cancelled invocation and does not replay it.
+The stable invocation ID is also the completed command-record ID.
+Saved results retain the environment, requester label, task and request ID across
 restarts, subject to command-history retention. Live invocation state is session-only.
 
 The Access panel lists requested tasks, links their panes/results, and provides
@@ -138,9 +159,12 @@ not validate later edits. See [verification records](verification-records.md).
 
 Pane observations refresh on workspace changes and every five seconds while a
 grant exists. They become unavailable after fifteen seconds without an update;
-they are not proof that a process is idle. Unknown folders, WSL panes and
-unreachable/deleted folders remain inaccessible. Canonicalization prevents a
-junction inside the project from exposing output recorded outside it.
+they are not proof that a process is idle. Unknown or unreachable/deleted folders
+and panes from another environment remain inaccessible. Canonicalization prevents
+a junction or symlink inside the project from exposing output recorded outside it.
+Command history uses the folder captured when each command started. Moving a pane
+outside the project leaves its earlier project records readable; commands started
+outside remain excluded, including result requests with a known command ID.
 
 ## Transport and bounds
 

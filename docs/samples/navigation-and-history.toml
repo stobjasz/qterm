@@ -1,0 +1,20 @@
+# Merge these ROOT keys before any table header in global config.toml.
+restore_session = true
+shell_integration = true
+long_command_alert = 60
+
+# Merge into existing tables; do not duplicate their headers.
+[keybindings]
+split_right = "alt+shift+d"
+split_down = "alt+shift+s"
+quick_select = "alt+shift+q"
+search_all = "alt+shift+f"
+copy_last_output = "ctrl+shift+o"
+view_json = "ctrl+shift+j"
+toggle_broadcast = ""
+
+[scrollback]
+restore = true
+lines = 3000
+# Exact profile IDs: disable retained output for remote inspection shells.
+profiles = { "custom:Staging inspection" = false, "ssh:shop-staging" = false }

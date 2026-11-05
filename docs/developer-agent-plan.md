@@ -27,10 +27,10 @@ for unattended implementation; update it after each verified slice.
    Add a local test without changing provider trust or contacting a model.
 3. **Accurate status** (implemented and regression-verified): distinguish working, waiting, completed and unknown;
    preserve provenance and freshness; stop treating a quiet process as idle.
-4. **Send output to an agent** (new/idle-shell handoff implemented; running-session follow-ups remain open): preview command, cwd, exit status and bounded
+4. **Send output to an agent** (new/idle-shell handoff implemented; running-session follow-ups explicitly deferred by the user on 5 November): preview command, cwd, exit status and bounded
    selected output; choose Claude or Codex and new or compatible existing pane.
    Treat text as prompt data, never shell source. Do not auto-submit from a preview.
-5. **Efficient Codex indexing**: batch usage reads, surface scan diagnostics and
+5. **Efficient Codex indexing** (implemented and measured; [baseline and limits](codex-index-measurement.md)): batch usage reads, surface scan diagnostics and
    measure before introducing a more complex index.
 
 ## Phase 2: daily developer workflow
@@ -53,7 +53,7 @@ for unattended implementation; update it after each verified slice.
    task metadata, associated checks and change summary. Never silently discard
    dirty worktrees. Start without automatic dependency installation or merging.
    See [worktree-tasks.md](worktree-tasks.md) for the implemented workflow and scope.
-10. **Scoped local CLI** (implemented and regression-verified): list panes, retrieve bounded command results, list/run
+10. **Scoped local CLI** (implemented and regression-verified; startup reservation race fixed in checkpoint 22): list panes, retrieve bounded command results, list/run
     named project tasks, query status; structured responses and stable run IDs.
     Authenticate local requests, scope access and avoid arbitrary terminal typing.
     The implemented protocol is in [local-agent-interface.md](local-agent-interface.md).
@@ -69,7 +69,7 @@ for unattended implementation; update it after each verified slice.
     pinning and search; preview/export a bounded handoff with goals, findings,
     files, checks and next steps. Respect transcript-retention preferences.
     See [behavior and boundaries](session-library.md).
-14. **WSL parity** (in progress; [implemented project/file slice](wsl-support.md), [remaining plan](wsl-parity-proposal.md)): explicit distro identity, opt-in session indexing, distro-side
+14. **WSL parity** (implemented within the user's accepted unprivileged cleanup limit; [support](wsl-support.md), [contract](wsl-parity-proposal.md)): explicit distro identity, opt-in session indexing, distro-side
     project discovery and path-aware file links. Keep native and WSL identities
     separate even when textual paths match.
 15. **Optional Codex App Server spike**: isolate behind a capability adapter and
@@ -81,8 +81,9 @@ for unattended implementation; update it after each verified slice.
   grants for named-task execution. All access stays off until granted; see
   [the interface proposal](local-agent-interface-proposal.md). Ask again before
   adding persistent grants or arbitrary execution authority.
-- Native agent UI: whether qterm should own conversations/approvals through an
-  App Server integration. Until decided, keep the normal CLI as the primary UI.
+- Native agent UI **deferred by the user, 5 November 2026**: no managed-session
+  conversation/approval UI or automatic running-agent follow-ups in this delivery.
+  Keep the normal CLI as the primary UI and retain reviewed new/idle-shell handoffs.
 - Cross-provider handoffs: explicit exports initially; ask before enabling ongoing
   automatic sharing of transcript/context between providers.
 - Worktree completion: ask before adding automated merge, dependency bootstrap,
@@ -91,6 +92,10 @@ for unattended implementation; update it after each verified slice.
   when qterm exits, including detached tools launched from shells. Use a Windows
   job; allow only an explicit verified update's replacement/installer to survive
   the old instance. This supersedes the earlier preserve-GUI-tools design.
+- Linux privilege exception **accepted by the user, 5 November 2026**: “limits”
+  accepts user-level cleanup; descendants gaining Linux privilege may survive.
+  No root supervisor is approved. This is the explicit exception to the original
+  unrestricted descendant policy for the delivered scope.
 
 ## Validation and progress
 
@@ -921,3 +926,654 @@ for unattended implementation; update it after each verified slice.
   changes uncommitted, finish workspace checks and pause. Resume from
   [the handoff](resume-handoff.md); preserve the full objective and outstanding
   root decision, Linux live probes/Windows interop checks and running-session work.
+
+### Checkpoint 19 full validation after resumption — 4 November 2026
+
+- Prior implementation is saved in commit `bec702d`; the worktree was clean at
+  resumption. All **109 desktop scenarios passed** with no skips or failures in
+  7.7 minutes, including the 12 provider-menu scenarios and R50 notification policy.
+- The first attempt lost its tool session after at least 26 passing scenarios.
+  Checked its missing handle and actual process state before restarting; no
+  parallel suite was launched. The completed run has a durable JSON report and
+  transcript in ignored `.tools.local/checkpoint19-full-desktop.{json,log}`.
+- Inspected the current scoped-menu screenshot: Native Windows and separate WSL
+  groups fit without overlapping labels/controls. Updated the historical menu
+  audit and WSL documentation to reflect implemented fixes. Cleanup checks found
+  zero isolated app/runner processes, lifetime files, Linux supervisors or fixture
+  daemons. Native notification suppression remained enabled; installed qterm and
+  live provider configuration were untouched.
+- Frontend/native validation remains the checkpoint 19 result (347 frontend,
+  199 native, strict Clippy and both TypeScript checks); this run rebuilt the
+  isolated desktop app without changing runtime source. The full goal remains
+  active. The explicit remaining WSL workflow acceptance list is in
+  [the parity plan](wsl-parity-proposal.md#remaining-workflow-acceptance).
+
+### Twentieth implementation checkpoint: Linux close/Stop program evidence
+
+- WSL close/switch and explicit Stop now query the supervisor captured when the
+  pane started. Native inspection remains separate. Operations run on blocking
+  workers; the session lock is released before distribution I/O. Probe failure
+  requires an explicit close confirmation and cannot be treated as an idle pane.
+- A fixed Unix-socket channel exposes only `programs` and `stop`, with matching
+  user credentials, a random per-pane key, nonce-bound request/response HMACs,
+  bounded frames and authenticated expiry. The address hashes the key rather
+  than exposing it. No caller-supplied executable, command, PID or root operation
+  is accepted. Abstract sockets have no filesystem permission boundary, so the
+  authentication/credential checks are required; see [Linux Unix sockets](https://www.man7.org/linux/man-pages/man7/unix.7.html).
+- Linux inspection walks only the supervisor's kernel-reported descendants,
+  including each process's worker-thread children. PID file descriptors pin
+  targets; a parent must remain alive while its children are accepted. Work,
+  thread/child counts and output are bounded. Stop repeats inspection to catch
+  newly forked/adopted programs, preserves the shell and leaves other panes alone.
+- Root executable identity is compared with the user's configured shell and
+  `/etc/shells`. A directly launched/replaced program is named before close;
+  shell-preserving Stop reports that no shell remains instead of claiming idle.
+- Registered R87–R90 before four real desktop scenarios. All four focused cases
+  pass. Eight deliberate breaks were caught across detection, worker threads,
+  Stop signaling, error-as-idle, request authentication, direct roots, expiry
+  and false helper confirmation for idle switches; original sources were restored.
+  Teardown tolerates an already-ended supervisor and avoids resuming a reused PID.
+- A stronger suspended-supervisor test reproduced a queued Stop killing a program
+  started after timeout. Authenticated monotonic expiry now gates acceptance and
+  every Stop signal; the restored scenario preserves the later program. A full
+  run of the earlier implementation was deliberately stopped after 15 passing
+  scenarios to fix this issue. It is not final acceptance evidence.
+- The first completed full run passed 111 scenarios; two older path scenarios
+  timed out waiting for an unconditional switch confirmation. Actual idle Linux
+  shells now switch directly. Updated R71/R73 and their assertions while retaining
+  path/PNG conversion and unrepresentable-path preservation checks; both passed.
+  Deliberately adding a false Windows-helper program made the updated path test
+  fail. Timeout cleanup now tolerates already-removed owned Linux directories;
+  the one remaining Windows fixture was verified and removed separately.
+- Final frontend validation passes: 347 tests, both TypeScript checks and
+  production bundling. Strict Clippy and 199 native tests pass (four helpers
+  ignored). All **113 desktop scenarios passed** in the final full run (8.0 minutes,
+  no skips/failures/flaky results). The durable JSON report and transcript are
+  `.tools.local/checkpoint20-full-desktop.{json,log}`. Final cleanup checks found
+  no isolated runner/app, lifetime files, Linux supervisors or fixture programs.
+  Notification suppression stayed enabled throughout; installed qterm, live
+  provider configuration and model usage were unchanged.
+  Remaining provider-specific Linux presence/status, Windows interop,
+  privileged cleanup decision and WSL workflow parity stay on the full backlog.
+
+### Twenty-first implementation checkpoint: close context and shell invocation
+
+- Close/switch captures pane/profile/environment, actual terminal session and
+  user-input revision. Whole-tab checks also bind the exact membership. Recheck
+  after successful/failed process probes and again when confirmation is accepted;
+  cancel obsolete actions with an explanation. Newer requests supersede older
+  pending checks. Terminal protocol replies do not invalidate user-input context.
+- Linux shell-root classification now checks the bounded invocation alongside
+  the executable and declared shell names. Command/script launches do not imply
+  an interactive shell to preserve; shared BusyBox images require a declared
+  shell applet/name. RC/init-file operands remain literal data and supported
+  interactive profiles retain Stop. Unknown long options conservatively decline
+  shell-preserving Stop.
+- R91/R92 registered before six desktop cases: delayed input/split/exit,
+  confirmation after session exit, and actual Bash command/script roots. Fourteen
+  pure Python cases additionally cover shared images, aliases, login names,
+  literal RC operands, missing operands and unsupported flags. BusyBox is absent
+  from this Ubuntu installation; no package or root operation was used, and no
+  real BusyBox runtime validation is claimed.
+- Focused validation passed. Five deliberate breaks were caught: omitted input
+  revision, omitted tab-membership check, unguarded confirmation callback,
+  executable-only shell classification and omitted shared-image alias check.
+  Restored sources before final checks. The confirmation race keeps a second tab
+  open: normal hide-on-last-tab behavior otherwise hides its modal. A pinned,
+  command-line-checked child signal supplies the real exit boundary.
+- Frontend: 347 tests, both TypeScript checks and production build pass. Strict
+  Clippy and 199 native tests pass (four helpers ignored). The first full run passed
+  117/119; two apps failed before frontend load with WebView2 HRESULT 0x800700AA
+  (profile resource still in use). The harness now waits for actual processes
+  using the exact isolated profile to exit before launch, rather than relying on
+  CDP-port closure. Verified its matcher against six live isolated WebViews and
+  an empty post-run result; no retries or unrelated process termination were added.
+  The original result/log are `.tools.local/checkpoint21-before-profile-barrier.*`.
+  The next full run completed **118/119 passing**, with no startup failures. One
+  existing R61 Git Bash watch program did not start before its 15-second bound;
+  that older assertion captured only file existence. Added actual invocation
+  state/error and terminal output to the assertion, then repeated both native
+  shell scenarios five times: **10/10 passed**. This does not prove the intermittent
+  failure fixed. Preserve it as open work and use the improved evidence on recurrence.
+  Reports: `.tools.local/checkpoint21-full-desktop.{json,log}` (118/119),
+  `.tools.local/checkpoint21-watch-failure.*` (copy), and
+  `.tools.local/checkpoint21-native-shell-repeat.log` (10/10). No live handles
+  remain. Final cleanup found no isolated app/WebView, lifetime files, Linux
+  supervisors, fixture programs or fixture-environment processes. Provider-specific
+  process/lifecycle status, Windows interop, privileged ownership decision and
+  the remaining WSL workflow acceptance list still prevent full-goal completion.
+
+### Twenty-second implementation checkpoint: startup reservation commit race
+
+- Thirty additional sequential Git Bash task scenarios passed without reproducing
+  R61 (`.tools.local/checkpoint22-bash-reproduction.log`). A new R93 concurrent
+  request test then reproduced cancellation with **The task pane closed or changed
+  shell** while panes were being created. Four simultaneous requests exercise the
+  interface's actual active-task limit; no invoke mocking or state injection.
+- Startup reservations enter mutable maps before React commits their panes. An
+  effect from an older workspace could mistake an uncommitted pane for a closed
+  pane. Track whether each reservation has observed its expected pane; absence
+  before that observation keeps it pending, while later absence or a wrong profile
+  still cancels it. Apply the same guard to tracked-verification tickets, which
+  shared the premature-cancellation pattern.
+- Registered R93/R94 before their specs. R93 runs six rounds of four real concurrent
+  Git Bash requests, checks distinct panes and exactly-once output, verifies retry
+  identity and preserves the busy source program. R94 closes a mounted PowerShell
+  task waiting for a startup prompt and verifies cancellation without command
+  execution or source-pane closure. The focused task/shell/verification suite passes.
+- Restoring premature cancellation failed R93 again; disabling real-close
+  cancellation failed R94. Both deliberate breaks were caught and the helper was
+  restored (`.tools.local/pane-reservation-mutation-*.log`). The concurrency case
+  used all 24 task panes; WebGL context-loss warnings caused renderer fallback
+  without losing terminal results.
+- Frontend: 347 tests, both TypeScript checks, production bundling pass. Native
+  source is unchanged from the prior strict Clippy/199-test result. All **121
+  desktop scenarios passed** in the final full run (10.7 minutes, no skips,
+  failures or flaky results), with report/log in
+  `.tools.local/checkpoint22-full-desktop.{json,log}`. Cleanup found no isolated
+  app/WebView, lifetime files, Linux supervisors or fixture processes. There are
+  no live build/test handles. Notification suppression remained enabled; no
+  installed app, live provider configuration or model call changed. The original isolated R61
+  failure lacked job diagnostics, so do not claim this proves its sole cause;
+  retain the improved diagnostics. That scenario passed in the final full run.
+- Provider-specific Linux process/lifecycle status, Windows interop ownership,
+  the pending privileged-supervisor decision and WSL workflow parity remain open.
+
+### Twenty-third implementation checkpoint: scoped provider process evidence
+
+- Share a bounded process poll between Claude and Codex. Capture terminal-session
+  identity and its environment in the backend; return presence, errors, observation
+  time and ended-session state separately. Native ToolHelp failures are errors
+  rather than successful empty scans. Keep unsupported custom contexts unknown.
+- Probe only each WSL pane's captured supervisor tree through authenticated
+  presence requests. Group requests by exact distribution, bound batches to four
+  owners, and retain per-owner failures without discarding healthy sibling results.
+  No native process or transcript index substitutes for Linux evidence. Provider
+  image names and Node script positions are recognized; prompt arguments are not
+  provider identity. This implements process presence, not Linux lifecycle hooks.
+- Associated panes retain unknown state for failed, stale or mismatched process
+  evidence. Unrecognized Linux wrappers with known associations need a shell prompt
+  before clearing. Keep hook provenance and clone observation views so a transient
+  failure cannot mutate the retained hook event or prevent subsequent recovery.
+  Unknown status text does not claim a running process after an unsuccessful probe.
+- R95/R96 were registered before four real desktop cases. Both providers pass
+  quiet process discovery, same-folder isolation, ended-process removal and
+  independent probe-error recovery. Copy the real Python executable under provider
+  image names; wait for signals without provider/model calls. Ubuntu's multicall
+  sleep rejects renamed images, even with altered argv[0]; initial failures used
+  that invalid fixture, not a working quiet process.
+- Four deliberate breaks were caught and restored: disabled presence, omitted
+  errors, retained ended status and mutation of a frozen lifecycle event. The
+  ended-process test initially accepted unknown-to-busy as badge removal; strengthen
+  it to require every status badge for that provider to disappear. Logs and helper:
+  `.tools.local/provider-process-mutation-*`,
+  `.tools.local/verify-provider-process-regressions.mjs`.
+- A separate freshness clock expires published evidence while a backend request
+  is pending, without issuing overlapping RPCs. Two additional unit cases cover
+  expiry/recovery and ended/error retention. Deliberate omission of expiry fails.
+  The first full run passed 124/125; R88 hit Windows' command-line length limit
+  while embedding the larger supervisor in its helper. Pass helper source on
+  stdin instead. Deliberately restoring the old transport reproduces
+  `ENAMETOOLONG`; restored transport passes R88 and both provider-probe cases.
+  R82 once reported cwd `/`, then passed on focused rerun. Its cause remains
+  unproved; preserve cwd-plus-terminal diagnostics and watch the next full run.
+- Current checks: both TypeScript checks, 353 frontend tests, production bundle,
+  strict Clippy and 199 native tests pass (five helpers/opt-in tests ignored after
+  the benchmark addition). All **125 desktop scenarios passed** in the final full
+  run (12.3 minutes, no skips/failures/flaky results). Report/log:
+  `.tools.local/checkpoint23-full-desktop.{json,log}`. Final cleanup found no
+  isolated app/WebView, lifetime file, Linux supervisor or fixture process. R82
+  passed in this run; its earlier failed start is not independently explained.
+  Windows interoperability ownership, real multi-call
+  shell validation, privileged ownership decision and WSL workflow parity remain
+  open, alongside running-session follow-ups.
+
+### Twenty-fourth implementation checkpoint: measured native Codex indexing
+
+- Added an opt-in, test-only generated-history benchmark with 100/1,000 smaller
+  transcripts and 100 larger transcripts. Measure initial indexing, cached scans,
+  16-usage batching versus individual calls and one-file append refresh; assert
+  append/deletion correctness. No live provider data or configuration is involved.
+- Strict Clippy and the default native suite pass (199 passing, five ignored).
+  After desktop testing and process cleanup finished, the explicit ignored
+  benchmark passed all three generated-history datasets and removed its fixtures.
+- A 16-usage batch was 15.04–15.84 times faster than 16 separate calls. At 1,000
+  transcripts/64 MiB, debug-build initial indexing took 3.15 seconds; the cached
+  batch median/p95 were 28.03/33.42 ms versus 434.20 ms median for separate calls.
+  Keep the existing cache and batching; these results do not justify a more complex
+  index yet. Preserve background scan/loading diagnostics for initial indexing.
+  This is not a cold-disk, release-build or WSL performance claim. See the
+  [baseline, procedure and limits](codex-index-measurement.md).
+- Raw output: `.tools.local/codex-index-debug.log`. No installed app, provider
+  configuration, live transcript or model call changed. All handles are terminal.
+
+### Twenty-fifth implementation checkpoint: Windows interoperability ownership (accepted)
+
+- Registered R97/R98/R99 before four actual Windows-through-WSL cases. Launch
+  inert Windows Node programs with detached Windows children, retaining unrelated
+  root/child programs. Inspect/clean only exact fixture executable/script/tag
+  identities through pinned OS handles. `Qterm.crash()` terminates only the app;
+  test-side tree killing must not provide the cleanup being tested.
+- Quit and direct crash already cleaned both Windows processes. Pane closure
+  reproduced a surviving detached Windows child. A per-pane owner helper fixed
+  it in the console-subsystem debug build (five focused cases passed), but all
+  five cases failed before a prompt with the release GUI subsystem. Reject and
+  remove that production prototype. Preserve its ignored source/logs as evidence.
+  Removing it deliberately reproduced the detached-child failure. Replace the
+  approach with parent-held, creation-time ConPTY job assignment; see
+  [the next implementation plan](wsl-interop-ownership-plan.md).
+- **R99 is still failing:** shell-preserving Stop leaves a detached Windows child.
+  A per-pane job cannot simply be terminated while retaining the WSL
+  client. Keep this requirement and failing spec; investigate controlled parent
+  job access, pinned member identity and a preserved client boundary. Do not
+  substitute an app exit or pane close for Stop. Log:
+  `.tools.local/checkpoint25-interop-stop.log`.
+- Mutation/GUI-subsystem script is terminal; do not rerun that rejected prototype
+  script unchanged. Production source and the normal artifact are restored;
+  quit/crash revalidation passes (2/2). All handles are terminal and cleanup found
+  no isolated WebViews, supervisors, fixture programs or lifetime files. No complete
+  129-scenario desktop run is claimed: R98/R99 still need implementation.
+  Root-supervisor
+  approval remains pending; no privileged Linux operation was used.
+- Replacement now implemented: a licensed local portable-pty 0.9.0 patch adds only
+  a Windows job-list creation attribute and optional, non-serialized builder handle.
+  qterm creates a private kill-on-close job before the WSL client runs and retains
+  its handle in Session, releasing it before console teardown. Cargo.lock changes
+  only the dependency's registry source/checksum; no versions changed. Offline
+  check and strict Clippy pass. All five focused cases pass. Removing the creation
+  attribute deliberately reproduces R98. All five focused cases pass with the GUI
+  subsystem too; normal sources/artifact were restored and R98 passed again.
+  Replacement script: `.tools.local/verify-interop-job-creation.mjs`, logs:
+  `.tools.local/interop-job-{missing-attribute,gui-subsystem,restored}.log`.
+  Three upstream source files differ (38 additions, one removal); license text
+  and dependency versions are unchanged. Cleanup found no isolated WebViews,
+  supervisors, fixture programs or lifetime files; all handles are terminal.
+  R99 Stop implementation and full acceptance are still outstanding.
+- Setup failures also release the job before the PTY: the owning local is declared
+  after console creation, then moved into Session on success. Final strict Clippy
+  and native tests pass (199 passing, five ignored); rebuilt normal-mode R98 passes
+  after this drop-order adjustment. All handles are terminal.
+- Stop implementation is now present, with bounded verified job-member handles,
+  pinned original transport and backend write reservation. A frontend Stop
+  reservation retains terminal replies and releases input on failure. R100's real
+  paused-supervisor case passes, preserving another pane's input and preventing
+  queued user commands from leaking through after Stop.
+- Transport is captured before user/profile commands run: the fixed Linux owner
+  waits for authenticated ready/launch, while new `pty_ready` occurs only after
+  the frontend receives the session ID and flushes early device replies with
+  their classification. Blocking the spawn response until launch delayed cursor
+  replies into shell text; the separate attachment/launch phase resolves that.
+- Windows programs must end before Linux interop relays. Reversing that order
+  left Win32 key protocol text in Bash input even though programs were gone.
+  Stop now verifies an interactive shell first, ends programs before their console
+  hosts (bounded natural-exit grace), then remaining Linux programs. R99's original
+  usability case passes; it now also checks a second Windows launch/Stop cycle.
+  Temporary process diagnostics were removed. Current TypeScript checks, 353
+  frontend tests and production build pass. Native and 12-case focused desktop
+  validation are in progress; full/GUI/mutation acceptance remains outstanding.
+
+- Final checkpoint acceptance: all **130 desktop scenarios pass** (13.1 minutes,
+  no skips, failures or flaky results), including repeated Windows launch/Stop
+  and fresh shell input. Six GUI-subsystem cases pass. Removing Windows Stop
+  deliberately leaves `owned-child`; removing both input-reservation guards
+  deliberately executes the forbidden command. Both assertions fail as intended;
+  restored sources and both normal Stop cases pass. Strict Clippy, 199 native
+  tests (five ignored), 353 frontend tests, both TypeScript checks, production
+  bundle and diff whitespace checks pass. Final cleanup finds no isolated
+  WebViews, WSL supervisors, fixture programs or lifetime files; all handles are
+  terminal. Report/log: `.tools.local/checkpoint25-full-desktop.{json,log}`.
+  This supersedes the historical in-progress notes above. Remaining full-goal
+  work: WSL worktree/verification, recipes and scoped execution, real multi-call
+  shell evidence, the privileged ownership decision, running-agent follow-ups
+  and the final requirement audit. Resume from `docs/resume-handoff.md`.
+
+### Twenty-sixth implementation checkpoint: WSL worktree foundation (integration pending)
+
+- Fixed distro-side preview, create and details operations now use Linux Git and
+  filesystem identities. Revalidate exact commit, source/shared-metadata and
+  destination-parent device/inode identities; reject replaced paths and reserve
+  the new directory exclusively. Preserve dirty source and partial failure state.
+- The real disposable Linux/Git test covers creation/inspection and hostile
+  repository programs. Removing the hook guard fails the forbidden-program
+  assertion; restored bridge passes. Inspection matches symlink-as-text checkout
+  without changing shared config. See [integration plan and test procedure](wsl-worktree-implementation.md).
+- The durable task store, profile binding and UI still require integration; do
+  not claim WSL worktree tasks or verification complete. Native records and UI
+  capabilities remain unchanged. Final strict Clippy and 199 native tests pass
+  (five ignored); all four rebuilt desktop checks pass (WSL project discovery,
+  repeated interop Stop, Claude/Codex process presence). Log:
+  `.tools.local/checkpoint26-focused-desktop.log`. Node syntax and diff whitespace
+  checks pass. Checkpoint 25 remains the last full desktop-suite baseline.
+
+### Twenty-seventh implementation checkpoint: integrated WSL worktrees (accepted)
+
+- Add environment, exact profile launch hash and Linux shared-metadata identity
+  to durable tasks, retaining native history compatibility. Pending previews keep
+  source/parent identities. Save history before distro-side creation and preserve
+  partial failures. Revalidate profiles before mutation/open and use fixed Linux
+  operations for inspection; no native or default-distribution fallback.
+- Worktree UI exposes WSL shells and environment labels. Agent requests use
+  literal distro brief files in separate tabs, exact spawn configuration checks
+  and fresh session/profile/repository validation at the prompt. Native automation
+  grants remain native-only. Saved runs match environment and Linux case.
+- Register R101–R103 before real desktop scenarios. Current 354 frontend tests,
+  both TypeScript checks, production bundle, strict Clippy and 202 native tests
+  (five ignored) pass, including native history migration and launch-configuration
+  binding. Real WSL restart coverage exposed immediate data-operation rejection
+  at four active operations. Bounded admission retains four active, allows up to
+  sixteen waiting for at most five seconds, and never retries an executed
+  mutation. Worktree creation revalidates the profile after admission; native
+  concurrency checks cover release, expiry and queue capacity.
+- All six focused worktree cases pass in the GUI subsystem and again after source
+  restoration with the normal build. Deliberately removing profile binding,
+  prompt validation and Linux history association makes each protected scenario
+  fail its intended assertion. No mutations remain; cleanup found no isolated
+  WebViews, Linux supervisors or fixture processes. Full **134-case acceptance
+  passes** (14.5 minutes, zero skips/failures/flaky results); report/log:
+  `.tools.local/checkpoint27-full-desktop.{json,log}`. Final cleanup also found no
+  fixture programs or lifetime files. All handles are terminal and diff whitespace
+  checks pass. Remaining: WSL verification, recipes and scoped execution,
+  multi-call shell runtime evidence, privileged ownership decision, structured
+  follow-ups to running agents and the full requirement audit.
+
+### Twenty-eighth implementation checkpoint: Linux verification primitives
+
+- Add bounded Linux repository snapshots (bytes/index/HEAD/mode and repository
+  identity) plus persistent-in-scope inotify coverage of directories, source
+  inodes and shared Git metadata. Observed edits remain invalid after restoration;
+  watcher errors/overflow never produce unchanged evidence. Pinned/no-follow
+  source opens reject symlinks/FIFOs/submodules. Ignore ordinary build output,
+  including common temporary output directories removed before completion.
+- Send fixed bundled helper source and request separately through a bounded
+  stdin envelope, avoiding Windows argv limits and preserving Unicode. No IPC
+  caller can supply Python code. Monitor FFI loads only when monitoring is used.
+- Nine real Linux cases pass, including actual kernel overflow and descriptor
+  cleanup. Three deliberate breaks (hashing, inode watches, overflow handling)
+  each fail their intended assertion. Four Node checks pass, including existing
+  worktrees, Unicode snapshots and envelope bounds. All 41 existing WSL desktop
+  cases pass (4.7 minutes), three GUI cases pass and final source passes all Linux
+  checks plus three rebuilt desktop cases. Strict Clippy and 202 native tests
+  pass (five ignored). No user-facing WSL verification action is enabled yet.
+- Next: trusted filesystem coverage (host/remote edits cannot rely solely on
+  Linux inotify), Windows-owned authenticated monitor lifetime, environment-bound
+  tickets/recording/refresh and prompt/session/profile validation, then real
+  desktop verification scenarios. See [implementation plan](wsl-verification-implementation.md).
+
+### Twenty-ninth implementation checkpoint: owned Linux verification backend (verified)
+
+- Enforce local filesystem coverage through actual descriptor mount IDs and
+  device identities. Real Windows-mounted source/shared-metadata fixtures cannot
+  acquire Linux-only coverage; readonly snapshots remain separate from proof.
+- Add an immutable Windows-owned monitor lifetime, fixed-context authenticated
+  same-user requests, freshness/response proofs and bounded I/O. Lifetime removal
+  or replacement interrupts the monitor and releases its watches. A fresh
+  isolated Git launcher applies output limits without thread-unsafe preexec code.
+- Add environment/cwd/profile-bound backend tickets and PTY startup authorization.
+  Results need matching authorized pane/profile/environment/command/folder.
+  Compare caches use environment plus root; restored records start unknown.
+  Native history/verification retain their existing paths. UI WSL tracking is
+  still disabled until prompt, map and cancellation integration is complete.
+- Linux repository/monitor and real 9p cases pass; strict Clippy/default 202 native
+  tests pass (eight ignored). Two opt-in native ownership/record/crash scenarios
+  passed, plus their child fixture. Four deliberate regressions fail their intended
+  assertions (filesystem coverage, request authentication, Windows lifetime,
+  environment cache isolation). Sources restored; all Linux/native checks, five
+  GUI scenarios and all 50 affected desktop scenarios pass (6.3 minutes). Final
+  cleanup finds no isolated app/WebView, supervisor, helper/fixture process,
+  lifetime file or verification fixture directory. Frontend TypeScript and 354
+  frontend tests pass. All handles are terminal. Next: frontend ticket/startup/
+  cancellation wiring and real WSL verification command scenarios; this does not
+  complete WSL verification or the broader goal.
+
+### Thirtieth implementation checkpoint: WSL verification UI (focused checks verified)
+
+- Enable reviewed WSL checks with original profile/environment, canonical folder,
+  frozen profile hash and actual session authorization at the empty prompt. Keep
+  ticket attribution only for the exact reviewed command; cancel on close/startup
+  failure or an intervening different command. Preview the environment.
+- Scope latest-run deduplication by environment as well as command/folder/profile,
+  with a regression test for identical spellings across native and Linux contexts.
+- R104–R106 real desktop cases prove matching evidence through restart, ignored
+  build output, source-edit staleness, edit/restore during a check and changed
+  startup-profile rejection without losing interactive shell use. Deliberate
+  missing-ticket and missing-profile-check mutations fail their intended assertions.
+  All sources restored; three GUI and seven focused normal desktop cases pass.
+  Both TypeScript checks, 355 frontend tests, production bundle and whitespace
+  checks pass. No isolated app/WebViews, bundled helper processes, lifetime files
+  or launch fixtures remain. Logs/script are in `.tools.local/checkpoint30-*` and
+  `.tools.local/verify-checkpoint30-ui.mjs`; all handles are terminal.
+- Remaining verification acceptance: real UI cancellation, watcher loss,
+  unsupported mounts, unavailable distribution/scope guards and direct crash,
+  followed by broader regression coverage. WSL recipes/scoped grants, multi-call
+  runtime proof, privileged ownership decision, running-agent follow-ups and the
+  final requirement audit remain open. The full goal remains unfinished.
+
+### Thirty-first implementation checkpoint: WSL verification accepted
+
+- Register R107–R112 before real desktop cases for pending-pane close, direct
+  qterm crash, monitor loss before/during execution, nonzero shell exit, actual
+  Windows-mounted source/shared metadata, unavailable replacement distribution
+  and case-sensitive startup folders. OS assertions identify fixture-owned
+  monitor processes by birth identity, bundled argv and real inotify watches;
+  PID descriptors guard signals and forced cleanup follows acceptance assertions.
+- Reproduce a monitor leak after nonzero shell exit. Cancel the verification
+  ticket on every shell exit while preserving the visible error pane.
+- Catch seven deliberate failures: cancellation, crash lifetime, authorization,
+  lost-monitor matches, filesystem guard, native fallback and case-folded folders.
+  All sources restored; twelve verification GUI cases and **all 146 desktop
+  cases** pass (15.3 minutes, zero skipped/failed/flaky cases or report errors).
+  Both TypeScript checks, 355 frontend tests and production bundling pass. Logs:
+  `.tools.local/checkpoint31-*.log`; full report:
+  `.tools.local/checkpoint31-full-desktop.json`. All handles are terminal.
+  Cleanup finds no isolated app/WebViews, bundled helpers, lifetimes or launch/
+  mount fixture directories. This accepts WSL verification within its documented
+  coverage limits; Windows-mounted/remote filesystems cannot acquire Linux-only
+  proof. No installed app, live provider configuration, release or model call
+  changed.
+- Next: [WSL recipes and scoped task grants](wsl-workflows-implementation.md).
+  Multi-call runtime proof, the privileged ownership decision, running-agent
+  follow-ups and the final requirement audit remain open. Full goal unfinished.
+
+### Thirty-second implementation checkpoint: Linux workflow-source foundation
+
+- Add fixed bounded distro-side source/directory reads and revalidation, bundled
+  through the existing stdin transport. Preserve exact bytes, canonical Linux
+  paths and source/project/step identities. Reject source replacement, modified
+  definitions, escaping aliases and special files without executing project code.
+- Nine real Linux cases, two Node integration cases and an opt-in Rust production
+  transport/TOML case pass. Three deliberate identity/digest/containment breaks
+  fail their intended assertions. Sources restored; strict Clippy, 202 native
+  tests (nine ignored), three GUI and four focused desktop cases pass. Script/logs:
+  `.tools.local/verify-checkpoint32-workflows.mjs`, `.tools.local/checkpoint32-*.log`.
+  All handles are terminal; exact restoration and fixture/process cleanup pass.
+- WSL recipe policy/runtime/UI and scoped grants are still open. Continue with
+  [the integration plan](wsl-workflows-implementation.md), avoiding WSL I/O under
+  Store locks and Windows interpretation of Linux relative paths. Checkpoint 31
+  remains the last full desktop acceptance. Full goal remains unfinished.
+
+### Thirty-third implementation checkpoint: WSL recipes accepted
+
+- Integrate typed Linux source/directory identities into recipe review and
+  runtime. Retain environment and exact launch configuration through scheduling,
+  readiness, recording and Stop. Native private profile keys remain private;
+  WSL spawn uses a separate launch hash. Revalidate current configuration around
+  slow operations and immediately before submission. Evidence failures remain
+  warnings while independent command-launch authorization stays mandatory.
+- Move start validation and distro Stop I/O outside Store locks. Recheck review
+  cancellation/expiry/bindings/capacity on commit. Preserve input reservations
+  across React commits; cancel on failure/shell exit. Apply Linux path semantics
+  to both recipe parsing and WSL project settings; native grants stay native-only.
+- R113–R116 prove dependency order, `..\literal` as a Linux filename, evidence/
+  requester/environment retention, changed definitions/profiles, readiness,
+  cancellation/timeout/Stop and restart during active work without replay.
+  Eight deliberate negatives fail their intended assertions. All sources restored;
+  nine GUI and **all 153 desktop cases pass** (16.8 minutes, zero failed/skipped/
+  flaky cases or report errors), plus strict Clippy, 204 native tests (nine
+  ignored), 355 frontend tests, both TypeScript checks and production bundling.
+  Logs/report: `.tools.local/checkpoint33-*.log` and
+  `.tools.local/checkpoint33-full-desktop.json`. All handles are terminal; no test
+  app/WebViews, Linux supervisors/helpers/fixture programs, lifetimes or launch
+  directories remain. No installed app/live data/release/model call changed.
+- Next: WSL project read/named-task grants and actual Linux client access in
+  [steps 4–6 of the integration plan](wsl-workflows-implementation.md). Multi-call
+  runtime proof, privileged ownership decision, running-agent follow-ups and the
+  final requirement audit remain open. Full goal unfinished.
+
+### Thirty-fourth implementation checkpoint: Linux named-task source foundation
+
+- Factor the existing task-format and package-manager selection logic from native
+  filesystem access. Add fixed Linux project/directory/manifest fact reads with
+  UID, filesystem/Git identities, component-aware containment, regular-file and
+  1 MiB bounds, and expected-source digest checks. Transfer raw manifests with
+  bounded base64 rather than lossy text or oversized JSON byte arrays.
+- Nine Linux cases and the actual Rust production transport/shared-parser case
+  pass, including all supported task-format families and an exact 1 MiB binary
+  manifest round trip. Three deliberate identity/digest/containment failures are
+  caught. Sources restored; strict Clippy, 204 native tests (ten ignored), four
+  GUI and six focused desktop checks pass. Script/logs:
+  `.tools.local/verify-checkpoint34-task-sources.mjs`, `.tools.local/checkpoint34-*.log`.
+  All handles are terminal; exact restoration and cleanup pass with no isolated
+  app/WebViews, Linux supervisors/helpers/fixture programs, lifetimes or fixtures.
+- No WSL grant authority is enabled. Integrate explicit environment-bound grant
+  and task policy, Access UI, request/claim/launch/results/Stop and actual Linux
+  client access next. Native grants stay native-only. Checkpoint 33 remains the
+  last full desktop baseline; full goal remains unfinished.
+
+### Thirty-fifth implementation checkpoint: environment-bound grant foundation
+
+- Add typed native/Linux project scopes and Linux task-policy discovery with
+  private filesystem/user/Git identities, explicit distribution, bounded source
+  bytes, ancestor manager selection and current definition revalidation. Validate
+  a selected task set with one rediscovery. Access read filtering now checks
+  environment and shell kind before canonical containment, using batched Linux
+  path checks outside locks; pane publication retains its captured environment.
+- Grant creation validates a cloned pending review outside the mutex, then checks
+  cancellation, expiry and single-use ownership at commit. Two deliberate missing
+  environment/cancellation guards fail their intended assertions. Exact sources
+  restored; real Linux policy/pipe checks, 205 native tests, strict Clippy, 355
+  frontend tests, app TypeScript and four focused desktop cases pass. Script
+  `.tools.local/verify-checkpoint35-policy.mjs` and desktop sessions are terminal.
+- WSL grants remain unavailable in UI/IPC and execution is explicitly rejected at
+  grant/launch. Next integrate environment-bound queue records, dynamic profile/
+  session checks, launch/evidence/Stop and frontend startup, then explicit Access
+  selection, real Linux CLI invocation and GUI acceptance. The 153-case checkpoint
+  33 suite remains the last full desktop run. Full goal remains unfinished.
+
+### Thirty-sixth implementation checkpoint: Linux named-task runtime and client route
+
+- Carry reviewed environment and exact shell binding through queue, claim,
+  launch, evidence, result attribution, status and Stop. Recheck live configuration
+  around distro operations and at submission; retain independent launch policy
+  checks after evidence failure. WSL results require matching environment/kind/cwd;
+  native results reject WSL or foreign environments. Stop uses the original full
+  pane/key binding outside Access/Queue locks for distro work.
+- Access exposes explicit Windows/WSL environment selection, matching execution
+  profiles, original environment in review/grants and a captured WSL spawn hash.
+  R117 uses actual Linux-to-Windows executable/pipe interop with provider indexing
+  disabled, runs a real Python project entry point once in its new Linux pane and
+  retains requester/environment/repository evidence across restart without replay.
+  CLI docs explain Windows connection-path spelling and executable translation.
+- The intended missing-requester mutation fails its attribution assertion. Exact
+  source restored; five desktop cases (1.3 minutes), 205 native tests, strict Clippy,
+  355 frontend tests, app/focused E2E TypeScript and production bundling pass. Review
+  screenshot inspected; no supervisors/fixture programs/data or verification
+  helpers remain. Script `.tools.local/verify-checkpoint36-task-runtime.mjs`
+  session 24007 is terminal and successful. Logs: `.tools.local/checkpoint36-*.log`.
+- Full WSL grant acceptance still requires dedicated Linux isolation, changed/
+  delayed definition/profile/folder, concurrent retry, revocation, Stop and startup
+  failure coverage plus broader/full regression. Checkpoint 33 remains the last
+  full 153-case run. Privileged supervisor approval remains pending separately;
+  running-agent follow-ups, multi-call shell proof and final audit remain open.
+
+### Thirty-seventh implementation checkpoint: Linux grant scope, revocation and Stop
+
+- R118 uses real differently cased Linux projects and an escaping symlink. The
+  read grant excludes outside panes and command captures, cannot execute tasks,
+  and rejects direct result requests for outside IDs obtained through a second
+  explicit grant. Earlier commands started inside the project remain readable
+  after their pane moves; scope follows captured command-start cwd.
+- R119 rejects changed Linux manifests and cancels a granted task while its actual
+  Bash startup waits for input. Releasing the shell after revocation executes no
+  task and leaves a usable prompt. R120 observes exact PID birth, stops the Linux
+  task, preserves its requesting source program and retains the task shell.
+- Deliberate missing containment/definition/Stop guards fail their intended
+  desktop assertions. Exact sources restored; seven Linux/native desktop cases
+  pass (1.9 minutes), 205 native tests and strict Clippy pass, and focused E2E
+  TypeScript passes. Cleanup finds zero supervisors, fixture programs, fixture
+  environment processes or data/verification helpers. Script
+  `.tools.local/verify-checkpoint37-agent-guards.mjs` session 70528 is terminal;
+  logs are `.tools.local/checkpoint37-*.log`. No installed app/live data/model call
+  changed. Remaining Linux grant coverage includes delayed profile/folder changes,
+  concurrent retries, failed startup, unavailable distributions and full regression.
+  Full goal stays active with the other recorded remaining requirements.
+
+### Thirty-eighth implementation checkpoint: delayed Linux launch and failed-shell cleanup
+
+- R121 changes the actual profile, distribution or task-directory identity while
+  Linux startup waits on a real FIFO. Releasing startup rejects the changed context
+  without execution. R122 uses parallel Linux CLI processes with duplicate stable
+  request IDs, proving one invocation/pane per intended task and retained source
+  process/requester. Task input reservation remains enabled throughout these tests.
+- R123 exposed a failed shell that stayed visible while its pending invocation
+  incorrectly remained `launching`. The pre-fix test fails its cancellation check.
+  `App.onExit` now clears the unfinished task's reservation and startup input,
+  reports its failure and retains the visible nonzero-exit pane; retries return the
+  same cancelled invocation without replay.
+- Three deliberate profile/identity/idempotency breaks fail their intended
+  assertions. Exact source restored; 14 Linux/native desktop cases pass (3.7 minutes),
+  including all new launch cases and native concurrency/pending-close regressions.
+  All 205 native tests, strict Clippy, 355 frontend tests, both focused/app TypeScript
+  checks and production bundling pass. Script
+  `.tools.local/verify-checkpoint38-launch-guards.mjs` session 90117 is terminal.
+  Logs: `.tools.local/checkpoint38-*.log`. Full desktop regression/report audit and
+  cleanup are running next; checkpoint 33 remains the last accepted full baseline.
+  The full goal retains the other recorded lifecycle/follow-up/audit requirements.
+
+### Thirty-ninth implementation checkpoint: full WSL grants and real multi-call evidence
+
+- Accept all 162 full desktop cases (21.4 minutes), no failures/skips/flaky cases
+  or reporter errors. Source restoration and cleanup pass; session 8097 is terminal.
+  The [scoped-grant requirement audit](wsl-scoped-grants-audit.md) maps steps 4–6
+  to actual implementation and tests. Checkpoint 38 is the current full baseline.
+- Download/extract a verified official Ubuntu BusyBox static package as UID 1000
+  into ignored workspace storage, retaining metadata/copyright. Three real Linux
+  tests cover twelve live invocation variants, actual process images/arguments,
+  physical alias declarations, production unregistered-image probes and real stdin.
+  System shell configuration is unchanged. Both declaration/invocation breaks
+  fail; exact ownership source restored and no runtime/acquisition fixtures or
+  processes remain. [Runtime scope and evidence](wsl-shell-runtime-validation.md).
+- Prepare the [managed follow-up proposal](running-agent-followups-proposal.md)
+  using fetched official Codex App Server documentation. Ask the user to decide
+  managed agent UI versus explicitly deferring automatic running-agent follow-ups,
+  and approve/reject the fixed root-supervisor proposal. Both remain pending; no
+  privileged process, provider server/model call or live provider data change is
+  authorized by silence. The final whole-goal requirement audit remains open.
+
+### Fortieth implementation checkpoint: whole-goal evidence audit
+
+- [The completion audit](goal-completion-audit.md) checks every numbered phase
+  and additional user instruction against current source and actual test behavior.
+  `.tools.local/audit-goal-report.mjs` verifies required spec results in the accepted
+  162-case report and writes a SHA-256-bound requirements mapping. Native index
+  benchmark logs, persistence queue/revision/clear ordering, status/probe provenance,
+  inbox semantics and the implemented task/library/workflow boundaries were read.
+- The delivered portions are evidenced; the full goal remains unachieved because
+  structured running-agent delivery and privileged Linux cleanup are not implemented.
+  Their user decisions remain pending. Optional MCP/App Server experiments retain
+  their original optional status. No deferral or approval is inferred from silence.
+- Correct the diagnostic adapter documentation's stale WSL-link limitation. No
+  production code changes or redundant full-suite rerun were made. Checkpoint 38
+  remains the accepted full baseline; completion requires another requirement audit
+  after the decisions and resulting work.
+
+### Final agreed-scope acceptance, 5 November 2026
+
+The user deferred managed sessions/automatic running-agent follow-ups (“1 defer”)
+and clarified acceptance of unprivileged Linux cleanup (“limits”). No root
+supervisor is approved or implemented. The final completion audit and report
+mapping reflect these explicit scope decisions; no required implementation remains
+for this delivery. Report/restoration/cleanup checks pass against all 162 desktop
+cases, with zero failures/skips/flaky cases or report errors. Earlier accepted
+gates remain 205 native tests, 355 frontend tests, strict Clippy, TypeScript and
+production bundling. Changes remain in the workspace; no installed-app update,
+release, live provider data/config change or model call was performed.

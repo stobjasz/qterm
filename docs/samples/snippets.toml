@@ -1,0 +1,16 @@
+# Merge into global config.toml. Use from an empty shell prompt in a Git checkout.
+[[snippets]]
+name = "Review current diff"
+command = "git diff --stat"
+run = true
+
+[[snippets]]
+name = "Recent commit graph"
+command = "git log --oneline --graph -20"
+run = true
+
+# Inserts text only, so you can replace the example branch before pressing Enter.
+[[snippets]]
+name = "Compare with a branch"
+command = "git diff main...HEAD --stat"
+run = false

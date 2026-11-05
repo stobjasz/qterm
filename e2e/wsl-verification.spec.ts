@@ -1,0 +1,35 @@
+// R104: real Linux Git, monitored source, PTY check and durable evidence.
+import {expect,test} from "./qterm";
+import {wslVerificationFixture} from "./wsl-verification-fixture";
+const fixture=wslVerificationFixture();
+test.skip(!fixture.distro,"Requires an installed WSL distribution");
+test.use({settings:fixture.settings});
+test.beforeAll(fixture.seed);
+test.afterAll(fixture.cleanup);
+test("a reviewed Linux check retains matching evidence until its source changes",async({qterm},info)=>{
+  const pane=await fixture.ready(qterm);
+  await qterm.run(pane,"python3 check.py");
+  await expect.poll(()=>qterm.terminalText(pane)).toContain("VERIFIED_42");
+  await expect.poll(async()=>(await qterm.terminalText(pane)).trimEnd().endsWith(`${fixture.project}$`)).toBe(true);
+  const open=()=>qterm.page.getByRole("button",{name:"Problems and command runs",exact:true}).click();
+  const panel=()=>qterm.page.getByRole("dialog",{name:"Problems and command runs",exact:true});
+  const inspect=()=>panel().getByRole("button",{name:/Inspect run:.*python3 check\.py/}).click();
+  const freshness=()=>panel().getByRole("status",{name:"Verification freshness",exact:true});
+  await open();await inspect();await expect(freshness()).toContainText("No before-run");
+  await panel().getByRole("button",{name:"Run with repository tracking",exact:true}).click();
+  const preview=qterm.page.getByRole("dialog",{name:"Run with repository tracking",exact:true});
+  await expect(preview).toContainText(`Environment: ${fixture.environment}`);
+  await expect(preview.getByLabel("Verification command",{exact:true})).toHaveText("python3 check.py");
+  expect((await qterm.workspace()).tabs).toHaveLength(1);
+  await preview.getByRole("button",{name:"Run reviewed command",exact:true}).click();await expect(preview).toBeHidden();
+  const tracked=await qterm.activePane();expect(tracked).not.toBe(pane);
+  await expect.poll(()=>qterm.terminalText(tracked)).toContain("VERIFIED_42");
+  await open();await inspect();await expect(freshness()).toContainText("repository matches checked state");
+  await qterm.page.screenshot({path:info.outputPath("wsl-verification.png")});
+  await panel().getByRole("button",{name:"Close problems",exact:true}).click();
+  await qterm.restart();await open();await inspect();await expect(freshness()).toContainText("repository matches checked state");
+  await expect(panel().getByRole("button",{name:"Go to command pane",exact:true})).toBeDisabled();
+  fixture.python(`open(${JSON.stringify(`${fixture.project}/value.txt`)},'w').write('22')`);
+  await expect(freshness()).toContainText("Stale:",{timeout:15000});
+  await expect(panel().getByLabel("Run details",{exact:true})).toContainText("Exit 0");
+});

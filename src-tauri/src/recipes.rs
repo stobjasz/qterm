@@ -70,6 +70,9 @@ fn name(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
 }
 pub fn validate(defs: &Definitions) -> Result<(), String> {
+    validate_environment(defs,false)
+}
+pub(crate) fn validate_environment(defs: &Definitions, linux:bool) -> Result<(), String> {
     if defs.version != 1 {
         return Err("workflows.version must be 1".into());
     }
@@ -103,13 +106,13 @@ pub fn validate(defs: &Definitions) -> Result<(), String> {
             }
             let path = Path::new(&step.cwd);
             if step.cwd.is_empty()
-                || path.is_absolute()
+                || (if linux { step.cwd.starts_with('/') || step.cwd.split('/').any(|part|part=="..") } else { path.is_absolute()
                 || path.components().any(|c| {
                     matches!(
                         c,
                         Component::ParentDir | Component::RootDir | Component::Prefix(_)
                     )
-                })
+                }) })
             {
                 return Err(format!(
                     "{}: cwd must be project-relative without parent traversal",
@@ -171,6 +174,8 @@ pub struct ReviewedStep {
     pub directory: String,
     #[serde(skip)]
     relative: String,
+    #[serde(skip)]
+    linux_directory: Option<crate::wsl_workflows::Directory>,
 }
 #[derive(Clone, Serialize)]
 pub struct ReviewedRecipe {
@@ -190,6 +195,11 @@ pub struct Review {
     pub recipes: Vec<ReviewedRecipe>,
     #[serde(skip)]
     profile_key: String,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub launch_key: Option<String>,
+    pub environment: String,
+    #[serde(skip)]
+    linux_source: Option<crate::wsl_workflows::Source>,
     #[serde(skip)]
     created: Option<Instant>,
 }
@@ -210,6 +220,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 impl Review {
     fn read(cwd: &str, profile: &Profile) -> Result<Self, String> {
+        if let Some(distribution)=profile.distribution.as_deref(){return Self::read_linux(cwd,profile,distribution);}
         let folder = repo_state::native_folder(cwd)?;
         let file = folder
             .ancestors()
@@ -248,6 +259,7 @@ impl Review {
                     definition: step,
                     directory: repo_state::display(&dir),
                     relative,
+                    linux_directory:None,
                 });
             }
             recipes.push(ReviewedRecipe {
@@ -264,11 +276,15 @@ impl Review {
             profile_id: profile.id.clone(),
             profile_name: profile.name.clone(),
             profile_key,
+            launch_key:None,
+            environment:"native".into(),
+            linux_source:None,
             recipes,
             created: Some(Instant::now()),
         })
     }
     fn validate(&self, profile: &Profile, step: &ReviewedStep) -> Result<(), String> {
+        if self.linux_source.is_some(){return self.validate_many(profile,std::slice::from_ref(step));}
         if profile.id != self.profile_id
             || profile.automation_key().as_deref() != Some(&self.profile_key)
         {
@@ -284,6 +300,45 @@ impl Review {
             return Err("Workflow step folder changed; review again".into());
         }
         Ok(())
+    }
+    fn read_linux(cwd:&str,profile:&Profile,distribution:&str)->Result<Self,String>{
+        profile.check_kind(Some("wsl"))?;
+        let source=crate::wsl_workflows::Source::read(distribution,cwd)?;
+        let definitions=project::parse_settings_environment(&source.text,true)?.workflows.ok_or("No [workflows] section found")?;
+        let paths:Vec<_>=definitions.recipes.iter().flat_map(|recipe|recipe.steps.iter().map(|step|step.cwd.clone())).collect();
+        let mut directories=source.directories(distribution,&paths)?.into_iter();
+        let mut recipes=vec![];
+        for recipe in definitions.recipes{
+            let mut steps=vec![];
+            for definition in recipe.steps{
+                let directory=directories.next().ok_or("Missing Linux workflow directory")?;
+                steps.push(ReviewedStep{relative:definition.cwd.clone(),definition,directory:directory.directory.clone(),linux_directory:Some(directory)});
+            }
+            recipes.push(ReviewedRecipe{name:recipe.name,layout:recipe.layout,steps});
+        }
+        Ok(Self{id:agent_pipe::random()?,source:source.source.clone(),project:source.project.clone(),digest:source.digest.clone(),profile_id:profile.id.clone(),profile_name:profile.name.clone(),profile_key:profile.launch_key(),launch_key:Some(profile.launch_key()),environment:format!("wsl:{}",distribution.to_lowercase()),linux_source:Some(source),recipes,created:Some(Instant::now())})
+    }
+    fn validate_many(&self,profile:&Profile,steps:&[ReviewedStep])->Result<(),String>{
+        if let Some(source)=&self.linux_source{
+            profile.check_kind(Some("wsl"))?;profile.check_environment(Some(&self.environment))?;
+            if profile.id!=self.profile_id||profile.launch_key()!=self.profile_key{return Err("Workflow shell configuration changed; review again".into());}
+            let directories=steps.iter().map(|step|step.linux_directory.clone().ok_or("Missing Linux workflow directory identity")).collect::<Result<Vec<_>,_>>()?;
+            return source.validate(self.environment.strip_prefix("wsl:").ok_or("Workflow environment is unavailable")?,&directories);
+        }
+        for step in steps{self.validate(profile,step)?;}Ok(())
+    }
+    fn binding(&self,sessions:&SessionManager,session:u32)->Option<(String,String)>{
+        if self.linux_source.is_some(){sessions.launch_binding(session)}else{sessions.automation_binding(session)}
+    }
+    fn check_launch(&self,profile:&Profile,step:&ReviewedStep,pane:&str,session:u32,context:&Launch<'_>)->Result<(),String>{
+        (context.revalidate)(profile)?;
+        if !context.integrate||self.binding(context.sessions,session).as_ref()!=Some(&(pane.into(),self.profile_key.clone())){return Err("Actual workflow shell/pane does not match the reviewed profile".into());}
+        if let Some(distribution)=self.environment.strip_prefix("wsl:"){
+            let cwd=crate::wsl::call(distribution,serde_json::json!({"method":"folder","cwd":context.cwd}))?;
+            if cwd.get("cwd").and_then(serde_json::Value::as_str)!=Some(step.directory.as_str()){return Err("Workflow shell started in another folder".into());}
+        }else if repo_state::native_folder(context.cwd)?!=repo_state::native_folder(&step.directory)?{return Err("Workflow shell started in another folder".into());}
+        self.validate(profile,step)?;
+        (context.revalidate)(profile)
     }
 }
 
@@ -343,6 +398,8 @@ pub struct Run {
     pub layout: Layout,
     pub project: String,
     pub profile_id: String,
+    pub launch_key: Option<String>,
+    pub environment: String,
     pub created_at: u64,
     pub steps: Vec<StepRun>,
 }
@@ -528,6 +585,38 @@ depends_on = ["service"]
         store
             .write_once(&step.id, &step.pane_id, session, None, None, |_| Ok(()))
             .unwrap()
+    }
+    #[test]
+    fn linux_relative_folders_are_not_windows_parent_or_drive_paths(){
+        let mut definitions=project::parse_settings(SOURCE).unwrap().workflows.unwrap();
+        for literal in [r"..\literal", "C:literal"]{
+            definitions.recipes[0].steps[0].cwd=literal.into();
+            assert!(validate(&definitions).is_err());
+            validate_environment(&definitions,true).unwrap();
+        }
+        for escape in ["../outside","/outside","child/../other"]{
+            definitions.recipes[0].steps[0].cwd=escape.into();
+            assert!(validate_environment(&definitions,true).is_err());
+        }
+    }
+    #[test]
+    fn cancellation_remains_responsive_during_workflow_source_validation(){
+        use std::sync::mpsc;
+        let (_repo,store,review,profile)=setup();
+        let bindings=review.recipes[0].steps.iter().map(|step|(step.definition.name.clone(),format!("pending-{}",step.definition.name))).collect();
+        let (entered_tx,entered_rx)=mpsc::channel();let (release_tx,release_rx)=mpsc::channel();let (cancel_tx,cancel_rx)=mpsc::channel();
+        let (responsive,result)=std::thread::scope(|scope|{
+            let worker=scope.spawn(||store.start_validated(&review.id,"dev",bindings,std::slice::from_ref(&profile),true,move|policy,profile,steps|{
+                entered_tx.send(()).unwrap();release_rx.recv_timeout(Duration::from_secs(5)).unwrap();policy.validate_many(profile,steps)
+            }));
+            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let cancel=scope.spawn(||{store.cancel_review(&review.id);cancel_tx.send(()).unwrap();});
+            let responsive=cancel_rx.recv_timeout(Duration::from_secs(1)).is_ok();
+            release_tx.send(()).unwrap();let result=worker.join().unwrap();cancel.join().unwrap();(responsive,result)
+        });
+        assert!(responsive,"workflow cancellation blocked on source I/O");
+        assert!(matches!(result,Err(error) if error.contains("cancelled or expired")));
+        assert!(store.snapshot().is_empty());
     }
     #[test]
     fn versioned_schema_rejects_cycles_unknown_dependencies_duplicate_names_and_unsafe_commands() {
@@ -875,6 +964,7 @@ pub struct Store {
     inner: Mutex<Inner>,
 }
 pub struct Launch<'a> {
+    pub revalidate: &'a dyn Fn(&Profile)->Result<(),String>,
     pub cwd: &'a str,
     pub sessions: &'a SessionManager,
     pub profiles: &'a [Profile],
@@ -906,7 +996,10 @@ impl Store {
         profiles: &[Profile],
         integrate: bool,
     ) -> Result<Run, String> {
-        let mut inner = self.inner.lock().unwrap();
+        self.start_validated(review_id,recipe,bindings,profiles,integrate,|policy,profile,steps|policy.validate_many(profile,steps))
+    }
+    fn start_validated(&self,review_id:&str,recipe:&str,bindings:HashMap<String,String>,profiles:&[Profile],integrate:bool,validate:impl FnOnce(&Review,&Profile,&[ReviewedStep])->Result<(),String>)->Result<Run,String>{
+        let existing=|inner:&Inner|->Result<Option<Run>,String>{
         if let Some(run) = inner.runs.iter().find(|r| r.view.review_id == review_id) {
             if run.view.name != recipe
                 || run
@@ -918,16 +1011,17 @@ impl Store {
             {
                 return Err("Review already launched with different pane bindings".into());
             }
-            return Ok(run.view.clone());
+            return Ok(Some(run.view.clone()));
         }
-        if !integrate {
-            return Err("Enable shell integration before launching a workflow".into());
-        }
-        let policy = inner
+        Ok(None)};
+        let policy = {let inner=self.inner.lock().unwrap();
+        if let Some(run)=existing(&inner)?{return Ok(run);}
+        if !integrate{return Err("Enable shell integration before launching a workflow".into());}
+        inner
             .reviews
             .get(review_id)
             .ok_or("Workflow review expired; review again")?
-            .clone();
+            .clone()};
         if policy
             .created
             .is_none_or(|t| t.elapsed() >= Duration::from_secs(600))
@@ -950,12 +1044,15 @@ impl Store {
         {
             return Err("Bind one unique new pane to every workflow step".into());
         }
+        validate(&policy,profile,&definition.steps)?;
+        let mut inner=self.inner.lock().unwrap();
+        if let Some(run)=existing(&inner)?{return Ok(run);}
+        if !inner.reviews.contains_key(review_id)||policy.created.is_none_or(|time|time.elapsed()>=Duration::from_secs(600)){return Err("Workflow review cancelled or expired during validation".into());}
         if inner.runs.iter().filter(|r| r.view.active()).count() >= 4 {
             return Err("Four workflows are already active".into());
         }
         let mut steps = vec![];
         for step in &definition.steps {
-            policy.validate(profile, step)?;
             let pane = bindings
                 .get(&step.definition.name)
                 .ok_or("Missing step pane")?;
@@ -986,6 +1083,8 @@ impl Store {
             layout: definition.layout,
             project: policy.project.clone(),
             profile_id: policy.profile_id.clone(),
+            launch_key:policy.launch_key.clone(),
+            environment:policy.environment.clone(),
             created_at: repo_state::now(),
             steps,
         };
@@ -1047,35 +1146,37 @@ impl Store {
             .iter()
             .find(|p| p.id == policy.profile_id)
             .ok_or("Reviewed shell is unavailable")?;
-        if !context.integrate
-            || context.sessions.automation_binding(session).as_ref()
-                != Some(&(pane.into(), policy.profile_key.clone()))
-        {
-            return Err("Actual workflow shell/pane does not match the reviewed profile".into());
-        }
-        if repo_state::native_folder(context.cwd)?
-            != repo_state::native_folder(&step.step.directory)?
-        {
-            return Err("Workflow shell started in another folder".into());
-        }
-        policy.validate(profile, &step.step)?;
-        let (ticket, warning) = match context
-            .records
-            .prepare(&step.step.directory, &step.step.definition.command)
-        {
+        policy.check_launch(profile,&step.step,pane,session,&context)?;
+        let prepared=if let Some(distribution)=policy.environment.strip_prefix("wsl:"){
+            context.records.prepare_wsl(distribution,&step.step.directory,&step.step.definition.command,profile)
+        }else{context.records.prepare(&step.step.directory,&step.step.definition.command)};
+        let (mut ticket, mut warning) = match prepared {
             Ok(p) => (Some(p.id), None),
             Err(e) => (None, Some(e)),
         };
         let result = (|| {
-            policy.validate(profile, &step.step)?;
-            let programs = context.sessions.programs(&[session]);
+            policy.check_launch(profile,&step.step,pane,session,&context)?;
+            if policy.linux_source.is_some()&&let Some(id)=ticket.clone(){
+                // Coverage failures are evidence warnings; launch policy still
+                // requires its own fresh source, session and directory checks.
+                if let Err(error)=context.records.authorize_wsl(&id,pane,&|launch|{
+                    if launch.profile_id!=policy.profile_id||launch.profile_key!=policy.profile_key||launch.environment!=policy.environment||launch.cwd!=step.step.directory{return Err("Workflow evidence belongs to another launch context".into());}
+                    policy.check_launch(profile,&step.step,pane,session,&context)
+                }){
+                    context.records.cancel(&id);ticket=None;warning=Some(error);
+                }
+            }
+            let programs = context.sessions.programs(&[session])?;
             if !programs.is_empty() {
                 return Err(format!(
                     "Workflow shell is busy ({}); no command typed",
                     programs.join(", ")
                 ));
             }
+            policy.check_launch(profile,&step.step,pane,session,&context)?;
             self.write_once(id, pane, session, ticket.clone(), warning, |command| {
+                (context.revalidate)(profile)?;
+                if policy.binding(context.sessions,session).as_ref()!=Some(&(pane.into(),policy.profile_key.clone())){return Err("Workflow session changed before submission".into());}
                 context.sessions.write(session, &format!("{command}\r"))
             })
         })();
@@ -1165,7 +1266,7 @@ impl Store {
             .iter()
             .position(|s| s.id == id)
             .ok_or("Workflow step not found")?;
-        if sessions.automation_binding(session).as_ref()
+        if run.policy.binding(sessions,session).as_ref()
             != Some(&(pane.into(), run.policy.profile_key.clone()))
         {
             return Err("Workflow observation came from another shell".into());
@@ -1190,6 +1291,7 @@ impl Store {
             } else if step.state.active() {
                 step.state = State::Unknown;
                 step.error = Some(message.chars().take(2000).collect());
+                if let Some(ticket)=run.runtime[at].ticket.take(){records.cancel(&ticket);}
             }
             run.refresh();
         }
@@ -1211,13 +1313,15 @@ impl Store {
         Ok(())
     }
     pub fn stop(&self, id: &str, sessions: &SessionManager) -> Result<(), String> {
+        let (policy,requests,mut errors)={
         let mut inner = self.inner.lock().unwrap();
         let run = inner
             .runs
             .iter_mut()
             .find(|r| r.view.id == id)
             .ok_or("Workflow run not found")?;
-        let mut errors = vec![];
+        let mut requests=vec![];
+        let mut errors=vec![];
         for (step, runtime) in run.view.steps.iter_mut().zip(&run.runtime) {
             if step.state == State::Pending {
                 step.state = State::Cancelled;
@@ -1225,25 +1329,36 @@ impl Store {
             } else if step.state.active() {
                 step.state = State::Stopping;
                 if let Some(session) = runtime.session {
-                    if sessions.automation_binding(session).as_ref()
-                        != Some(&(step.pane_id.clone(), run.policy.profile_key.clone()))
-                    {
-                        step.state = State::Unknown;
-                        step.error = Some("Original workflow shell is unavailable".into());
-                        errors.push(step.step.definition.name.clone());
-                        continue;
-                    }
-                    if let Err(e) = sessions
-                        .write(session, "\u{3}")
-                        .and_then(|()| sessions.stop_programs(session))
-                    {
-                        step.error = Some(e);
-                        errors.push(step.step.definition.name.clone());
-                    }
+                    requests.push((step.id.clone(),step.pane_id.clone(),session));
+                }else{
+                    step.state=State::Unknown;step.error=Some("Original workflow session is unavailable".into());
+                    errors.push(step.step.definition.name.clone());
                 }
             }
         }
         run.refresh();
+        (run.policy.clone(),requests,errors)};
+        for (step_id,pane,session) in requests{
+            let result=(||{
+                {
+                    let inner=self.inner.lock().unwrap();
+                    let Some(run)=inner.runs.iter().find(|run|run.view.id==id) else{return Ok(());};
+                    let Some(at)=run.view.steps.iter().position(|step|step.id==step_id) else{return Ok(());};
+                    if run.view.steps[at].state!=State::Stopping||run.runtime[at].session!=Some(session){return Ok(());}
+                    if policy.binding(sessions,session).as_ref()!=Some(&(pane,policy.profile_key.clone())){return Err("Original workflow shell is unavailable".into());}
+                    sessions.write(session,"\u{3}")?;
+                }
+                // Linux inspection/Stop can wait on a separate distribution.
+                // Keep store reads, completion events and cancellation responsive.
+                sessions.stop_programs(session).map(|_|())
+            })();
+            if let Err(error)=result{
+                let mut inner=self.inner.lock().unwrap();
+                if let Some(run)=inner.runs.iter_mut().find(|run|run.view.id==id)&&let Some(step)=run.view.steps.iter_mut().find(|step|step.id==step_id)&&step.state==State::Stopping{
+                    step.state=State::Unknown;step.error=Some(error);errors.push(step.step.definition.name.clone());run.refresh();
+                }
+            }
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -1275,6 +1390,7 @@ impl Store {
         {
             return Err("Command result does not match the reviewed workflow step".into());
         }
+        if run.policy.linux_source.is_some()&&(record.environment.as_deref()!=Some(&run.view.environment)||record.shell_kind.as_deref()!=Some("wsl")||record.cwd.as_deref()!=Some(&step.step.directory)){return Err("Command result came from another workflow environment or folder".into());}
         record.started_at = step.started_at.ok_or("Workflow step never launched")?;
         record.finished_at = record.finished_at.max(record.started_at);
         record.cwd = Some(step.step.directory.clone());
@@ -1285,7 +1401,7 @@ impl Store {
             task_name: step.step.definition.name.clone(),
             request_id: run.view.id.clone(),
         });
-        record.environment=Some("native".into());
+        record.environment=Some(run.view.environment.clone());
         Ok(run.runtime[at].ticket.clone())
     }
     pub fn completed(&self, id: &str, exit: Option<i64>, at: u64) {

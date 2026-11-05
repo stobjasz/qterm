@@ -21,7 +21,11 @@ for(const shell of [{kind:"cmd",id:"custom:Agent cmd",name:"Agent cmd",command:"
         const result=agentCli(file,"commands.result",{commandId:job.id}).body.result;expect(result.command.shellKind).toBe(shell.kind);expect(result.command.profileId).toBe(shell.id);expect(result.command.cwd).toBe(project.dir);expect(result.command.requester.client).toBe("Native shell client");expect(result.output,JSON.stringify({task,result,terminal:await qterm.terminalText(job.paneId)})).toContain("agent-check-42");expect(result.command.exitCode).toBe(shell.kind==="cmd"?null:0);
         expect(fs.readFileSync(path.join(project.dir,"target/count.txt"),"utf8")).toBe("run\n");
         const watching=agentCli(file,"tasks.run",{taskId:watch.id,requestId:`watch-${shell.kind}`}).body.result;
-        await expect.poll(()=>fs.existsSync(path.join(project.dir,"target/watch.pid"))).toBe(true);const pid=Number(fs.readFileSync(path.join(project.dir,"target/watch.pid"),"utf8"));
+        await expect.poll(async()=>{
+          const response=agentCli(file,"tasks.status",{runId:watching.id}).body;
+          const current=response.result,pane=current?.paneId??watching.paneId;
+          return {started:fs.existsSync(path.join(project.dir,"target/watch.pid")),state:current?.state,error:current?.error??response.error?.message??null,terminal:pane?(await qterm.terminalText(pane)).slice(-3000):""};
+        }).toMatchObject({started:true,error:null});const pid=Number(fs.readFileSync(path.join(project.dir,"target/watch.pid"),"utf8"));
         await qterm.page.getByRole("button",{name:"Agent access",exact:true}).click();const access=qterm.page.getByRole("dialog",{name:"Agent access",exact:true});await access.getByRole("button",{name:`Stop task watch-${shell.kind}`,exact:true}).click();await expect.poll(()=>alive(pid)).toBe(false);
         await expect.poll(()=>agentCli(file,"tasks.status",{runId:watching.id}).body.result?.state).toBe("finished");const stopped=agentCli(file,"tasks.status",{runId:watching.id}).body.result;
         await access.getByRole("button",{name:"Close agent access",exact:true}).click();

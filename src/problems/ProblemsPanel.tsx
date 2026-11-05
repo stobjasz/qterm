@@ -71,7 +71,7 @@ export function ProblemsPanel({ runs, initialRunId, snapshot, saveError, compari
           {d.file ? <button aria-label={`Open ${d.file}${d.line ? `:${d.line}` : ""}`} onClick={() => void open(run, d)}>{d.file}{d.line ? `:${d.line}${d.col ? `:${d.col}` : ""}` : ""}</button> : <span>No source location reported</span>}
         </li>)}</ul>
         <details><summary>Captured output</summary><pre aria-label="Captured command output">{run.output || "(No captured output)"}</pre></details>
-        <div className="settings-actions"><button disabled={busy || !run.cwd || run.commandTruncated || !run.shellKind || run.shellKind === "other" || run.shellKind === "wsl"} onClick={() => onVerify(run)}>Run with repository tracking</button>
+        <div className="settings-actions"><button disabled={busy || !run.cwd || run.commandTruncated || !run.shellKind || run.shellKind === "other" || (run.shellKind === "wsl" && !run.environment?.startsWith("wsl:"))} onClick={() => onVerify(run)}>Run with repository tracking</button>
           <button disabled={busy || !paneLabels.has(run.paneId) || run.appRunId !== snapshot.runId} onClick={() => onGo(run.paneId)}>Go to command pane</button></div>
       </>}</div></div>
       <div className="settings-actions"><button disabled={busy || !runs.some((r) => r.verification)} onClick={() => { setBusy(true); void onRefresh().catch((e) => setError(String(e))).finally(() => setBusy(false)); }}>Refresh verification</button>

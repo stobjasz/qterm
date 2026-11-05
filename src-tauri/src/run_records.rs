@@ -1,5 +1,5 @@
 //! Durable command results and evidence for explicitly prepared verification runs.
-use crate::repo_state::{self, Coverage, Snapshot as Repository};
+use crate::repo_state::{self, Coverage as NativeCoverage, Snapshot as Repository};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -7,7 +7,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -246,13 +246,33 @@ pub enum Action {
 pub struct Prepared {
     pub id: String,
     pub before: Repository,
+    pub launch: Option<VerificationLaunch>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct VerificationLaunch {
+    pub profile_id:String, pub profile_key:String, pub environment:String, pub cwd:String,
+}
+enum Coverage { Native(NativeCoverage), Wsl(Arc<crate::wsl_verification_monitor::Monitor>) }
+impl Coverage {
+    fn changed(&self)->Result<bool,String>{match self{Self::Native(value)=>value.changed(),Self::Wsl(value)=>value.changed()}}
+    fn finish(&self,root:&str)->Result<(Option<Repository>,bool),String>{
+        match self{
+            Self::Native(_)=>{let after=repo_state::capture(Path::new(root))?;Ok((Some(after),self.changed()?))},
+            Self::Wsl(value)=>{let result=value.finish()?;Ok((result.after,result.changed))},
+        }
+    }
+    fn cancel(&self){if let Self::Wsl(value)=self{value.cancel();}}
 }
 struct Ticket {
     before: Repository,
     coverage: Coverage,
-    cwd: PathBuf,
+    cwd: String,
     command: String,
+    launch:Option<VerificationLaunch>,
+    authorized_pane:Option<String>,
 }
+impl Drop for Ticket {fn drop(&mut self){self.coverage.cancel();}}
 struct Inner {
     runs: Vec<Run>,
     revision: u64,
@@ -406,7 +426,7 @@ impl Store {
         }
         let cwd = repo_state::native_folder(cwd)?;
         let root = repo_state::root(&cwd)?;
-        let coverage = Coverage::start(&root)?;
+        let coverage = NativeCoverage::start(&root)?;
         let before = repo_state::capture(&root)?;
         if coverage.changed()? {
             return Err(
@@ -422,15 +442,43 @@ impl Store {
             id.clone(),
             Ticket {
                 before: before.clone(),
-                coverage,
-                cwd,
+                coverage:Coverage::Native(coverage),
+                cwd:repo_state::display(&cwd),
                 command: command.trim().to_owned(),
+                launch:None,authorized_pane:None,
             },
         );
-        Ok(Prepared { id, before })
+        Ok(Prepared { id, before,launch:None })
+    }
+    pub fn prepare_wsl(&self,distribution:&str,cwd:&str,command:&str,profile:&crate::pty::Profile)->Result<Prepared,String>{
+        if command.trim().is_empty()||command.encode_utf16().count()>16000||command.contains(['\r','\n']){return Err("Choose a single reviewed shell command".into());}
+        profile.check_environment(Some(&format!("wsl:{}",distribution.to_lowercase())))?;
+        profile.check_kind(Some("wsl"))?;
+        if self.tickets.lock().unwrap().len()>=16{return Err("At most 16 verification checks can be pending".into());}
+        let monitor=Arc::new(crate::wsl_verification_monitor::Monitor::start(distribution,cwd)?);
+        let before=monitor.before.clone();
+        let launch=VerificationLaunch{profile_id:profile.id.clone(),profile_key:profile.launch_key(),environment:format!("wsl:{}",distribution.to_lowercase()),cwd:monitor.cwd.clone()};
+        let mut tickets=self.tickets.lock().unwrap();
+        if tickets.len()>=16{return Err("At most 16 verification checks can be pending".into());}
+        let id=id();tickets.insert(id.clone(),Ticket{before:before.clone(),coverage:Coverage::Wsl(monitor),cwd:launch.cwd.clone(),command:command.trim().into(),launch:Some(launch.clone()),authorized_pane:None});
+        Ok(Prepared{id,before,launch:Some(launch)})
+    }
+    pub fn launch_context(&self,ticket:&str)->Result<VerificationLaunch,String>{self.tickets.lock().unwrap().get(ticket).and_then(|ticket|ticket.launch.clone()).ok_or("Linux verification ticket is no longer pending".into())}
+    pub fn authorize_wsl(&self,ticket:&str,pane:&str,validate:&dyn Fn(&VerificationLaunch)->Result<(),String>)->Result<(),String>{
+        let (monitor,launch)={let tickets=self.tickets.lock().unwrap();let ticket=tickets.get(ticket).ok_or("Verification ticket was cancelled")?;
+            let Coverage::Wsl(monitor)=&ticket.coverage else{return Err("This is not a Linux verification ticket".into());};
+            if ticket.authorized_pane.is_some(){return Err("Verification startup was already authorized".into());}
+            (Arc::clone(monitor),ticket.launch.clone().ok_or("Missing verification launch identity")?)};
+        validate(&launch)?;
+        if monitor.changed()?{return Err("Repository changed before the reviewed check started; prepare it again".into());}
+        validate(&launch)?;
+        let mut tickets=self.tickets.lock().unwrap();let pending=tickets.get_mut(ticket).ok_or("Verification ticket was cancelled")?;
+        if pending.authorized_pane.is_some(){return Err("Verification startup was already authorized".into());}
+        pending.authorized_pane=Some(pane.into());Ok(())
     }
     pub fn cancel(&self, ticket: &str) {
-        self.tickets.lock().unwrap().remove(ticket);
+        let ticket=self.tickets.lock().unwrap().remove(ticket);
+        if let Some(ticket)=ticket{ticket.coverage.cancel();}
     }
     pub fn append(&self, mut run: Run, ticket: Option<&str>) -> Result<Snapshot, String> {
         // The caller cannot submit its own repository attestation.
@@ -452,7 +500,7 @@ impl Store {
         }
         if let Some(ticket) = ticket.and_then(|id| self.tickets.lock().unwrap().remove(id)) {
             let mut evidence = Evidence {
-                before: ticket.before,
+                before: ticket.before.clone(),
                 after: None,
                 eligible: false,
                 changed_during_run: false,
@@ -460,32 +508,30 @@ impl Store {
                 reason: "Verification input did not match the prepared command".into(),
                 checked_at: repo_state::now(),
             };
-            let folder = run
-                .cwd
-                .as_ref()
-                .and_then(|p| repo_state::native_folder(p).ok());
-            if folder.as_ref() == Some(&ticket.cwd)
+            let matches=if let Some(launch)=&ticket.launch{
+                run.environment.as_deref()==Some(&launch.environment)&&run.cwd.as_ref()==Some(&ticket.cwd)&&run.profile_id.as_ref()==Some(&launch.profile_id)&&run.shell_kind.as_deref()==Some("wsl")&&ticket.authorized_pane.as_ref()==Some(&run.pane_id)
+            }else{run.environment.as_deref().unwrap_or("native")=="native"&&run.cwd.as_ref().and_then(|cwd|repo_state::native_folder(cwd).ok()).map(|path|repo_state::display(&path)).as_ref()==Some(&ticket.cwd)};
+            if matches
                 && run.command.trim() == ticket.command
                 && !run.command_truncated
                 && run.started_at >= evidence.before.captured_at
             {
-                match repo_state::capture(Path::new(&evidence.before.root))
-                    .and_then(|after| ticket.coverage.changed().map(|changed| (after, changed)))
-                {
+                match ticket.coverage.finish(&evidence.before.root) {
                     Ok((after, changed)) => {
                         evidence.changed_during_run = changed;
-                        evidence.eligible = !changed && after.digest == evidence.before.digest;
+                        evidence.eligible = !changed && after.as_ref().is_some_and(|after|after.digest == evidence.before.digest);
                         evidence.status = if evidence.eligible {
                             Freshness::Matches
                         } else {
                             Freshness::Stale
                         };
                         evidence.reason = if changed { "Repository edits were observed after this check was prepared; its result does not validate those edits" } else if !evidence.eligible { "Repository state changed between the before and after snapshots" } else { "Repository files, Git identity and staged state match the before-run snapshot; no relevant edits were observed during the check" }.into();
-                        evidence.after = Some(after);
+                        evidence.after = after;
                     }
                     Err(error) => evidence.reason = error,
                 }
             }
+            ticket.coverage.cancel();
             run.verification = Some(evidence);
         }
         let mut inner = self.inner.lock().unwrap();
@@ -504,18 +550,25 @@ impl Store {
             .filter_map(|r| {
                 r.verification
                     .as_ref()
-                    .map(|v| (r.id.clone(), v.before.clone(), v.eligible))
+                    .map(|v| (r.id.clone(),r.environment.clone().unwrap_or_else(||"native".into()), v.before.clone(), v.eligible))
             })
             .collect();
         let roots: HashSet<_> = records
             .iter()
-            .map(|(_, before, _)| before.root.clone())
+            .map(|(_,environment, before, _)| (environment.clone(),before.root.clone()))
             .collect();
         let current: HashMap<_, _> = roots
             .into_iter()
-            .map(|root| {
+            .map(|(environment,root)| {
                 let value: Result<Repository, String> = (|| {
-                    let coverage = Coverage::start(Path::new(&root))?;
+                    if let Some(distribution)=environment.strip_prefix("wsl:"){
+                        let monitor=crate::wsl_verification_monitor::Monitor::start(distribution,&root)?;
+                        let result=monitor.finish()?;
+                        if result.changed{return Err("Linux repository changed during comparison; retry to establish freshness".into());}
+                        return result.after.ok_or("Linux comparison returned no repository state".into());
+                    }
+                    if environment!="native"{return Err("Verification environment is unavailable".into());}
+                    let coverage = NativeCoverage::start(Path::new(&root))?;
                     let captured = repo_state::capture(Path::new(&root))?;
                     if coverage.changed()? {
                         return Err(
@@ -525,17 +578,17 @@ impl Store {
                     }
                     Ok(captured)
                 })();
-                (root, value)
+                ((environment,root), value)
             })
             .collect();
         let mut inner = self.inner.lock().unwrap();
-        for (id, before, eligible) in records {
+        for (id, environment,before, eligible) in records {
             let Some(run) = inner.runs.iter_mut().find(|r| r.id == id) else {
                 continue;
             };
             let v = run.verification.as_mut().unwrap();
             v.checked_at = repo_state::now();
-            match &current[&before.root] {
+            match &current[&(environment,before.root.clone())] {
                 Ok(now) if eligible => {
                     v.status = if now.digest == before.digest {
                         Freshness::Matches

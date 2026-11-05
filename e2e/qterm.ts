@@ -78,6 +78,9 @@ export class Qterm {
 
   /** Starts the app (keeping whatever it saved before) and waits until its UI is up. */
   async start(): Promise<void> {
+    // The debugging port can close before WebView2 releases its shared profile.
+    // Wait for the actual isolated browser processes before opening it again.
+    await expect.poll(isolatedWebviews, {timeout: 15_000, message: "the isolated WebView2 profile to be released"}).toEqual([]);
     fs.mkdirSync(path.dirname(APP_LOG), { recursive: true });
     const logFd = fs.openSync(APP_LOG, "a");
     fs.writeSync(logFd, `\n--- qterm started ${new Date().toISOString()}\n`);
@@ -137,6 +140,19 @@ export class Qterm {
     }
     this.process = undefined;
     await expect.poll(cdpReady, { message: "the debugging port to close" }).toBe(false);
+  }
+
+  /** Crash only the app process: no test-side descendant termination may mask ownership. */
+  async crash(): Promise<void> {
+    await this.browser?.close().catch(() => {});
+    const child=this.process;
+    if(child&&child.exitCode===null){
+      const exited=new Promise<void>(resolve=>child.once("exit",()=>resolve()));
+      if(!child.kill("SIGKILL"))throw new Error("Could not terminate the isolated app process");
+      await exited;
+    }
+    this.process=undefined;
+    await expect.poll(cdpReady,{message:"the crashed app's debugging port to close"}).toBe(false);
   }
 
   invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -283,6 +299,16 @@ function webviewProcesses(): string {
   } catch (e) {
     return `\n--- could not list WebView2 processes: ${e}\n`;
   }
+}
+
+/** Read-only, exact profile matching: never waits for or terminates installed apps. */
+export function isolatedWebviews():number[] {
+  const script=`$ErrorActionPreference='Stop'
+$target=[Regex]::Escape($env:QTERM_E2E_WEBVIEW_DIR)
+$pattern='(?:^|\\s)(?:--user-data-dir="'+$target+'"|"--user-data-dir='+$target+'"|--user-data-dir='+$target+')(?=\\s|$)'
+$ids=@(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match $pattern } | ForEach-Object { [int]$_.ProcessId })
+ConvertTo-Json -Compress -InputObject $ids`;
+  return JSON.parse(execFileSync("powershell",["-NoProfile","-Command",script],{encoding:"utf8",windowsHide:true,timeout:5000,env:{...process.env,QTERM_E2E_WEBVIEW_DIR:path.join(LOCAL_DIR,"EBWebView")}}).trim()) as number[];
 }
 
 /** Startup steps, with QTERM_E2E_DEBUG=1. */

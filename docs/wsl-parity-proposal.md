@@ -1,5 +1,12 @@
 # WSL parity implementation slice
 
+**Final delivery decisions, 5 November 2026:** the user deferred managed sessions/
+automatic running-agent follow-ups and explicitly accepted unprivileged Linux
+cleanup limits (“limits”). The implemented scope passes the checkpoint 38 full
+suite (162 cases), with the final [requirement audit](goal-completion-audit.md).
+Root supervision remains unimplemented and unauthorized. Historical open items
+below are superseded by this explicit scope decision where noted.
+
 Next after the session library checkpoint. Read-only inventory/runtime probes
 confirmed an existing Ubuntu distribution with a working WSL2 shell, Python 3
 and Git. No distribution installation or provider configuration change is needed
@@ -69,12 +76,68 @@ The remaining items below are still acceptance requirements for full parity.
    preparation and literal Linux brief files.
 4. Per-pane subreapers and Windows lifetime files now clean same-user detached Linux
    descendants on pane/app exit and Windows crashes while preserving unrelated
-   processes. Continue live Linux lifecycle/process probes and Windows interop
-   ownership validation. Then revalidate older provider menus, library grouping,
-   scoped removal and unavailable distros.
+   processes. Close/Stop now use authenticated same-user Linux tree inspection,
+   including worker-thread children and adopted descendants. Failed probes require
+   close confirmation, and expiring requests prevent delayed Stop against new
+   programs. Continue provider-specific lifecycle/process probes and Windows interop
+   ownership validation. Provider menus, library grouping, scoped removal and
+   unavailable distributions now have checkpoint 19 coverage; all 109 desktop
+   scenarios passed on 4 November 2026.
    Privileged descendants require the [root-supervisor decision](wsl-ownership-proposal.md).
-   The [provider-menu audit](provider-menu-scope-audit.md) records the remaining
-   UUID-only joins/removal and parallel launch paths.
+   The [provider-menu audit](provider-menu-scope-audit.md) records the historical
+   UUID-only joins/removal and parallel launch paths, and their implemented fixes.
+
+## Remaining workflow acceptance
+
+The native workflow implementations do not by themselves establish WSL parity.
+Keep these items in the full-goal completion audit:
+
+- **Live programs and agent status:** close/Stop now query only the captured pane's
+  owned Linux tree in its distribution. Provider-specific presence now uses the
+  same captured owner, with explicit failed/stale evidence and shared provider
+  polling (checkpoint 23 validated). Distinguish process presence from provider lifecycle
+  events; silence or a failed probe cannot establish idle. Closing/switching and
+  Stop now use Linux evidence, preserve a verified shell when stopping programs,
+  and preserve unrelated panes and processes. Direct program roots require explicit
+  close/interrupt. Validate Windows interoperability
+  descendants separately. Privileged cleanup still requires the pending decision.
+  Delayed checks and confirmation now revalidate pane/session/input/tab identity.
+  Shell invocation/alias matching has real Bash and pure shared-image coverage;
+  real multi-call runtime validation is recorded in checkpoint 39 using actual
+  BusyBox executable/argv facts, physical fixture aliases and production
+  unregistered-shell probes. See [scope and evidence](wsl-shell-runtime-validation.md).
+- **Worktree tasks and verification:** worktree preview/creation/inspection and
+  separate prompt-gated agent launch now use the selected distribution, retained
+  environment and Linux filesystem identities. Dirty source/worktrees are
+  preserved; edited profiles and unavailable distributions cannot substitute
+  native Git or another environment. Checkpoint 27 passes all 134 desktop cases,
+  six GUI cases and three deliberate regressions. See
+  [implementation and evidence](wsl-worktree-implementation.md). WSL tracked
+  verification is accepted in checkpoint 31: environment-bound panes/evidence,
+  actual Linux repository bytes, continuous local-filesystem coverage,
+  edit/restore staleness, profile/folder guards and owned monitor cleanup.
+  All 146 desktop cases pass; see [verification evidence](wsl-verification-implementation.md)
+  for limitations, including refusal of Windows-mounted/remote-only coverage.
+- **Workflow recipes:** accepted in checkpoint 33: distro-side definitions,
+  environment-bound review/launch/readiness/Stop, fresh source/profile/folder
+  checks, result attribution and restart without command replay. All 153 desktop
+  cases pass. Scoped project grants remain separate work. Follow
+  [the recipe and scoped-task implementation plan](wsl-workflows-implementation.md).
+- **Scoped local interface:** implemented and full-suite validated in checkpoints
+  34–38 (162 desktop cases, no failures/skips/flaky results). Bind each explicit session-only project grant to
+  its environment and canonical project, and require separate named-task execution
+  authority. Distro task results need stable run/request identities and requester
+  attribution. Changed definitions, revocation or unavailable distributions must
+  cancel pending launches. Native grants never authorize a same-spelled Linux
+  project or a different distribution.
+- **Running-agent follow-ups, explicitly deferred by the user on 5 November:** new-tab and confirmed idle-shell handoffs are
+  implemented. Delivering a structured follow-up to an already running provider
+  remains future work outside this delivery; never infer a safe input target from output silence or
+  type a shell command into a provider's terminal UI.
+- **Completion evidence:** native Codex indexing has a measured baseline in
+  [the indexing report](codex-index-measurement.md). Still
+  audit every original phase against current implementation and real boundary
+  tests. Optional MCP/App Server experiments remain separately scoped.
 
 ### Source implementation constraints
 
@@ -95,7 +158,8 @@ The remaining items below are still acceptance requirements for full parity.
   when extending the remaining handoff paths.
 - Usage and busy-process probes now gate native lookup by captured environment
   and known shell kind, including ambiguous Other profiles. Linux lifecycle
-  probes and older provider menu/removal paths still need their separate audit.
+  provider probes now also use the pane supervisor; generic close/Stop use it too.
+  Provider menu/removal fixes passed full desktop validation.
 
 ## Evidence required
 

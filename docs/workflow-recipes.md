@@ -1,7 +1,8 @@
 # Workflow recipes
 
 Open **Recipes** in the tab bar or the `recipes` palette action. Enter a project
-folder and choose a native PowerShell, Cmd or Git Bash profile. Review the source
+folder and choose a native PowerShell, Cmd or Git Bash profile, or an explicit WSL
+distribution profile with integrated Bash. Review the environment, source
 digest, commands, canonical folders, dependencies and layout, then check consent
 and choose **Launch reviewed workflow**. Reviewing and opening folders run nothing.
 
@@ -68,7 +69,12 @@ reviewed source digest and configured shell/environment again before writing.
 Changing a definition or folder requires a fresh review. Shell startup programs
 can delay launch; cancelling releases the pane for manual use. Cmd commands show
 their child-interpreter wrapper in the review so stopping batch files preserves
-the parent shell. WSL execution remains separate from native recipes.
+the parent shell. WSL recipes retain their distribution and exact reviewed shell
+configuration through dependency delays, output readiness and Stop. Source and
+folder identities are checked in Linux; case and literal backslashes retain Linux
+semantics. A replaced source/project/step folder or changed profile prevents the
+delayed command from executing and requires another review. Cancelling releases
+reserved panes for manual use. See [WSL requirements and ownership limits](wsl-support.md).
 
 Runs and pending launch permissions are session-only. Restarted panes retain
 ordinary workspace/output but never replay commands. Completed command records

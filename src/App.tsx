@@ -5,8 +5,11 @@ import {
   claudeSessionSeen,
   createAgentBrief,
   prepareVerification,
+  authorizeVerification,
+  type VerificationLaunch,
   cancelVerification,
-  worktreeTaskDetails,
+  prepareWorktreeOpen,
+  validateWorktreeStartup,
   publishAgentPanes,
   agentAccessSnapshot,
   claimAgentTask,
@@ -26,7 +29,6 @@ import {
   type RecipeReview,
   type WorktreeTask,
   type AgentProvider,
-  claudeRunning,
   onClaudeAttention,
   onClaudeSessionStart,
   claudeUsage,
@@ -160,6 +162,10 @@ import { TerminalRegistry, type CommandBlock, type PaneSpec, type RegistryEvents
 import { PaneBackgroundMenu } from "./terminal/PaneBackgroundMenu";
 import { CommandBlockMenu } from "./terminal/CommandBlockMenu";
 import { ConfirmClose, programName } from "./tabs/ConfirmClose";
+import { closeContext } from "./tabs/closeContext";
+import { lostReservedPane, type PaneReservation } from "./terminal/paneReservation";
+import {useProviderProcesses} from "./agents/useProviderProcesses";
+import {processEvidence,withProcessEvidence} from "./agents/processEvidence";
 import { SearchAllPanel } from "./terminal/SearchAllPanel";
 import { SearchBar } from "./terminal/SearchBar";
 import type { SearchHit, SearchOptions } from "./terminal/searchAll";
@@ -214,8 +220,6 @@ const SAVE_DELAY_MS = 400;
 const SCROLLBACK_SAVE_MS = 30_000;
 /** Retry failed saves even if the workspace and history haven't changed. */
 const SAVE_RETRY_MS = 5000;
-/** How often to look for Claude Code in the panes, and how recent output means "working". */
-const CLAUDE_POLL_MS = 2000;
 /** While a tab shows a dev server's Open button, how often to check its port is still listened on... */
 const DEV_LINK_POLL_MS = 3000;
 /** ...and how long after it was printed a port not listened on yet is fine (some servers print first). */
@@ -379,14 +383,16 @@ export default function App() {
   /** Typed into a pane's shell once it starts (resuming a Claude session). */
   const startupInput = useRef(new Map<PaneId, string>());
   const startupShellKinds=useRef(new Map<PaneId,Profile["kind"]>());
+  const worktreeLaunches=useRef(new Map<PaneId,WorktreeTask>());
+  const worktreeProfileKeys=useRef(new Map<PaneId,string>());
   const sourceLaunches=useRef(new Map<PaneId,{source:Pick<LibraryEntry,"key"|"sourceVersion"|"sourceConfig"|"provider"|"environment">;cwd:string}>());
   const startupAtPrompt = useRef(new Set<PaneId>());
-  const agentTaskPanes = useRef(new Map<PaneId, { id: string; profileId: string; command: string; submitted: boolean }>());
+  const agentTaskPanes = useRef(new Map<PaneId, { id: string; command: string; submitted: boolean; launchKey?:string|null } & PaneReservation>());
   const recipeHandlers=useRef<ReturnType<typeof useRecipeRuns>>(undefined);
-  const verificationTickets = useRef(new Map<PaneId, { id: string; profileId: string }>());
+  const verificationTickets = useRef(new Map<PaneId, { id: string; command: string; launch?: VerificationLaunch | null } & PaneReservation>());
   useEffect(() => {
     for (const [paneId, ticket] of verificationTickets.current) {
-      if (workspace.panes[paneId]?.profileId !== ticket.profileId) { verificationTickets.current.delete(paneId); void cancelVerification(ticket.id).catch(() => {}); }
+      if (lostReservedPane(ticket,workspace.panes[paneId]?.profileId)) { verificationTickets.current.delete(paneId); void cancelVerification(ticket.id).catch(() => {}); }
     }
   }, [workspace.panes]);
   /** Output saved before the restart, shown above each restored pane's new shell. */
@@ -397,7 +403,11 @@ export default function App() {
   const [registry] = useState(
     () =>
       new TerminalRegistry({
-        onValidateStartup:async(paneId,_session,cwd)=>{
+        onValidateStartup:async(paneId,session,cwd)=>{
+          const verification=verificationTickets.current.get(paneId);
+          if(verification?.launch){await authorizeVerification(verification.id,paneId,session,cwd);return;}
+          const worktree=worktreeLaunches.current.get(paneId);
+          if(worktree){await validateWorktreeStartup(worktree.id,paneId,session,cwd);worktreeLaunches.current.delete(paneId);return;}
           const pending=sourceLaunches.current.get(paneId);if(!pending)throw new Error("Source launch is no longer pending");
           const current=await resolveLibrarySession(pending.source.key,pending.source.sourceVersion);
           if(!sourceEnabled(pending.source,configRef.current)||!current.launchCwd||!sameCommandFolder(current.launchCwd,cwd,current.environment)||!sameCommandFolder(pending.cwd,cwd,current.environment))throw new Error("Source settings or folder changed before the shell became ready");
@@ -417,6 +427,7 @@ export default function App() {
           }
         },
         onStartupError: (paneId, message) => {
+          worktreeLaunches.current.delete(paneId);worktreeProfileKeys.current.delete(paneId);
           sourceLaunches.current.delete(paneId);
           recipeHandlers.current?.fail(paneId,message);
           const task = agentTaskPanes.current.get(paneId);
@@ -551,9 +562,12 @@ export default function App() {
     if(openedRecipeRuns.current.has(run.id))return;
     if(run.steps.some(s=>s.state!=="pending"))throw new Error("This workflow launch is no longer pending. Review it again to create a new run.");
     try{
+      const current=profilesRef.current?.find(p=>p.id===run.profileId);
+      if(!configRef.current?.shellIntegration)throw new Error("Shell integration changed before opening workflow panes. Review again.");
+      if(!current||!profileSupportsEnvironment(run.environment,current))throw new Error("The workflow shell no longer matches its reviewed environment.");
       openedRecipeRuns.current.add(run.id);
       recipes.register(run);
-      const panes:Pane[]=run.steps.map(step=>{startupInput.current.set(step.paneId,`${step.command}\r`);startupAtPrompt.current.add(step.paneId);return{id:step.paneId,profileId:profile.id,profileName:profile.name,environment:"native",title:"",cwd:step.directory};});
+      const panes:Pane[]=run.steps.map(step=>{startupInput.current.set(step.paneId,`${step.command}\r`);startupAtPrompt.current.add(step.paneId);startupShellKinds.current.set(step.paneId,profile.kind);return{id:step.paneId,profileId:profile.id,profileName:profile.name,environment:run.environment,title:"",cwd:step.directory};});
       if(run.layout==="tabs")setWorkspace(ws=>panes.reduce((next,pane)=>openTabWith(next,nextId("tab"),{kind:"leaf",pane:pane.id},[pane],`${run.name}: ${run.steps.find(s=>s.paneId===pane.id)!.name}`),ws));
       else {const root:LayoutNode=panes.length===1?{kind:"leaf",pane:panes[0].id}:{kind:"split",dir:run.layout==="rows"?"column":"row",children:panes.map(p=>({kind:"leaf",pane:p.id})),sizes:panes.map(()=>1/panes.length)};setWorkspace(ws=>openTabWith(ws,nextId("tab"),root,panes,run.name));}
       setNotice(`Launched workflow ${run.name}; dependent steps reserve input until ready.`);
@@ -567,11 +581,13 @@ export default function App() {
     try {
       const ids = { tab: nextId("tab"), pane: nextId("pane") };
       const job = await claimAgentTask(id, ids.pane); claimed = true;
-      const profile = profiles?.find((p) => p.id === job.profileId);
-      if (!profile || profile.kind === "wsl" || profile.kind === "other") throw new Error("The reviewed native shell is unavailable");
-      agentTaskPanes.current.set(ids.pane, { id, profileId: job.profileId, command: job.task.command, submitted: false });
+      const profile = profilesRef.current?.find((p) => p.id === job.profileId);
+      if (!profile || !profileSupportsEnvironment(job.environment,profile)) throw new Error("The reviewed task shell is unavailable in its original environment");
+      if(!configRef.current?.shellIntegration)throw new Error("Enable shell integration before opening the task pane");
+      agentTaskPanes.current.set(ids.pane, { id, profileId: job.profileId, command: job.task.command, submitted: false,launchKey:job.launchKey });
+      startupShellKinds.current.set(ids.pane,profile.kind);
       startupInput.current.set(ids.pane, `${job.task.command}\r`); startupAtPrompt.current.add(ids.pane);
-      if (!newTab(job.profileId, job.task.directory, false, ids)) throw new Error("Could not create a task tab");
+      if (!newTabRef.current(job.profileId, job.task.directory, false, ids)) throw new Error("Could not create a task tab");
       setWorkspace((ws) => renameTab(ws, ids.tab, `${job.requester.client}: ${job.task.name}`));
       setNotice(`Queued ${job.task.name} for ${job.requester.client}; its new tab reserves input until the reviewed task can launch.`);
     } catch (e) {
@@ -592,7 +608,7 @@ export default function App() {
     }
   }, [agentAccess.snapshot.invocations, acceptAgentTask, registry]);
   useEffect(() => {
-    for (const [paneId, task] of agentTaskPanes.current) if (workspace.panes[paneId]?.profileId !== task.profileId) {
+    for (const [paneId, task] of agentTaskPanes.current) if (lostReservedPane(task,workspace.panes[paneId]?.profileId)) {
       agentTaskPanes.current.delete(paneId); void failAgentTask(task.id, "The task pane closed or changed shell").catch(() => {});
     }
   }, [workspace.panes]);
@@ -603,21 +619,25 @@ export default function App() {
   }, []);
 
   const openWorktree = useCallback(async (task: WorktreeTask, agent: boolean) => {
-    const profile = profiles?.find((p) => p.id === task.profileId);
-    if (!profile || profile.kind === "wsl" || profile.kind === "other") throw new Error("The recorded native shell is unavailable. Restore that profile before opening this task.");
-    const details = await worktreeTaskDetails(task.id); // Revalidate the recorded repository before opening a pane.
-    if (agent && details.branch !== task.branch) throw new Error(`This worktree is now on ${details.branch}. Switch back to ${task.branch} before launching its task agent, or open a shell to inspect it.`);
+    task=await prepareWorktreeOpen(task.id,agent);
+    const profile = profilesRef.current?.find((p) => p.id === task.profileId);
+    if (!profile || profile.kind === "other") throw new Error("The recorded shell is unavailable. Restore that profile before opening this task.");
+    const distribution=task.environment?.startsWith("wsl:")?task.environment.slice(4):undefined;
     let command: string | undefined;
     if (agent && task.provider !== "shell") {
       if (!config?.shellIntegration) throw new Error("Enable shell integration before opening a task agent.");
-      const brief = await createAgentBrief(briefText({ command: `Worktree task: ${task.title}`, cwd: task.directory, output: "" }, task.request));
+      const text=briefText({ command: `Worktree task: ${task.title}`, cwd: task.directory, output: "" }, task.request);
+      const brief = distribution?await createWslAgentBrief(distribution,text):await createAgentBrief(text);
       command = handoffCommand(task.provider, brief.path, profile.kind);
       if (!command) throw new Error("This shell cannot launch the task agent.");
     }
+    await prepareWorktreeOpen(task.id,agent);
+    if(command&&!configRef.current?.shellIntegration)throw Error("Shell integration changed while preparing the task agent");
     const id = newTab(profile.id, task.directory);
     if (!id) throw new Error("Could not open the worktree tab.");
     setWorkspace((ws) => { const tab = ws.tabs.find((t) => paneIds(t.root).includes(id)); return tab ? renameTab(ws, tab.id, task.title) : ws; });
-    if (command) { startupShellKinds.current.set(id,profile.kind);startupInput.current.set(id, `${command}\r`); startupAtPrompt.current.add(id); }
+    if(task.profileKey)worktreeProfileKeys.current.set(id,task.profileKey);
+    if (command) { worktreeLaunches.current.set(id,task);startupShellKinds.current.set(id,profile.kind);startupInput.current.set(id, `${command}\r`); startupAtPrompt.current.add(id); }
     setWorktreesOpen(false);
     setNotice(command ? "The task agent will launch at the new worktree's empty shell prompt." : "Opened the task worktree in a new shell tab.");
   }, [profiles, config?.shellIntegration, newTab]);
@@ -678,13 +698,19 @@ export default function App() {
     const run = verificationRun;
     if (!run?.cwd || !run.command.trim() || run.commandTruncated) throw new Error("This run has no complete recorded command or folder.");
     const profile = profiles?.find((p) => p.id === run.profileId);
-    if (!profile || profile.kind === "other" || profile.kind === "wsl" || !run.shellKind || run.shellKind !== profile.kind) throw new Error("The original native shell profile is unavailable or changed kind. WSL verification is still planned.");
+    if (!profile || profile.kind === "other" || !run.shellKind || run.shellKind !== profile.kind || !profileSupportsEnvironment(run.environment ?? "native",profile)) throw new Error("The original shell profile is unavailable or no longer matches the recorded environment.");
     if (!config?.shellIntegration) throw new Error("Enable shell integration before tracking verification results.");
-    const prepared = await prepareVerification(run.cwd, run.command);
-    const paneId = newTab(profile.id, run.cwd);
-    if (!paneId) { await cancelVerification(prepared.id); throw new Error("Could not open a verification pane."); }
-    verificationTickets.current.set(paneId, { id: prepared.id, profileId: profile.id });
-    startupInput.current.set(paneId, `${run.command}\r`); startupAtPrompt.current.add(paneId);
+    const prepared = await prepareVerification(run.cwd, run.command, profile.id, run.environment ?? "native");
+    try {
+      const current=profilesRef.current?.find(p=>p.id===profile.id);
+      if(!configRef.current?.shellIntegration||!current||current.kind!==profile.kind||!profileSupportsEnvironment(run.environment??"native",current))throw new Error("Shell settings changed while preparing verification. Review the command again.");
+      if(profile.kind==="wsl"&&(!prepared.launch||prepared.launch.profileId!==profile.id||prepared.launch.environment!==run.environment))throw new Error("The prepared verification does not match the recorded WSL environment.");
+      const paneId = newTabRef.current(profile.id, prepared.launch?.cwd ?? run.cwd);
+      if (!paneId) throw new Error("Could not open a verification pane.");
+      verificationTickets.current.set(paneId, { id: prepared.id, command:run.command, profileId: profile.id, launch:prepared.launch });
+      startupShellKinds.current.set(paneId,profile.kind);
+      startupInput.current.set(paneId, `${run.command}\r`); startupAtPrompt.current.add(paneId);
+    } catch(error) { await cancelVerification(prepared.id); throw error; }
     setVerificationRun(undefined);
     setNotice("The reviewed check will run when its new pane reaches an empty prompt in the recorded folder.");
   }, [verificationRun, profiles, config?.shellIntegration, newTab]);
@@ -763,6 +789,7 @@ export default function App() {
       registry.dispose(paneId);
       startupInput.current.delete(paneId);
       startupShellKinds.current.delete(paneId);
+      worktreeLaunches.current.delete(paneId);worktreeProfileKeys.current.delete(paneId);
       sourceLaunches.current.delete(paneId);
       startupAtPrompt.current.delete(paneId);
       setAttention((current) => without(current, paneId));
@@ -780,13 +807,23 @@ export default function App() {
   );
 
   /** Closing by hand: ask first when a program still runs there (a shell that exits closes as before). */
-  const [confirmClose, setConfirmClose] = useState<{ what: "tab" | "pane"; programs: string[]; verb: "close" | "switch"; close(): void }>();
+  const [confirmClose, setConfirmClose] = useState<{ what: "tab" | "pane"; programs: string[]; error?: string; verb: "close" | "switch"; close(): void }>();
+  const closeRequest = useRef(0);
   const askToClose = useCallback(
     (what: "tab" | "pane", panes: PaneId[], close: () => void, verb: "close" | "switch" = "close") => {
+      const request=++closeRequest.current;
+      const context=closeContext(workspaceRef.current,what,panes,id=>registry.closeToken(id));
+      const valid=()=>{
+        if(request!==closeRequest.current)return false;
+        if(context!==undefined&&context===closeContext(workspaceRef.current,what,panes,id=>registry.closeToken(id)))return true;
+        setNotice("The pane or tab changed while checking running programs. Try the close or switch action again.");
+        return false;
+      };
+      const finish=()=>{if(valid())close();};
       const sessions = panes.map((id) => registry.sessionOf(id)).filter((s): s is number => s !== undefined);
       void runningPrograms(sessions)
-        .catch(() => [] as string[])
-        .then((programs) => (programs.length ? setConfirmClose({ what, programs: programs.map(programName), verb, close }) : close()));
+        .then((programs) => {if(valid())programs.length ? setConfirmClose({ what, programs: programs.map(programName), verb, close:finish }) : finish();})
+        .catch((error) => {if(valid())setConfirmClose({ what, programs: [], error: String(error), verb, close:finish });});
     },
     [registry],
   );
@@ -815,6 +852,7 @@ export default function App() {
           registry.dispose(paneId);
           startupInput.current.delete(paneId);
           startupShellKinds.current.delete(paneId);
+          worktreeLaunches.current.delete(paneId);worktreeProfileKeys.current.delete(paneId);
           sourceLaunches.current.delete(paneId);
           startupAtPrompt.current.delete(paneId);
           setAttention((current) => without(current, paneId));
@@ -873,6 +911,7 @@ export default function App() {
     const profile = profilesRef.current?.find((p) => p.id === pane.profileId);
     return {
       profileId: pane.profileId,
+      profileKey:agentTaskPanes.current.get(pane.id)?.launchKey??recipeHandlers.current?.profileKey(pane.id)??verificationTickets.current.get(pane.id)?.launch?.profileKey??worktreeProfileKeys.current.get(pane.id),
       distribution: profile?.distribution,
       shellKind:startupShellKinds.current.get(pane.id)??profile?.kind,
       environment:pane.environment,
@@ -880,7 +919,7 @@ export default function App() {
       startupInput: startupInput.current.get(pane.id),
       startupAtPrompt: startupAtPrompt.current.has(pane.id),
       startupAuthorization: agentTaskPanes.current.has(pane.id) || !!recipeHandlers.current?.hasPane(pane.id),
-      startupValidation:sourceLaunches.current.has(pane.id),
+      startupValidation:!!verificationTickets.current.get(pane.id)?.launch||sourceLaunches.current.has(pane.id)||worktreeLaunches.current.has(pane.id),
       restored: restoredOutput.current.get(pane.id),
       elevated: pane.elevated,
       theme: profile?.theme ? THEMES[profile.theme] : undefined,
@@ -1048,11 +1087,14 @@ export default function App() {
         case "stopPrograms": {
           const session = registry.sessionOf(paneId);
           if (session === undefined) break;
+          const release=registry.reserveStop(paneId);
+          if(!release){setNotice("This pane is preparing startup input or already stopping programs.");break;}
+          setNotice("Stopping programs; this pane's input is reserved until Stop finishes.");
           void stopPrograms(session)
-            .then((ended) =>
+            .then((ended) => registry.sessionOf(paneId)===session&&
               setNotice(ended.length ? `Stopped ${ended.map(programName).join(", ")}; the shell is still there.` : "Nothing runs in this pane but its shell."),
             )
-            .catch((e) => setNotice(`Could not stop it: ${e}`));
+            .catch((e) => setNotice(`Could not stop it: ${e}`)).finally(release);
           break;
         }
         case "viewJson": {
@@ -1087,7 +1129,22 @@ export default function App() {
     onTitle: (paneId, title) => setWorkspace((ws) => setPaneTitle(ws, paneId, title)),
     // Like Windows Terminal's "graceful" close: a clean exit closes the pane,
     // a failure stays on screen so the error can be read.
-    onExit: (paneId, code) => code === 0 && closePaneById(paneId),
+    onExit: (paneId, code) => {
+      recipeHandlers.current?.fail(paneId,"Workflow shell exited before completion");
+      const task=agentTaskPanes.current.get(paneId);
+      if(task){
+        registry.cancelStartup(paneId);startupInput.current.delete(paneId);startupAtPrompt.current.delete(paneId);
+        agentTaskPanes.current.delete(paneId);
+        void failAgentTask(task.id,`The task shell exited before command completion (exit ${code})`).catch(()=>{});
+      }
+      const ticket=verificationTickets.current.get(paneId);
+      if(ticket){
+        registry.cancelStartup(paneId);startupInput.current.delete(paneId);
+        verificationTickets.current.delete(paneId);
+        void cancelVerification(ticket.id).catch(()=>{});
+      }
+      if(code===0)closePaneById(paneId);
+    },
     onCwd: (paneId, cwd) => {
       setWorkspace((ws) => setPaneCwd(ws, paneId, cwd));
       setHistory((h) => rememberFolder(h, cwd));
@@ -1138,7 +1195,9 @@ export default function App() {
       }
       const ticket = verificationTickets.current.get(paneId);
       verificationTickets.current.delete(paneId);
-      void records.record(run, ticket?.id).catch((e) => setNotice(`Could not save command record: ${e}`));
+      const matchesTicket=ticket&&finished.command===ticket.command;
+      if(ticket&&!matchesTicket){registry.cancelStartup(paneId);startupInput.current.delete(paneId);void cancelVerification(ticket.id).catch(()=>{});}
+      void records.record(run, matchesTicket?ticket.id:undefined).catch((e) => setNotice(`Could not save command record: ${e}`));
       // A command may have changed the repository, or the project's settings.
       refreshProject.current(paneId);
       // A server it ran has stopped: check its port now rather than at the next poll.
@@ -1339,6 +1398,7 @@ export default function App() {
     const publish = () => void publishAgentPanes(Object.values(workspace.panes).map((pane) => ({
       id: pane.id, cwd: pane.cwd && pane.cwd.length <= 4096 ? pane.cwd : null,
       label: limitText(paneLabel(pane.id), 512), profileId: pane.profileId,
+      environment: registry.environmentOf(pane.id) ?? pane.environment ?? null,
       kind: (registry.environmentOf(pane.id)??pane.environment)?.startsWith("wsl:") ? "wsl" : profiles?.find((p) => p.id === pane.profileId)?.kind ?? "other",
     }))).then(() => active && setAgentPaneError(undefined), (e) => active && setAgentPaneError(`Could not publish pane observations: ${e}`));
     publish(); const timer = window.setInterval(publish, 5000);
@@ -1352,7 +1412,9 @@ export default function App() {
     [registry],
   );
 
+  const processSnapshot=useProviderProcesses(Boolean(config?.claudeSessions||config?.claudeAlerts||config?.codexSessions||config?.codexAlerts||config?.codexRestore),registry,workspace);
   const codex = useCodex({
+    processes:processSnapshot,
     config, workspace, registry, attention: codexAttention,
     raiseAlert: (alert, notify) => raiseAlert(alert, notify),
     clearAlert: (paneId) => setAttention((current) => current.get(paneId)?.kind?.startsWith("codex:") ? without(current, paneId) : current),
@@ -1683,19 +1745,19 @@ export default function App() {
       return;
     }
     let disposed = false;
-    let timer: number;
     const poll = async () => {
       try {
-        const running = new Set(await claudeRunning());
         if (disposed) return;
         const now = Date.now();
         const next = new Map<PaneId, AgentStatus>();
         const observed = new Map<PaneId, AgentObservation>();
         for (const paneId of Object.keys(workspaceRef.current.panes)) {
           const session = registry.sessionOf(paneId);
-          const native=nativeAgentContext(registry.environmentOf(paneId),registry.shellKindOf(paneId));
-          if (session === undefined || (native?!running.has(session):!claudeEvents.current.has(paneId)&&!paneSessions.current.has(paneId))) continue;
-          const event = resolveObservation(claudeEvents.current.get(paneId), registry.submissionRevision(paneId), registry.lastOutput(paneId), now, CLAUDE_BUSY_MS);
+          if(session===undefined)continue;
+          const environment=registry.environmentOf(paneId),native=nativeAgentContext(environment,registry.shellKindOf(paneId));
+          const evidence=processEvidence(processSnapshot.get(session),environment,"claude",claudeEvents.current.has(paneId)||paneSessions.current.has(paneId),claudeStatusRef.current.has(paneId),registry.atEmptyPrompt(paneId),native||environment?.startsWith("wsl:")===true,now);
+          if(!evidence.track)continue;
+          const event = withProcessEvidence(resolveObservation(claudeEvents.current.get(paneId), registry.submissionRevision(paneId), registry.lastOutput(paneId), now, CLAUDE_BUSY_MS),evidence);
           next.set(paneId, event.state); observed.set(paneId, event);
         }
         for (const id of claudeEvents.current.keys()) if (!next.has(id)) claudeEvents.current.delete(id);
@@ -1707,11 +1769,10 @@ export default function App() {
           setClaudeObservations((current) => new Map([...current].map(([id, value]) => [id, { ...value, state: "unknown", reason: "Process scan failed; last observation retained." }])));
         }
       }
-      if (!disposed) timer = window.setTimeout(() => void poll(), CLAUDE_POLL_MS);
     };
     void poll();
-    return () => { disposed = true; window.clearTimeout(timer); };
-  }, [claudeFeatures, registry]);
+    return () => { disposed = true; };
+  }, [claudeFeatures, registry,processSnapshot]);
 
   // A pane's last reply and cache countdown go when Claude Code isn't running there any more.
   useEffect(() => {
@@ -2198,6 +2259,7 @@ export default function App() {
         <ConfirmClose
           what={confirmClose.what}
           programs={confirmClose.programs}
+          error={confirmClose.error}
           verb={confirmClose.verb}
           onClose={() => {
             setConfirmClose(undefined);
@@ -2266,17 +2328,18 @@ export default function App() {
         onValidate={async()=>{await resolveLibrarySession(sessionHandoff.key,sessionHandoff.sourceVersion,false);if(!sourceEnabled(sessionHandoff,configRef.current))throw new Error("Source settings changed; review the source again.");}}
         profiles={(profiles??[]).filter(p=>profileSupportsEnvironment(sessionHandoff.environment,p))} checks={commandRuns} onSend={sendSessionHandoff} onClose={()=>{setSessionHandoff(undefined);setLibraryOpen(true);}}/>}
       {agentAccessOpen && <AgentAccessPanel cwd={focusedPane ? workspace.panes[focusedPane]?.cwd : undefined} snapshot={agentAccess.snapshot} error={agentAccess.error ?? agentPaneError}
-        profiles={(profiles ?? []).filter((p) => p.kind !== "wsl" && p.kind !== "other")} profileId={focusedPane ? workspace.panes[focusedPane]?.profileId : undefined} recordedIds={new Set(commandRuns.map((r) => r.id))}
+        profiles={(profiles ?? []).filter((p) => p.kind !== "other")} environment={focusedPane ? registry.environmentOf(focusedPane)??workspace.panes[focusedPane]?.environment : undefined} profileId={focusedPane ? workspace.panes[focusedPane]?.profileId : undefined} recordedIds={new Set(commandRuns.map((r) => r.id))}
         onGrant={agentAccess.grant} onRevoke={agentAccess.revoke} onClose={() => setAgentAccessOpen(false)} onStop={stopRequestedTask}
         onGo={(paneId) => { if (workspaceRef.current.panes[paneId]) { setWorkspace((ws) => focusPane(ws, paneId)); setAgentAccessOpen(false); } else setNotice("That task pane is closed."); }}
         onInspect={(job) => { setProblemRunId(job.id); setAgentAccessOpen(false); setProblemsOpen(true); }} />}
       {recipesOpen && <RecipePanel cwd={focusedPane?workspace.panes[focusedPane]?.cwd:undefined} profileId={focusedPane?workspace.panes[focusedPane]?.profileId:undefined}
-        profiles={(profiles??[]).filter(p=>p.kind!=="wsl"&&p.kind!=="other")} runs={recipes.runs} error={recipes.error} recordedIds={new Set(commandRuns.map(r=>r.id))}
+        profiles={(profiles??[]).filter(p=>p.kind!=="other")} runs={recipes.runs} error={recipes.error} recordedIds={new Set(commandRuns.map(r=>r.id))}
         onLaunch={launchReviewedRecipe} onCancel={recipes.cancel} onStop={recipes.stop} onClose={()=>setRecipesOpen(false)}
         onGo={pane=>{if(workspaceRef.current.panes[pane]){setWorkspace(ws=>focusPane(ws,pane));setRecipesOpen(false);}else setNotice("That workflow pane is closed.");}}
         onInspect={id=>{setProblemRunId(id);setRecipesOpen(false);setProblemsOpen(true);}}/>}
       {worktreesOpen && <WorktreePanel cwd={focusedPane ? workspace.panes[focusedPane]?.cwd : undefined} profileId={focusedPane ? workspace.panes[focusedPane]?.profileId : undefined}
-        profiles={(profiles ?? []).filter((p) => p.kind !== "wsl" && p.kind !== "other")} snapshot={worktrees.snapshot} saveError={worktrees.error} runs={commandRuns}
+        environment={focusedPane?(registry.environmentOf(focusedPane)??workspace.panes[focusedPane]?.environment):undefined}
+        profiles={(profiles ?? []).filter((p) => p.kind !== "other")} snapshot={worktrees.snapshot} saveError={worktrees.error} runs={commandRuns}
         onCreate={worktrees.create} onAction={worktrees.action} onOpen={openWorktree} onClose={() => setWorktreesOpen(false)}
         onInspect={(run) => { setProblemRunId(run.id); setWorktreesOpen(false); setProblemsOpen(true); }} />}
       {problemsOpen && <ProblemsPanel runs={commandRuns} initialRunId={problemRunId}

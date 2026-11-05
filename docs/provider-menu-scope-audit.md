@@ -1,15 +1,16 @@
-# Remaining provider menu scope work
+# Provider menu scope audit and implementation
 
 Checkpoint 19 implements the changes below and passes focused/native/frontend
-validation. Full desktop-suite validation and final documentation review remain
-queued at the user's requested pause. The findings below preserve the audit's
-original rationale; they no longer describe the current launch/removal code.
+validation. All 109 desktop scenarios passed on 4 November 2026 after resuming the
+saved checkpoint. The findings below preserve the audit's original rationale; they no
+longer describe the current launch/removal code.
 
-The session library uses provider/environment/UUID identities, verified source
-revisions and prompt-gated launch. The older Claude/Codex menus still contain
-parallel paths that need to use those same boundaries before WSL parity is complete.
+The session library and Claude/Codex menus now share provider/environment/UUID
+identities, verified source revisions and prompt-gated launch. Native browsing is
+labelled **Native Windows**. Folder groups and remembered-reference removal retain
+environment identity; fresh group actions also launch in that environment.
 
-Observed in the current source:
+Findings before checkpoint 19:
 
 - `ClaudeMenu.tsx` and `CodexMenu.tsx` join native transcript rows to remembered
   sessions by UUID alone. Their folder groups also omit environment identity.
@@ -27,7 +28,7 @@ Observed in the current source:
   Keep backend retention checks consistent with the library, including refreshes
   already in flight when history is disabled.
 
-Required implementation:
+Implementation requirements addressed by checkpoint 19:
 
 1. Normalize remembered environment using the same explicit captured value and
    conservative historical inference as the backend library. Keep unknown context
@@ -53,8 +54,12 @@ Required implementation:
 6. Fresh-session actions from a folder group also retain that group's environment.
    Avoid passing a Linux folder to a native default profile.
 
-Evidence needed: backend colliding-UUID scoped-forget tests, real Windows/WSL menu
-collision and removal tests, literal source-home resume through a profile startup
-barrier, busy/prompt/broadcast guards and native-menu regressions. Register risks
-before specs and deliberately break each protected boundary, then restore/pass.
-No model or live provider configuration changes are needed for those fixtures.
+Evidence: backend colliding-UUID scoped-forget and failed-save tests pass. R83–R86
+cover 12 real Windows/WSL menu scenarios, including collision/removal, literal
+source-home resume through a startup barrier, busy-shell preservation, disabled
+sources, unavailable distributions and fresh-session environment selection.
+Five deliberate mutations failed their intended assertions; restored source and
+all 12 scenarios passed afterward. The full 109-scenario desktop run passed with
+no skips or failures. The current menu screenshot was inspected, and no isolated
+app, supervisor, fixture daemon or lifetime file remained after the suite.
+Fixtures use no models or live provider configuration.

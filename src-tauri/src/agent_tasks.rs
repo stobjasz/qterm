@@ -1,5 +1,5 @@
 //! Reviewed launch definitions and session invocation state. No arbitrary input API.
-use crate::{agent_pipe, project, pty::Profile, repo_state, run_records};
+use crate::{agent_pipe, agent_scope::Scope, project, pty::Profile, repo_state, run_records};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,7 +20,7 @@ pub struct Task {
     pub directory: String,
     pub manifest_digest: String,
     #[serde(skip)]
-    manifest: PathBuf,
+    manifest: String,
     #[serde(skip)]
     resolved_command: String,
 }
@@ -35,13 +35,18 @@ pub struct Manifest {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Policy {
+    pub environment: String,
     pub profile_id: String,
     pub profile_name: String,
     pub tasks: Vec<Task>,
     pub manifests: Vec<Manifest>,
     #[serde(skip)]
     pub profile_key: String,
+    #[serde(skip)]
+    linux: Option<LinuxPolicy>,
 }
+#[derive(Clone)]
+struct LinuxPolicy {project:crate::wsl_tasks::Project,directory:crate::wsl_tasks::Directory,files:HashMap<String,crate::wsl_tasks::FileFact>}
 fn source(path: &Path, root: &Path) -> Result<(PathBuf, Vec<u8>), String> {
     let path = fs::canonicalize(path).map_err(|e| e.to_string())?;
     if !path.starts_with(root) {
@@ -101,7 +106,7 @@ impl Policy {
                 source: task.source,
                 directory: repo_state::display(&dir),
                 manifest_digest: digest,
-                manifest,
+                manifest:repo_state::display(&manifest),
             });
         }
         if tasks.is_empty() {
@@ -110,6 +115,7 @@ impl Policy {
         let mut manifests: Vec<_> = manifests.into_values().collect();
         manifests.sort_by(|a, b| a.path.cmp(&b.path));
         let policy = Self {
+            environment:"native".into(),linux:None,
             profile_id: profile.id.clone(),
             profile_name: profile.name.clone(),
             profile_key: key,
@@ -142,7 +148,7 @@ impl Policy {
             .iter()
             .filter(|m| {
                 tasks.iter().any(|t| {
-                    t.manifest_digest == m.digest && repo_state::display(&t.manifest) == m.path
+                    t.manifest_digest == m.digest && t.manifest == m.path
                 })
             })
             .cloned()
@@ -164,7 +170,7 @@ impl Policy {
             return Err("Task directory changed or escaped the project".into());
         }
         let (path, bytes) = source(&dir.join(&task.source), root)?;
-        if path != task.manifest || format!("{:x}", Sha256::digest(bytes)) != task.manifest_digest {
+        if repo_state::display(&path) != task.manifest || format!("{:x}", Sha256::digest(bytes)) != task.manifest_digest {
             return Err("Task manifest changed; review a new execution grant".into());
         }
         let found = project::tasks(&dir).ok_or("Task definition no longer exists")?;
@@ -181,6 +187,41 @@ impl Policy {
             );
         }
         Ok(())
+    }
+    pub(crate) fn review_scope(scope:&Scope,cwd:&str,profile:&Profile)->Result<Self,String>{
+        let Scope::Linux(project)=scope else{let Scope::Native(root)=scope else{unreachable!()};return Self::review(root,&repo_state::native_folder(cwd)?,profile);};
+        profile.check_kind(Some("wsl"))?;profile.check_environment(Some(&project.environment()))?;
+        let found=project.discover(cwd)?;
+        let mut tasks=vec![];let mut manifests=HashMap::new();
+        for task in found.tasks{
+            if task.command.encode_utf16().count()>16000||task.command.contains(['\r','\n','\0'])||task.name.chars().any(char::is_control){continue;}
+            let fact=found.files.get(&task.source).ok_or("Task source is no longer available")?;
+            let bytes=found.bytes.get(&task.source).ok_or("Task source exceeds the execution-review limit")?;
+            let digest=fact.digest.clone().ok_or("Task source has no complete digest")?;
+            let text=String::from_utf8_lossy(bytes);let preview:String=text.chars().take(16000).collect();
+            manifests.entry(fact.path.clone()).or_insert_with(||Manifest{path:fact.path.clone(),digest:digest.clone(),truncated:preview.len()<text.len(),preview});
+            tasks.push(Task{id:task_id(&task.source,&task.name),name:task.name,resolved_command:task.command.clone(),command:task.command,source:task.source,directory:found.directory.path.clone(),manifest_digest:digest,manifest:fact.path.clone()});
+        }
+        if tasks.is_empty(){return Err("No tasks have complete single-line launch commands".into());}
+        let mut manifests:Vec<_>=manifests.into_values().collect();manifests.sort_by(|a,b|a.path.cmp(&b.path));
+        let policy=Self{environment:scope.environment(),profile_id:profile.id.clone(),profile_name:profile.name.clone(),profile_key:profile.launch_key(),tasks,manifests,linux:Some(LinuxPolicy{project:project.clone(),directory:found.directory,files:found.files})};
+        policy.validate_tasks_scope(scope,&policy.tasks,profile)?;Ok(policy)
+    }
+    pub(crate) fn validate_scope(&self,scope:&Scope,task:&Task,profile:&Profile)->Result<(),String>{
+        self.validate_tasks_scope(scope,std::slice::from_ref(task),profile)
+    }
+    pub(crate) fn validate_tasks_scope(&self,scope:&Scope,tasks:&[Task],profile:&Profile)->Result<(),String>{
+        if self.environment!=scope.environment(){return Err("Execution policy belongs to another environment".into());}
+        match (&self.linux,scope){
+            (None,Scope::Native(root))=>{for task in tasks {self.validate(root,task,profile)?;}Ok(())},
+            (Some(policy),Scope::Linux(project))=>{
+                if policy.project!=*project||profile.id!=self.profile_id||profile.launch_key()!=self.profile_key{return Err("Shell or project configuration changed; review a new execution grant".into());}
+                profile.check_kind(Some("wsl"))?;profile.check_environment(Some(&self.environment))?;
+                let found=project.discover(&policy.directory.path)?;
+                if found.directory!=policy.directory||tasks.iter().any(|task|task.directory!=policy.directory.path||found.files.get(&task.source)!=policy.files.get(&task.source)||!found.tasks.iter().any(|current|current.source==task.source&&current.name==task.name&&current.command==task.resolved_command)){return Err("Task manifest, command or execution directory changed; review a new execution grant".into());}Ok(())
+            }
+            _=>Err("Execution policy belongs to another project environment".into()),
+        }
     }
 }
 #[derive(Clone, Debug, serde::Deserialize, Serialize)]
@@ -200,6 +241,11 @@ pub struct Invocation {
     pub project: String,
     pub task: Task,
     pub profile_id: String,
+    pub environment: String,
+    /// WSL spawn expectation; native automation keys stay private.
+    pub launch_key: Option<String>,
+    #[serde(skip)]
+    profile_key: String,
     pub state: String,
     pub pane_id: Option<String>,
     pub queued_at: u64,
@@ -214,6 +260,10 @@ pub struct Invocation {
     pub ticket: Option<String>,
 }
 impl Invocation {
+    pub(crate) fn binding(&self,sessions:&crate::pty::SessionManager,session:u32)->Option<(String,String)>{
+        let actual=if self.environment=="native"{sessions.automation_binding(session)}else if self.environment.starts_with("wsl:"){sessions.launch_binding(session)}else{None};
+        actual.filter(|(pane,key)|Some(pane)==self.pane_id.as_ref()&&key==&self.profile_key)
+    }
     pub fn active(&self) -> bool {
         matches!(
             self.state.as_str(),
@@ -265,7 +315,7 @@ impl Queue {
         project: &str,
         requester: Requester,
         task: Task,
-        profile_id: String,
+        policy: &Policy,
     ) -> Result<Invocation, String> {
         let mut jobs = self.jobs.lock().unwrap();
         if let Some(job) = jobs.iter().find(|j| {
@@ -288,7 +338,10 @@ impl Queue {
             requester,
             project: project.into(),
             task,
-            profile_id,
+            profile_id:policy.profile_id.clone(),
+            environment:policy.environment.clone(),
+            launch_key:policy.linux.as_ref().map(|_|policy.profile_key.clone()),
+            profile_key:policy.profile_key.clone(),
             state: "queued".into(),
             pane_id: None,
             queued_at: repo_state::now(),
@@ -382,8 +435,13 @@ impl Queue {
         {
             return Err("Command result does not match the granted task invocation".into());
         }
+        if job.environment.starts_with("wsl:") {
+            if run.environment.as_deref()!=Some(&job.environment)||run.shell_kind.as_deref()!=Some("wsl")||run.cwd.as_deref()!=Some(&job.task.directory){return Err("Command result came from another granted task environment or folder".into());}
+        }else if run.shell_kind.as_deref()==Some("wsl")||run.environment.as_deref().is_some_and(|env|env!="native") {
+            return Err("Command result came from another granted task environment".into());
+        }
         run.requester = Some(job.requester.clone());
-        run.environment=Some("native".into());
+        run.environment=Some(job.environment.clone());
         // The launch boundary already verified this canonical folder. Preserve it
         // even when the task removes/renames its cwd or shell telemetry is absent.
         run.cwd = Some(job.task.directory.clone());
@@ -457,7 +515,7 @@ mod tests {
                 &repo_state::display(&repo.dir),
                 requester(&policy.tasks[0], id),
                 policy.tasks[0].clone(),
-                policy.profile_id.clone(),
+                policy,
             )
             .unwrap()
     }
@@ -605,7 +663,7 @@ mod tests {
                     &job.project,
                     requester(&job.task, "five"),
                     job.task.clone(),
-                    policy.profile_id.clone()
+                    &policy
                 )
                 .is_err()
         );

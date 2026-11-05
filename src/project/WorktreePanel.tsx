@@ -5,15 +5,15 @@ import { useModalFocus } from "../tabs/useModalFocus";
 import { worktreeRuns } from "./worktreeRuns";
 
 interface Props {
-  cwd?: string; profileId?: string; profiles: Profile[]; snapshot: WorktreeSnapshot; saveError?: string | null; runs: readonly CommandRun[];
+  cwd?: string; profileId?: string; environment?:string; profiles: Profile[]; snapshot: WorktreeSnapshot; saveError?: string | null; runs: readonly CommandRun[];
   onCreate(token: string): Promise<WorktreeSnapshot>;
   onAction(action: "retry" | "recover" | "complete" | "reopen", taskId?: string): Promise<unknown>;
   onOpen(task: WorktreeTask, agent: boolean): Promise<void>;
   onInspect(run: CommandRun): void; onClose(): void;
 }
-export function WorktreePanel({ cwd, profileId, profiles, snapshot, saveError, runs, onCreate, onAction, onOpen, onInspect, onClose }: Props) {
+export function WorktreePanel({ cwd, profileId, environment,profiles, snapshot, saveError, runs, onCreate, onAction, onOpen, onInspect, onClose }: Props) {
   const root = useRef<HTMLElement>(null); useModalFocus(root);
-  const [draft, setDraft] = useState<WorktreeDraft>({ cwd: cwd ?? "", title: "", request: "", branch: "", base: "HEAD", directory: "", provider: "codex", profileId: profiles.find((p) => p.id === profileId)?.id ?? profiles[0]?.id ?? "" });
+  const [draft, setDraft] = useState<WorktreeDraft>({ environment:environment??"native",cwd: cwd ?? "", title: "", request: "", branch: "", base: "HEAD", directory: "", provider: "codex", profileId: profiles.find((p) => p.id === profileId)?.id ?? profiles[0]?.id ?? "" });
   const [form, setForm] = useState(false); const [preview, setPreview] = useState<WorktreePreview>();
   const previewRef = useRef(preview); previewRef.current = preview;
   useEffect(() => () => { if (previewRef.current) void cancelWorktreePreview(previewRef.current.token).catch(() => {}); }, []);
@@ -36,11 +36,12 @@ export function WorktreePanel({ cwd, profileId, profiles, snapshot, saveError, r
         <label>New branch<input aria-label="Worktree new branch" value={draft.branch} onChange={(e) => edit("branch", e.target.value)} disabled={busy} required /></label>
         <label>New directory (existing parent)<input aria-label="Worktree new directory" value={draft.directory} onChange={(e) => edit("directory", e.target.value)} disabled={busy} required /></label>
         <label>Agent<select aria-label="Worktree agent" value={draft.provider} onChange={(e) => edit("provider", e.target.value)} disabled={busy}><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="shell">Shell only</option></select></label>
-        <label>Shell<select aria-label="Worktree shell" value={draft.profileId} onChange={(e) => edit("profileId", e.target.value)} disabled={busy}>{profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label>Shell<select aria-label="Worktree shell" value={draft.profileId} onChange={(e) => {const p=profiles.find(p=>p.id===e.target.value),next=p?.distribution?`wsl:${p.distribution.toLowerCase()}`:"native";setDraft(d=>({...d,profileId:e.target.value,environment:next,...(d.environment!==next?{cwd:"",directory:""}:{})}));}} disabled={busy}>{profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <p>Environment: {draft.environment??"native"}</p>
         <label className="worktree-request">Request<textarea aria-label="Worktree task request" value={draft.request} onChange={(e) => edit("request", e.target.value)} maxLength={8000} disabled={busy} required /></label>
         <div className="settings-actions"><button type="button" disabled={busy} onClick={() => setForm(false)}>Cancel new task</button><button type="submit" disabled={busy || !draft.profileId}>Preview worktree task</button></div>
       </form> : <div aria-label="Worktree creation preview">
-        <h3>{preview.task.title}</h3><p>Repository: {preview.task.repository}</p><p>Base: {preview.task.base} at {preview.task.commit}</p><p>New branch: {preview.task.branch}</p><p>New directory: {preview.task.directory}</p>
+        <h3>{preview.task.title}</h3><p>Environment: {preview.task.environment??"native"}</p><p>Repository: {preview.task.repository}</p><p>Base: {preview.task.base} at {preview.task.commit}</p><p>New branch: {preview.task.branch}</p><p>New directory: {preview.task.directory}</p>
         <p>Agent: {preview.task.provider} · Shell: {profiles.find((p) => p.id === preview.task.profileId)?.name ?? "Unavailable"}</p><pre className="handoff-preview">{preview.task.request}</pre>
         {preview.sourceDirty && <p role="status">The source checkout has local changes. They stay there and are not copied into the new worktree.</p>}
         <p>Creation uses the reviewed commit with Git hooks and checkout filters disabled. Filter-managed files may remain pointers. No dependencies are installed. Opening the agent is a separate action after creation.</p>
@@ -55,8 +56,8 @@ function TaskDetail({ task, runs, busy, perform, onOpen, onAction, onInspect }: 
   const [details, setDetails] = useState<WorktreeDetails>(); const [error, setError] = useState<string>();
   const refresh = async () => { try { setDetails(await worktreeTaskDetails(task.id)); setError(undefined); } catch (e) { setDetails(undefined); setError(String(e)); } };
   useEffect(() => { let active = true; void worktreeTaskDetails(task.id).then((d) => active && setDetails(d), (e) => active && setError(String(e))); return () => { active = false; }; }, [task.id]);
-  const associated = worktreeRuns(task.directory, task.createdAt, runs);
-  return <div aria-label="Worktree task details"><h3>{task.title}</h3><p>{task.status} · {task.provider}</p><p>{task.directory}</p><p>Source: {task.repository}</p><p>Created from {task.base} at {task.commit}</p><pre className="handoff-preview">{task.request}</pre>
+  const associated = worktreeRuns(task.directory, task.createdAt, runs,task.environment??"native");
+  return <div aria-label="Worktree task details"><h3>{task.title}</h3><p>{task.status} · {task.provider}</p><p>Environment: {task.environment??"native"}</p><p>{task.directory}</p><p>Source: {task.repository}</p><p>Created from {task.base} at {task.commit}</p><pre className="handoff-preview">{task.request}</pre>
     {task.error && <p role="alert">{task.error}</p>}{error && <p role="status">Worktree inspection unavailable: {error}</p>}
     {details && <><p role="status" aria-label="Worktree change summary">{details.branch} · {details.changed} changed · {details.untracked} untracked · {details.commits} commits after the task base</p><p>HEAD: {details.head}</p><pre aria-label="Worktree diff summary">{details.summary || "No tracked differences from the task base."}</pre>{details.summaryTruncated && <p role="status">Tracked diff summary truncated to 12000 characters.</p>}</>}
     <div className="settings-actions"><button disabled={busy} onClick={() => void perform(refresh)}>Refresh worktree</button><button disabled={busy || !details} onClick={() => void perform(() => onOpen(task, false))}>Open worktree shell</button>{task.provider !== "shell" && <button disabled={busy || !details || task.status === "failed"} onClick={() => void perform(() => onOpen(task, true))}>Open task agent</button>}

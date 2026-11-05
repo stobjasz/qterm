@@ -1,0 +1,35 @@
+# Merge into C:/work/shop/.qterm.toml, NOT global config.toml.
+# Requires the project's existing npm typecheck/test scripts.
+name = "Shop"
+tab_color = "green"
+icon = "SHOP"
+
+[[snippets]]
+name = "Shop typecheck"
+command = "npm run typecheck"
+run = false
+
+[[snippets]]
+name = "Shop tests"
+command = "npm run test"
+run = false
+
+# Text matches ignore case. Use an output marker your project really emits.
+[[triggers]]
+name = "Smoke check completed"
+pattern = "SMOKE_OK"
+action = "notify"
+
+# A tab marker without a Windows pop-up.
+[[triggers]]
+name = "Build failed"
+pattern = "Build failed"
+action = "mark"
+
+# TOML literal strings preserve the regular expression's backslash.
+[[triggers]]
+name = "TypeScript diagnostic"
+pattern = 'error TS\d+'
+regex = true
+action = "highlight"
+color = "#5c1a1a"

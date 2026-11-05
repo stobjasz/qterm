@@ -4,21 +4,29 @@ mod agent_brief;
 mod agent_inbox;
 mod agent_access;
 mod agent_tasks;
+mod agent_scope;
 mod agent_pipe;
 mod process_owner;
+mod agent_process;
 mod repo_state;
 mod run_records;
 mod worktree_tasks;
 mod recipes;
 mod session_library;
 mod wsl;
+mod wsl_workflows;
+mod wsl_tasks;
 mod wsl_sources;
 mod wsl_owner;
+mod wsl_windows_job;
+mod wsl_verification_monitor;
 mod claude;
 mod claude_hook;
 mod claude_statusline;
 mod claude_usage;
 mod codex;
+#[cfg(test)]
+mod codex_benchmark;
 mod codex_hook;
 mod commands;
 mod config;
@@ -194,6 +202,7 @@ pub fn run() {
             commands::get_config,
             commands::list_profiles,
             commands::pty_spawn,
+            commands::pty_ready,
             commands::pty_write,
             commands::pty_ack,
             commands::pty_resize,
@@ -220,6 +229,7 @@ pub fn run() {
             commands::record_command_run,
             commands::command_runs_action,
             commands::prepare_verification,
+            commands::authorize_verification,
             commands::cancel_verification,
             commands::refresh_verification,
             commands::worktree_tasks_snapshot,
@@ -253,6 +263,8 @@ pub fn run() {
             commands::create_worktree_task,
             commands::worktree_task_action,
             commands::worktree_task_details,
+            commands::prepare_worktree_open,
+            commands::validate_worktree_startup,
             commands::codex_usage_many,
             commands::codex_running,
             commands::codex_usage,
@@ -291,6 +303,7 @@ pub fn run() {
             commands::delete_layout,
             commands::list_all_claude_sessions,
             commands::claude_running,
+            commands::provider_processes,
             commands::stop_programs,
             commands::project_info,
             commands::wsl_distributions,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  codexRunning, codexSessionSeen, codexUsageMany, forgetCodexSessions, listCodexSessions,
+  codexSessionSeen, codexUsageMany, forgetCodexSessions, listCodexSessions,
   onCodexActivity, onCodexAttention, onCodexReply, onCodexSessionStart, onCodexSessionsChanged,
   setCodexPlanSummary, showPlanWarning, type ClaudeAlert, type CodexSession, type CodexUsage, type Config,
 } from "../ipc";
@@ -10,8 +10,11 @@ import {nativeAgentContext,sightingContext} from "../agents/environments";
 import { planSummary } from "./usage";
 import type { CodexMenuProps } from "./CodexMenu";
 import { hookObservation, resolveObservation, type AgentObservation, type AgentStatus } from "../agents/status";
+import {processEvidence,withProcessEvidence} from "../agents/processEvidence";
+import type {ProcessSnapshot} from "../agents/useProviderProcesses";
 
 interface Options {
+  processes:ProcessSnapshot;
   resumeSession(session:CodexSession,where:"new"|"current"):void;
   newSession(cwd:string,environment:string):void;
   config: Config | undefined;
@@ -36,6 +39,7 @@ export function useCodex(options: Options) {
   const [replies, setReplies] = useState<ReadonlyMap<string, string>>(new Map());
   const known = useRef(new Map<string, string>());
   const activity = useRef(new Map<string, AgentObservation>());
+  const previousStatus=useRef(status);previousStatus.current=status;
   const warned = useRef(new Map<string, number>());
   const seen = useCallback((paneId: string, id: string, associate = true) => {
     const o = latest.current;
@@ -88,10 +92,8 @@ export function useCodex(options: Options) {
   useEffect(() => {
     if (!enabled) { setStatus(new Map()); setUsages(new Map()); setObservations(new Map()); return; }
     let disposed = false;
-    let timer: number;
     const poll = async () => {
       try {
-        const running = new Set(await codexRunning());
         if (disposed) return;
         const o = latest.current;
         const next = new Map<string, AgentStatus>();
@@ -99,12 +101,13 @@ export function useCodex(options: Options) {
         const observed = new Map<string, AgentObservation>();
         const livePanes = Object.values(o.workspace.panes).filter((pane) => {
           const session = o.registry.sessionOf(pane.id);
-          return session !== undefined && (nativeAgentContext(o.registry.environmentOf(pane.id),o.registry.shellKindOf(pane.id))?running.has(session):known.current.has(pane.id)||activity.current.has(pane.id));
+          if(session===undefined)return false;
+          const environment=o.registry.environmentOf(pane.id),native=nativeAgentContext(environment,o.registry.shellKindOf(pane.id));
+          const evidence=processEvidence(o.processes.get(session),environment,"codex",known.current.has(pane.id)||activity.current.has(pane.id),previousStatus.current.has(pane.id),o.registry.atEmptyPrompt(pane.id),native||environment?.startsWith("wsl:")===true);
+          if(!evidence.track)return false;
+          const event=withProcessEvidence(resolveObservation(activity.current.get(pane.id),o.registry.submissionRevision(pane.id),o.registry.lastOutput(pane.id),Date.now(),2000),evidence);
+          next.set(pane.id,event.state);observed.set(pane.id,event);return true;
         });
-        for (const pane of livePanes) {
-          const event = resolveObservation(activity.current.get(pane.id), o.registry.submissionRevision(pane.id), o.registry.lastOutput(pane.id), Date.now(), 2000);
-          next.set(pane.id, event.state); observed.set(pane.id, event);
-        }
         setStatus(next); setObservations(observed);
         const nativePanes=livePanes.filter(pane=>nativeAgentContext(o.registry.environmentOf(pane.id),o.registry.shellKindOf(pane.id)));
         const ids = [...new Set(nativePanes.flatMap((pane) => known.current.has(pane.id) ? [known.current.get(pane.id)!] : []))];
@@ -142,11 +145,10 @@ export function useCodex(options: Options) {
           setObservations((current) => new Map([...current].map(([id, value]) => [id, { ...value, state: "unknown", reason: "Process scan failed; last observation retained." }])));
         }
       }
-      if (!disposed) timer = window.setTimeout(() => void poll(), 2500);
     };
     void poll();
-    return () => { disposed = true; window.clearTimeout(timer); };
-  }, [enabled]);
+    return () => { disposed = true; };
+  }, [enabled,options.processes]);
 
   const resume = useCallback((session: CodexSession) => {
     latest.current.resumeSession(session,"new");

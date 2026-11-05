@@ -140,16 +140,18 @@ export function ptySpawn(
   elevated = false,
   expectedEnvironment?: string,
   expectedKind?:ShellKind,
+  expectedProfileKey?:string,
 ): Promise<SessionId> {
   // Raw byte batches arrive as ArrayBuffer (tauri::ipc::Response on the Rust side).
   const channel = new Channel<ArrayBuffer>();
   channel.onmessage = (chunk) => onOutput(new Uint8Array(chunk));
-  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows, elevated,expectedEnvironment,expectedKind }, onOutput: channel });
+  return invoke("pty_spawn", { request: { paneId, profileId, cwd, cols, rows, elevated,expectedEnvironment,expectedKind,expectedProfileKey }, onOutput: channel });
 }
 
-export function ptyWrite(id: SessionId, data: string): Promise<void> {
-  return invoke("pty_write", { id, data });
+export function ptyWrite(id: SessionId, data: string,protocolReply=false): Promise<void> {
+  return invoke("pty_write", { id, data,protocolReply });
 }
+export const ptyReady=(id:SessionId):Promise<void>=>invoke("pty_ready",{id});
 
 export function wslTranslatePaths(distribution:string,paths:string[],toLinux:boolean):Promise<string[]>{return invoke("wsl_translate_paths",{distribution,paths,toLinux});}
 
@@ -326,7 +328,9 @@ export type CommandRunsAction = "retry" | "resetSaved" | "clear";
 export const commandRunsSnapshot = (): Promise<CommandRunsSnapshot> => invoke("command_runs_snapshot");
 export const recordCommandRun = (run: RecordedCommandRun, ticket?: string): Promise<CommandRunsSnapshot> => invoke("record_command_run", { run, ticket });
 export const commandRunsAction = (action: CommandRunsAction): Promise<CommandRunsSnapshot> => invoke("command_runs_action", { action });
-export const prepareVerification = (cwd: string, command: string): Promise<{ id: string; before: RepositorySnapshot }> => invoke("prepare_verification", { cwd, command });
+export interface VerificationLaunch { profileId: string; profileKey: string; environment: string; cwd: string }
+export const prepareVerification = (cwd: string, command: string, profileId?: string, environment?: string): Promise<{ id: string; before: RepositorySnapshot; launch?: VerificationLaunch | null }> => invoke("prepare_verification", { cwd, command, profileId, environment });
+export const authorizeVerification = (ticket: string, paneId: string, session: SessionId, cwd: string): Promise<void> => invoke("authorize_verification", { ticket, paneId, session, cwd });
 export const cancelVerification = (ticket: string): Promise<void> => invoke("cancel_verification", { ticket });
 export const refreshVerification = (): Promise<CommandRunsSnapshot> => invoke("refresh_verification");
 export const onCommandRunsChanged = (handler: (snapshot: CommandRunsSnapshot) => void): Promise<UnlistenFn> => listen<CommandRunsSnapshot>("command-runs-changed", (event) => handler(event.payload));
@@ -458,6 +462,16 @@ export function runningPrograms(ids: SessionId[]): Promise<string[]> {
   return invoke("running_programs", { ids });
 }
 
+export interface ProviderProcessObservation {
+  session:number;
+  environment:string;
+  providers:("claude"|"codex")[]|null;
+  error:string|null;
+  observedAt:number;
+  ended:boolean;
+}
+export const providerProcesses=(ids:number[])=>invoke<ProviderProcessObservation[]>("provider_processes",{ids});
+
 /** Ends what runs in the session's shell (and everything it started), keeping the shell; the programs that ended. */
 export function stopPrograms(id: SessionId): Promise<string[]> {
   return invoke("stop_programs", { id });
@@ -508,12 +522,14 @@ export const createWslAgentBrief=(distribution:string,text:string):Promise<{path
 export const validateWslFolder=(distribution:string,cwd:string):Promise<string>=>invoke("validate_wsl_folder",{distribution,cwd});
 
 export interface WorktreeTask {
+  environment?:string|null; profileKey?:string|null; commonIdentity?:[number,number]|null;
   id: string; title: string; request: string; repository: string; commonDir: string;
   directory: string; branch: string; base: string; commit: string;
   provider: AgentProvider | "shell"; profileId: string; createdAt: number;
   status: "creating" | "active" | "completed" | "failed"; error: string | null;
 }
 export interface WorktreeDraft {
+  environment?:string;
   cwd: string; title: string; request: string; branch: string; base: string;
   directory: string; provider: AgentProvider | "shell"; profileId: string;
 }
@@ -526,18 +542,20 @@ export const cancelWorktreePreview = (token: string) => invoke<void>("cancel_wor
 export const createWorktreeTask = (token: string) => invoke<WorktreeSnapshot>("create_worktree_task", { token });
 export const worktreeTaskAction = (action: "retry" | "recover" | "complete" | "reopen", taskId?: string) => invoke<WorktreeSnapshot>("worktree_task_action", { action, taskId });
 export const worktreeTaskDetails = (taskId: string) => invoke<WorktreeDetails>("worktree_task_details", { taskId });
+export const prepareWorktreeOpen=(taskId:string,agent:boolean)=>invoke<WorktreeTask>("prepare_worktree_open",{taskId,agent});
+export const validateWorktreeStartup=(taskId:string,paneId:string,session:number,cwd:string)=>invoke<void>("validate_worktree_startup",{taskId,paneId,session,cwd});
 export const onWorktreeTasksChanged = (fn: (value: WorktreeSnapshot) => void) => listen<WorktreeSnapshot>("worktree-tasks-changed", (event) => fn(event.payload));
 
 export interface GrantedTask { id: string; name: string; command: string; source: string; directory: string; manifestDigest: string }
 export interface ExecutionPolicy { profileId: string; profileName: string; tasks: GrantedTask[]; manifests: { path: string; digest: string; preview: string; truncated: boolean }[] }
 export interface AgentRequester { client: string; grantId: string; taskId: string; taskName: string; requestId: string }
-export interface AgentInvocation { id: string; requester: AgentRequester; project: string; task: GrantedTask; profileId: string; state: string; paneId: string | null; queuedAt: number; startedAt: number | null; finishedAt: number | null; exitCode: number | null; error: string | null; evidenceWarning: string | null }
-export interface AgentAccessReview { id: string; project: string; execution: ExecutionPolicy | null }
-export interface AgentGrant { id: string; client: string; project: string; connectionFile: string; createdAt: number; tasks: GrantedTask[]; profileId: string | null }
+export interface AgentInvocation { id: string; requester: AgentRequester; project: string; task: GrantedTask; profileId: string; environment:string; launchKey?:string|null; state: string; paneId: string | null; queuedAt: number; startedAt: number | null; finishedAt: number | null; exitCode: number | null; error: string | null; evidenceWarning: string | null }
+export interface AgentAccessReview { id: string; project: string; environment:string; execution: ExecutionPolicy | null }
+export interface AgentGrant { id: string; client: string; project: string; environment:string; connectionFile: string; createdAt: number; tasks: GrantedTask[]; profileId: string | null }
 export interface AgentAccessSnapshot { grants: AgentGrant[]; listening: boolean; revision: number; executable: string; invocations: AgentInvocation[] }
-export interface AgentPane { id: string; cwd: string | null; label: string; profileId: string; kind: string }
+export interface AgentPane { id: string; cwd: string | null; label: string; profileId: string; kind: string; environment?: string | null }
 export const agentAccessSnapshot = () => invoke<AgentAccessSnapshot>("agent_access_snapshot");
-export const reviewAgentAccess = (cwd: string, profileId?: string) => invoke<AgentAccessReview>("review_agent_access", { cwd, profileId });
+export const reviewAgentAccess = (cwd: string, profileId?: string,environment="native") => invoke<AgentAccessReview>("review_agent_access", { cwd, profileId,environment });
 export const cancelAgentAccessReview = (id: string) => invoke<void>("cancel_agent_access_review", { id });
 export const grantAgentAccess = (review: string, client: string, taskIds: string[] = []) => invoke<AgentAccessSnapshot>("grant_agent_access", { review, client, taskIds });
 export const revokeAgentAccess = (id: string) => invoke<AgentAccessSnapshot>("revoke_agent_access", { id });
@@ -865,9 +883,9 @@ export const onSessionPinsChanged=(handler:(pins:SessionPins)=>void)=>listen<Ses
 export type RecipeState = "pending" | "running" | "ready" | "succeeded" | "failed" | "blocked" | "cancelled" | "unknown" | "timed_out" | "stopping" | "exited";
 export interface RecipeStep { name:string; command:string; cwd:string; directory:string; dependsOn:string[]; readyOutput:string|null; timeoutSeconds:number }
 export interface RecipeDefinition { name:string; layout:"tabs"|"rows"|"columns"; steps:RecipeStep[] }
-export interface RecipeReview { id:string; source:string; project:string; digest:string; profileId:string; profileName:string; recipes:RecipeDefinition[] }
+export interface RecipeReview { id:string; source:string; project:string; digest:string; profileId:string; profileName:string; launchKey?:string|null; environment:string; recipes:RecipeDefinition[] }
 export interface RecipeStepRun extends RecipeStep { id:string; paneId:string; state:RecipeState; runnable:boolean; startedAt:number|null; finishedAt:number|null; exitCode:number|null; error:string|null; evidenceWarning:string|null }
-export interface RecipeRun { id:string; reviewId:string; name:string; layout:RecipeDefinition["layout"]; project:string; profileId:string; createdAt:number; steps:RecipeStepRun[] }
+export interface RecipeRun { id:string; reviewId:string; name:string; layout:RecipeDefinition["layout"]; project:string; profileId:string; launchKey?:string|null; environment:string; createdAt:number; steps:RecipeStepRun[] }
 export const reviewRecipes=(cwd:string,profileId:string):Promise<RecipeReview>=>invoke("review_recipes",{cwd,profileId});
 export const cancelRecipeReview=(id:string):Promise<void>=>invoke("cancel_recipe_review",{id});
 export const startRecipe=(reviewId:string,name:string,bindings:Record<string,string>):Promise<RecipeRun>=>invoke("start_recipe",{reviewId,name,bindings});

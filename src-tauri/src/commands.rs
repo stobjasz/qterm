@@ -60,8 +60,13 @@ pub async fn pty_spawn(
 }
 
 #[tauri::command]
-pub fn pty_write(sessions: State<'_, SessionManager>, id: SessionId, data: String) -> Result<(), String> {
-    sessions.write(id, &data)
+pub async fn pty_ready(app:AppHandle,id:SessionId)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||app.state::<SessionManager>().ready(id)).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub fn pty_write(sessions: State<'_, SessionManager>, id: SessionId, data: String,protocol_reply:Option<bool>) -> Result<(), String> {
+    sessions.write_input(id, &data,protocol_reply.unwrap_or(false))
 }
 
 /// The UI has processed `bytes` of output; see `pty::flow`.
@@ -372,14 +377,25 @@ pub async fn list_all_claude_sessions(app:AppHandle) -> Result<Vec<crate::claude
 /// Sessions with Claude Code running inside them (per-tab status).
 /// What still runs in these panes' shells, so closing them can ask first.
 #[tauri::command]
-pub async fn running_programs(sessions: State<'_, SessionManager>, ids: Vec<SessionId>) -> Result<Vec<String>, String> {
-    Ok(sessions.programs(&ids))
+pub async fn running_programs(app: AppHandle, ids: Vec<SessionId>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move||app.state::<SessionManager>().programs(&ids)).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn provider_processes(app:AppHandle,mut ids:Vec<SessionId>)->Result<Vec<crate::agent_process::Observation>,String>{
+    if ids.len()>256 {return Err("At most 256 terminal sessions can be inspected".into());}ids.sort_unstable();ids.dedup();
+    tauri::async_runtime::spawn_blocking(move||{
+        let sessions=app.state::<SessionManager>();let mut values=crate::agent_process::scan(sessions.process_targets(&ids));
+        let alive:std::collections::HashSet<_>=sessions.process_targets(&ids).into_iter().filter(|target|!target.ended).map(|target|target.id).collect();
+        for value in &mut values {if !alive.contains(&value.session){value.ended=true;value.providers=Some(vec![]);value.error=None;}}
+        values
+    }).await.map_err(|error|error.to_string())
 }
 
 /// Ends what runs in a pane's shell (the program and everything it started), keeping the shell.
 #[tauri::command]
-pub async fn stop_programs(sessions: State<'_, SessionManager>, id: SessionId) -> Result<Vec<String>, String> {
-    sessions.stop_programs(id)
+pub async fn stop_programs(app: AppHandle, id: SessionId) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move||app.state::<SessionManager>().stop_programs(id)).await.map_err(|e|e.to_string())?
 }
 
 /// Every listening TCP port with its process, and the pane session it runs under, if any.
@@ -667,8 +683,42 @@ pub async fn command_runs_action(app: AppHandle, action: crate::run_records::Act
 }
 
 #[tauri::command]
-pub async fn prepare_verification(app: AppHandle, cwd: String, command: String) -> Result<crate::run_records::Prepared, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<crate::run_records::Store>().prepare(&cwd, &command)).await.map_err(|e| e.to_string())?
+pub async fn prepare_verification(app: AppHandle, cwd: String, command: String,profile_id:Option<String>,environment:Option<String>) -> Result<crate::run_records::Prepared, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+        let store=app.state::<crate::run_records::Store>();
+        if let Some(id)=&profile_id{
+            let profile=profiles.iter().find(|profile|&profile.id==id).ok_or("The original verification shell is unavailable")?;
+            profile.check_environment(environment.as_deref())?;
+            if profile.distribution.is_none()&&!profile.native_agent_context(){return Err("This shell cannot prepare repository verification".into());}
+        }
+        let prepared=if let Some(distribution)=crate::wsl::context(profile_id.as_deref(),environment.as_deref(),&profiles)?{
+            let profile=profiles.iter().find(|profile|Some(&profile.id)==profile_id.as_ref()).ok_or("Choose the original WSL profile before preparing verification")?;
+            store.prepare_wsl(&distribution,&cwd,&command,profile)?
+        }else{store.prepare(&cwd,&command)?};
+        if let Some(launch)=&prepared.launch&&let Err(error)=verification_profile(launch,&all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>())){store.cancel(&prepared.id);return Err(error);}
+        Ok(prepared)
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn verification_profile(launch:&crate::run_records::VerificationLaunch,profiles:&[Profile])->Result<(),String>{
+    let profile=profiles.iter().find(|profile|profile.id==launch.profile_id).ok_or("The reviewed verification shell is unavailable")?;
+    profile.check_environment(Some(&launch.environment))?;profile.check_kind(Some("wsl"))?;
+    if profile.launch_key()!=launch.profile_key{return Err("The reviewed verification shell configuration changed".into());}Ok(())
+}
+
+#[tauri::command]
+pub async fn authorize_verification(app:AppHandle,ticket:String,pane_id:String,session:SessionId,cwd:String)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        let store=app.state::<crate::run_records::Store>();let context=store.launch_context(&ticket)?;
+        let distribution=context.environment.strip_prefix("wsl:").ok_or("Verification environment is unavailable")?;
+        let actual=crate::wsl::call(distribution,serde_json::json!({"method":"folder","cwd":cwd}))?.get("cwd").and_then(serde_json::Value::as_str).ok_or("Linux verification folder identity is unavailable")?.to_owned();
+        store.authorize_wsl(&ticket,&pane_id,&|launch|{
+            if !app.state::<ConfigState>().get().shell_integration{return Err("Shell integration was disabled before verification startup".into());}
+            verification_profile(launch,&all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()))?;
+            if actual!=launch.cwd||app.state::<SessionManager>().launch_binding(session)!=Some((pane_id.clone(),launch.profile_key.clone())){return Err("The verification pane no longer matches its reviewed shell and folder".into());}Ok(())
+        })
+    }).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
@@ -756,7 +806,16 @@ pub async fn start_recipe(app:AppHandle,review_id:String,name:String,bindings:st
 }
 #[tauri::command]
 pub async fn launch_recipe_step(app:AppHandle,id:String,pane_id:String,session:u32,cwd:String)->Result<crate::recipes::Run,String>{
-    tauri::async_runtime::spawn_blocking(move || {let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let sessions=app.state::<SessionManager>();let records=app.state::<crate::run_records::Store>();let store=app.state::<crate::recipes::Store>();let result=store.launch(&id,&pane_id,session,crate::recipes::Launch{cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records});let _=app.emit("recipe-runs-changed",store.snapshot());result}).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let sessions=app.state::<SessionManager>();let records=app.state::<crate::run_records::Store>();let store=app.state::<crate::recipes::Store>();
+        let revalidate=|expected:&Profile|{
+            if !app.state::<ConfigState>().get().shell_integration{return Err("Shell integration changed before workflow submission".into());}
+            let current=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+            let actual=current.iter().find(|profile|profile.id==expected.id).ok_or("Reviewed workflow shell is unavailable")?;
+            if actual.launch_key()!=expected.launch_key(){return Err("Workflow shell configuration changed; review again".into());}Ok(())
+        };
+        let result=store.launch(&id,&pane_id,session,crate::recipes::Launch{revalidate:&revalidate,cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records});let _=app.emit("recipe-runs-changed",store.snapshot());result
+    }).await.map_err(|e|e.to_string())?
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
@@ -770,10 +829,13 @@ pub fn cancel_recipe_run(app:AppHandle,id:String)->Result<(),String>{let store=a
 #[tauri::command]
 pub async fn stop_recipe_run(app:AppHandle,id:String)->Result<(),String>{tauri::async_runtime::spawn_blocking(move || {let store=app.state::<crate::recipes::Store>();let result=store.stop(&id,&app.state::<SessionManager>());let _=app.emit("recipe-runs-changed",store.snapshot());result}).await.map_err(|e|e.to_string())?}
 #[tauri::command]
-pub async fn review_agent_access(app: AppHandle, cwd: String, profile_id: Option<String>) -> Result<crate::agent_access::Review, String> {
+pub async fn review_agent_access(app: AppHandle, cwd: String, profile_id: Option<String>,environment:Option<String>) -> Result<crate::agent_access::Review, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let access=app.state::<crate::agent_access::Access>();
-        if let Some(id)=profile_id { let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()); let profile=profiles.iter().find(|p|p.id==id).ok_or("Shell profile not found")?; access.review_execution(&cwd,Some(profile)) } else { access.review(&cwd) }
+        let environment=environment.as_deref().unwrap_or("native");
+        let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+        let profile=profile_id.as_ref().map(|id|profiles.iter().find(|p|p.id==*id).ok_or("Shell profile not found")).transpose()?;
+        if environment=="native" {if profile.is_some(){access.review_execution(&cwd,profile)}else{access.review(&cwd)}}else{access.review_environment(&cwd,environment,profile)}
     }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
@@ -822,7 +884,13 @@ pub async fn launch_agent_task(app:AppHandle,id:String,pane_id:String,session:u3
     tauri::async_runtime::spawn_blocking(move || {
         let access=app.state::<crate::agent_access::Access>(); let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
         let sessions=app.state::<SessionManager>(); let records=app.state::<crate::run_records::Store>();
-        let context=crate::agent_access::LaunchContext {cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records};
+        let revalidate=|expected:&Profile|{
+            if !app.state::<ConfigState>().get().shell_integration{return Err("Shell integration changed before task submission".into());}
+            let current=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());
+            let actual=current.iter().find(|profile|profile.id==expected.id).ok_or("Reviewed task shell is unavailable")?;
+            if actual.launch_key()!=expected.launch_key(){return Err("Task shell configuration changed; review again".into());}Ok(())
+        };
+        let context=crate::agent_access::LaunchContext {revalidate:&revalidate,cwd:&cwd,sessions:&sessions,profiles:&profiles,integrate:app.state::<ConfigState>().get().shell_integration,records:&records};
         let result=access.launch(&id,&pane_id,session,context);
         if let Err(e)=&result { access.fail(&id,e,&app.state::<crate::run_records::Store>()); }
         let _=app.emit("agent-access-changed",access.snapshot()); result
@@ -834,14 +902,14 @@ pub fn fail_agent_task(app:AppHandle,id:String,message:String) { let access=app.
 pub async fn stop_agent_task(app:AppHandle,id:String)->Result<(),String> { tauri::async_runtime::spawn_blocking(move || { let access=app.state::<crate::agent_access::Access>(); let result=access.stop(&id,&app.state::<SessionManager>(),&app.state::<crate::run_records::Store>()); let _=app.emit("agent-access-changed",access.snapshot()); result }).await.map_err(|e|e.to_string())? }
 #[tauri::command]
 pub async fn preview_worktree_task(app: AppHandle, draft: crate::worktree_tasks::Draft) -> Result<crate::worktree_tasks::Preview, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<crate::worktree_tasks::Store>().preview(draft)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());let profile=profiles.iter().find(|p|p.id==draft.profile_id).ok_or("The selected shell is unavailable")?;app.state::<crate::worktree_tasks::Store>().preview_profile(draft,profile)}).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub fn cancel_worktree_preview(app: AppHandle, token: String) { app.state::<crate::worktree_tasks::Store>().cancel(&token); }
 #[tauri::command]
 pub async fn create_worktree_task(app: AppHandle, token: String) -> Result<crate::worktree_tasks::Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let store = app.state::<crate::worktree_tasks::Store>(); let result = store.create(&token);
+        let store = app.state::<crate::worktree_tasks::Store>(); let result = store.create_reviewed(&token,&||all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()));
         let _ = app.emit("worktree-tasks-changed", store.snapshot()); result
     }).await.map_err(|e| e.to_string())?
 }
@@ -855,6 +923,22 @@ pub async fn worktree_task_action(app: AppHandle, action: String, task_id: Optio
 #[tauri::command]
 pub async fn worktree_task_details(app: AppHandle, task_id: String) -> Result<crate::worktree_tasks::Details, String> {
     tauri::async_runtime::spawn_blocking(move || app.state::<crate::worktree_tasks::Store>().details(&task_id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn prepare_worktree_open(app:AppHandle,task_id:String,agent:bool)->Result<crate::worktree_tasks::Task,String>{
+    tauri::async_runtime::spawn_blocking(move||app.state::<crate::worktree_tasks::Store>().prepare_open(&task_id,agent,&||all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()))).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub async fn validate_worktree_startup(app:AppHandle,task_id:String,pane_id:String,session:SessionId,cwd:String)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        if !app.state::<ConfigState>().get().shell_integration{return Err("Shell integration was disabled before task startup".into());}
+        let task=app.state::<crate::worktree_tasks::Store>().prepare_open(&task_id,true,&||all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>()))?;
+        let actual=if let Some(distro)=task.environment.as_deref().and_then(|e|e.strip_prefix("wsl:")){crate::wsl::call(distro,serde_json::json!({"method":"folder","cwd":cwd}))?.get("cwd").and_then(serde_json::Value::as_str).ok_or("Missing Linux folder identity")?.to_owned()}else{crate::repo_state::display(&crate::repo_state::native_folder(&cwd)?)};
+        if actual!=task.directory{return Err("The task shell changed its reviewed folder".into());}
+        let profiles=all_profiles(&app.state::<SessionManager>(),&app.state::<ConfigState>());crate::worktree_tasks::Store::validate_profile(&task,&profiles)?;
+        let profile=profiles.iter().find(|p|p.id==task.profile_id).ok_or("Task shell is unavailable")?;
+        if app.state::<SessionManager>().launch_binding(session)!=Some((pane_id,profile.launch_key())){return Err("The task shell no longer matches its reviewed launch configuration".into());}Ok(())
+    }).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]

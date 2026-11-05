@@ -1,5 +1,11 @@
 # WSL ownership and privileged descendants
 
+**Decision, 5 November 2026:** the user clarified “limits,” accepting the current
+unprivileged Linux cleanup boundary for this delivery. The root supervisor is
+not approved or implemented. Native Windows and same-user Linux ownership remain
+as tested; descendants that gain Linux privilege may survive user-level cleanup.
+The proposal below is retained for separately authorized future work.
+
 The user selected ending every descendant when qterm exits. Windows Job Objects
 cover native descendants. The WSL lifetime-file/subreaper implementation currently
 covers same-user Linux descendants, including double forks, on pane close, app
@@ -9,7 +15,8 @@ verify stdin, interrupts and resize behavior.
 A remaining boundary is Linux privilege: an unprivileged supervisor cannot signal
 a child that changes identity through `sudo`. PID file descriptors prevent PID
 reuse errors but do not grant signal permission. Therefore same-user cleanup
-alone does not fulfill the requested full descendant policy.
+alone does not enforce the original unrestricted descendant policy. The user
+explicitly accepted this privilege limitation for the delivered scope.
 
 ## Proposed complete ownership boundary
 

@@ -27,7 +27,9 @@ References: [Rust diagnostic JSON](https://doc.rust-lang.org/rustc/json.html),
 Run capture keeps up to 128000 UTF-16 units without cutting a surrogate pair and
 up to 500 diagnostics. Lost scrollback and truncated captures are labelled
 incomplete. File opening resolves against the original command folder and checks
-that the file still exists. WSL path opening remains part of the parity work.
+that the file still exists. WSL links use the captured distribution and Linux
+folder, resolve the actual case-sensitive file and validate its Windows editor
+transport. R69 covers the real boundary; see [WSL support](wsl-support.md).
 
 The latest view groups by exact command, original folder and shell profile.
 Superseded runs remain available in history; the current rolling limit is 100

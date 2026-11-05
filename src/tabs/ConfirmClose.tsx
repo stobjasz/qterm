@@ -5,6 +5,7 @@ interface Props {
   what: "tab" | "pane";
   /** What still runs there, as the user knows it ("Claude Code", "node"). */
   programs: string[];
+  error?: string;
   /** Closing it (the default), or switching the pane to another shell. */
   verb?: "close" | "switch";
   onClose(): void;
@@ -12,7 +13,7 @@ interface Props {
 }
 
 /** Closing a tab or pane where a program still runs: ask first (Cancel has the focus). */
-export function ConfirmClose({ what, programs, verb = "close", onClose, onCancel }: Props) {
+export function ConfirmClose({ what, programs, error, verb = "close", onClose, onCancel }: Props) {
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   const list = programs.length > 1 ? `${programs.slice(0, -1).join(", ")} and ${programs[programs.length - 1]}` : programs[0];
@@ -27,10 +28,10 @@ export function ConfirmClose({ what, programs, verb = "close", onClose, onCancel
           if (e.key === "Escape") onCancel();
         }}
       >
-        <p>
+        {error ? <><p>Could not check running programs. {verb === "switch" ? "Switching this shell" : `Closing this ${what}`} may end active programs.</p><p role="alert">{error}</p></> : <p>
           <strong>{list}</strong> {programs.length > 1 ? "are" : "is"} still running in this {what}.{" "}
           {verb === "switch" ? "Switching its shell" : "Closing it"} ends {programs.length > 1 ? "them" : "it"}.
-        </p>
+        </p>}
         <div className="settings-actions">
           <button ref={cancel} onClick={onCancel}>
             Cancel

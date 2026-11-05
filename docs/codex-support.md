@@ -86,8 +86,9 @@ or register the production notification ID; they record delivery attempts locall
 - **Ask an agent about this** sends a reviewed local brief as a file reference in a
   normal initial CLI prompt. It opens a new tab or reuses an idle shell pane; it
   does not type into a running Codex session or answer its permission prompts.
-  Copying the brief supports manual follow-ups. Automatic follow-ups to running
-  sessions remain planned and require a structured provider transport.
+  Copying the brief supports manual follow-ups. The user explicitly deferred
+  automatic running-session follow-ups and managed sessions on 5 November 2026.
+  A future implementation requires a structured provider transport.
 - Session IDs are UUID-validated before persistence and shell resume. Usage is
   resolved by session ID, avoiding ambiguous matches when two panes share a folder.
 - Hooks outside qterm have no effect. Notification preference switches do not

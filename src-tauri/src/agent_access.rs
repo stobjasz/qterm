@@ -2,6 +2,7 @@
 //! they do not sandbox other processes running as the developer.
 use crate::{
     agent_pipe,
+    agent_scope::Scope,
     agent_tasks::{self, Invocation, Policy},
     pty::{Profile, SessionManager},
     repo_state, run_records,
@@ -12,7 +13,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::Read,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -22,11 +23,13 @@ use std::{
 pub struct Review {
     pub id: String,
     pub project: String,
+    pub environment: String,
     pub execution: Option<Policy>,
 }
+#[derive(Clone)]
 struct Pending {
     review: Review,
-    path: PathBuf,
+    scope: Scope,
     at: Instant,
 }
 #[derive(Clone, Serialize)]
@@ -35,6 +38,7 @@ pub struct GrantView {
     pub id: String,
     pub client: String,
     pub project: String,
+    pub environment: String,
     pub connection_file: String,
     pub created_at: u64,
     pub tasks: Vec<agent_tasks::Task>,
@@ -42,7 +46,7 @@ pub struct GrantView {
 }
 struct Grant {
     view: GrantView,
-    path: PathBuf,
+    scope: Scope,
     token: String,
     _credentials: File,
     execution: Option<Policy>,
@@ -55,6 +59,8 @@ pub struct Pane {
     pub label: String,
     pub profile_id: String,
     pub kind: String,
+    #[serde(default)]
+    pub environment: Option<String>,
 }
 struct Inner {
     grants: Vec<Grant>,
@@ -84,6 +90,7 @@ pub struct ExecutionContext<'a> {
     pub emit: &'a dyn Fn(&Invocation) -> Result<(), String>,
 }
 pub struct LaunchContext<'a> {
+    pub revalidate: &'a dyn Fn(&Profile)->Result<(),String>,
     pub cwd: &'a str,
     pub sessions: &'a SessionManager,
     pub profiles: &'a [Profile],
@@ -147,7 +154,8 @@ fn constant_equal(left: &str, right: &str) -> bool {
             .fold(0u8, |acc, (l, r)| acc | (l ^ r))
             == 0
 }
-fn inside(root: &Path, cwd: &str) -> bool {
+#[cfg(test)]
+fn inside(root: &std::path::Path, cwd: &str) -> bool {
     repo_state::native_folder(cwd).is_ok_and(|path| path.starts_with(root))
 }
 fn error(id: Option<&str>, code: &str, message: &str) -> Value {
@@ -192,12 +200,16 @@ impl Access {
         self.review_execution(cwd, None)
     }
     pub fn review_execution(&self, cwd: &str, profile: Option<&Profile>) -> Result<Review, String> {
-        let path = repo_state::root(&repo_state::native_folder(cwd)?)?;
+        self.review_environment(cwd, "native", profile)
+    }
+    pub fn review_environment(&self, cwd: &str, environment: &str, profile: Option<&Profile>) -> Result<Review, String> {
+        let scope = Scope::capture(cwd, environment)?;
         let review = Review {
             id: agent_pipe::random()?,
-            project: repo_state::display(&path),
+            project: scope.project(),
+            environment: scope.environment(),
             execution: match profile {
-                Some(p) => Some(Policy::review(&path, &repo_state::native_folder(cwd)?, p)?),
+                Some(p) => Some(Policy::review_scope(&scope, cwd, p)?),
                 None => None,
             },
         };
@@ -212,7 +224,7 @@ impl Access {
             review.id.clone(),
             Pending {
                 review: review.clone(),
-                path,
+                scope,
                 at: Instant::now(),
             },
         );
@@ -259,13 +271,13 @@ impl Access {
             .lock()
             .unwrap()
             .reviews
-            .remove(review)
+            .get(review)
+            .cloned()
             .ok_or("Project review expired; review the folder again")?;
-        if pending.at.elapsed() > Duration::from_secs(600)
-            || repo_state::native_folder(&pending.review.project)? != pending.path
-        {
+        if pending.at.elapsed() > Duration::from_secs(600) {
             return Err("Project folder changed; review it again".into());
         }
+        pending.scope.validate()?;
         let execution = if selected.is_empty() {
             None
         } else {
@@ -276,12 +288,24 @@ impl Access {
                 .ok_or("This review did not include execution")?
                 .select(selected)?;
             let profile = profile.ok_or("Reviewed shell is no longer available")?;
-            for task in &policy.tasks {
-                policy.validate(&pending.path, task, profile)?;
-            }
+            policy.validate_tasks_scope(&pending.scope, &policy.tasks, profile)?;
             Some(policy)
         };
+        self.commit_grant(review, pending, execution, client, handler)
+    }
+    fn commit_grant(
+        &self,
+        review: &str,
+        pending: Pending,
+        execution: Option<Policy>,
+        client: &str,
+        handler: Arc<dyn Fn(Value) -> Value + Send + Sync>,
+    ) -> Result<Snapshot, String> {
         let mut inner = self.inner.lock().unwrap();
+        if !inner.reviews.get(review).is_some_and(|current| current.at == pending.at)
+            || pending.at.elapsed() > Duration::from_secs(600) {
+            return Err("Project review was cancelled or expired; review it again".into());
+        }
         if inner.grants.len() >= 16 {
             return Err("At most 16 agent grants can be active".into());
         }
@@ -316,6 +340,7 @@ impl Access {
             id,
             client: client.trim().into(),
             project: pending.review.project,
+            environment: pending.review.environment,
             connection_file: repo_state::display(&path),
             created_at: repo_state::now(),
             tasks: execution
@@ -326,11 +351,12 @@ impl Access {
         };
         inner.grants.push(Grant {
             view,
-            path: pending.path,
+            scope: pending.scope,
             token,
             _credentials: file,
             execution,
         });
+        inner.reviews.remove(review);
         inner.revision += 1;
         drop(inner);
         Ok(self.snapshot())
@@ -357,6 +383,7 @@ impl Access {
                 p.id.len() > 128
                     || p.label.len() > 2048
                     || p.profile_id.len() > 512
+                    || p.environment.as_ref().is_some_and(|e| e.len() > 512)
                     || p.cwd.as_ref().is_some_and(|c| c.len() > 16384)
             })
         {
@@ -367,18 +394,17 @@ impl Access {
         inner.observed = repo_state::now();
         Ok(())
     }
-    fn authorized(&self, token: &str) -> Option<PathBuf> {
-        let (project, path) = {
+    fn authorized(&self, token: &str) -> Option<Scope> {
+        let scope = {
             let inner = self.inner.lock().unwrap();
             let grant = inner
                 .grants
                 .iter()
                 .find(|g| constant_equal(&g.token, token))?;
-            (grant.view.project.clone(), grant.path.clone())
+            grant.scope.clone()
         };
-        repo_state::native_folder(&project)
-            .ok()
-            .filter(|p| *p == path)
+        scope.validate().ok()?;
+        Some(scope)
     }
     #[cfg(test)]
     pub fn request(&self, value: Value, records: &run_records::Store) -> Value {
@@ -440,7 +466,7 @@ impl Access {
                 params
                     .and_then(|p| self.queue.get(&p.run_id).map_err(|e| ("not_available", e)))
                     .and_then(|job| {
-                        if repo_state::native_folder(&job.project).ok().as_ref() == Some(&root) {
+                        if root.same_project(&job.environment, &job.project) {
                             Ok(serde_json::to_value(job).unwrap())
                         } else {
                             Err(("not_available", "Task run is outside this project".into()))
@@ -461,7 +487,7 @@ impl Access {
             Err((code, message)) => error(id, code, &message),
         }
     }
-    fn policy(&self, grant_id: &str) -> Result<(PathBuf, Policy), String> {
+    fn policy(&self, grant_id: &str) -> Result<(Scope, Policy), String> {
         let inner = self.inner.lock().unwrap();
         let grant = inner
             .grants
@@ -469,7 +495,7 @@ impl Access {
             .find(|g| g.view.id == grant_id)
             .ok_or("Execution grant is no longer active")?;
         Ok((
-            grant.path.clone(),
+            grant.scope.clone(),
             grant
                 .execution
                 .clone()
@@ -510,7 +536,7 @@ impl Access {
     fn run_task(
         &self,
         token: &str,
-        root: &Path,
+        root: &Scope,
         params: Value,
         context: Option<ExecutionContext<'_>>,
     ) -> Result<Value, (&'static str, String)> {
@@ -571,7 +597,7 @@ impl Access {
                 "Reviewed shell is no longer available".into(),
             ))?;
         policy
-            .validate(root, task, profile)
+            .validate_scope(root, task, profile)
             .map_err(|e| ("definition_changed", e))?;
         let (job, new) = {
             let mut inner = self.inner.lock().unwrap();
@@ -599,10 +625,10 @@ impl Access {
                 let job = self
                     .queue
                     .enqueue(
-                        &repo_state::display(root),
+                        &root.project(),
                         requester,
                         task.clone(),
-                        policy.profile_id,
+                        &policy,
                     )
                     .map_err(|e| ("task_limit", e))?;
                 inner.revision += 1;
@@ -631,7 +657,7 @@ impl Access {
         if !integrate {
             return Err("Enable shell integration before launching granted tasks".into());
         }
-        policy.validate(&root, &job.task, profile)?;
+        policy.validate_scope(&root, &job.task, profile)?;
         let mut inner = self.inner.lock().unwrap();
         if !inner
             .grants
@@ -652,6 +678,7 @@ impl Access {
         context: LaunchContext<'_>,
     ) -> Result<Invocation, String> {
         let LaunchContext {
+            revalidate,
             cwd,
             sessions,
             profiles,
@@ -659,36 +686,48 @@ impl Access {
             records,
         } = context;
         let job = self.queue.get(id)?;
-        if cwd.is_empty()
-            || repo_state::native_folder(cwd)? != repo_state::native_folder(&job.task.directory)?
-        {
-            return Err("The shell is not in the reviewed task directory".into());
-        }
         let (root, policy) = self.policy(&job.requester.grant_id)?;
         let profile = profiles
             .iter()
             .find(|p| p.id == policy.profile_id)
             .ok_or("Reviewed shell is unavailable")?;
-        if !integrate
-            || sessions.automation_binding(session).as_ref()
-                != Some(&(pane.to_owned(), policy.profile_key.clone()))
-        {
-            return Err("The actual shell/pane does not match the reviewed profile".into());
-        }
-        policy.validate(&root, &job.task, profile)?;
-        let (ticket, warning) = match records.prepare(&job.task.directory, &job.task.command) {
+        let check_launch=||{
+            revalidate(profile)?;
+            if !integrate||job.pane_id.as_deref()!=Some(pane)||job.binding(sessions,session).is_none(){return Err("The actual shell/pane does not match the reviewed profile".into());}
+            match &root {
+                Scope::Native(_)=>if repo_state::native_folder(cwd)?!=repo_state::native_folder(&job.task.directory)?{return Err("The shell is not in the reviewed task directory".into());},
+                Scope::Linux(project)=>{
+                    let folder=crate::wsl::call(&project.distribution,json!({"method":"folder","cwd":cwd}))?;
+                    if folder["cwd"].as_str()!=Some(&job.task.directory){return Err("The shell is not in the reviewed Linux task directory".into());}
+                }
+            }
+            policy.validate_scope(&root,&job.task,profile)?;
+            revalidate(profile)
+        };
+        check_launch()?;
+        let prepared=match &root {
+            Scope::Native(_)=>records.prepare(&job.task.directory,&job.task.command),
+            Scope::Linux(project)=>records.prepare_wsl(&project.distribution,&job.task.directory,&job.task.command,profile),
+        };
+        let (mut ticket, mut warning) = match prepared {
             Ok(prepared) => (Some(prepared.id), None),
             Err(e) => (None, Some(e)),
         };
         let result = (|| {
-            policy.validate(&root, &job.task, profile)?;
-            let programs = sessions.programs(&[session]);
+            check_launch()?;
+            if matches!(root,Scope::Linux(_))&&let Some(id)=ticket.clone()
+                &&let Err(error)=records.authorize_wsl(&id,pane,&|launch|{
+                    if launch.profile_id!=policy.profile_id||launch.profile_key!=policy.profile_key||launch.environment!=job.environment||launch.cwd!=job.task.directory{return Err("Task evidence belongs to another launch context".into());}
+                    check_launch()
+                }){records.cancel(&id);ticket=None;warning=Some(error);}
+            let programs = sessions.programs(&[session])?;
             if !programs.is_empty() {
                 return Err(format!(
                     "The new task shell is busy ({}); no command was typed",
                     programs.join(", ")
                 ));
             }
+            check_launch()?;
             let mut inner = self.inner.lock().unwrap();
             if !inner
                 .grants
@@ -700,6 +739,8 @@ impl Access {
             let launched =
                 self.queue
                     .launch(id, pane, session, ticket.clone(), warning, |command| {
+                        revalidate(profile)?;
+                        if job.binding(sessions,session).is_none(){return Err("Task session changed before submission".into());}
                         sessions.write(session, &format!("{command}\r"))
                     })?;
             inner.revision += 1;
@@ -737,12 +778,7 @@ impl Access {
         }
         let job = self.queue.stopping(id)?;
         if let Some(session) = job.session {
-            if sessions
-                .automation_binding(session)
-                .as_ref()
-                .map(|p| p.0.as_str())
-                != job.pane_id.as_deref()
-            {
+            if job.binding(sessions,session).is_none() {
                 self.fail(id, "The task shell is no longer available", records);
                 return Ok(());
             }
@@ -754,7 +790,7 @@ impl Access {
     }
     fn read(
         &self,
-        root: &Path,
+        root: &Scope,
         method: &str,
         params: Value,
         records: &run_records::Store,
@@ -764,17 +800,25 @@ impl Access {
                 let _: Empty = parse(params)?;
                 let (panes, observed) = { let inner = self.inner.lock().unwrap(); (inner.panes.clone(), inner.observed) };
                 if repo_state::now().saturating_sub(observed) > 15000 { return Err(("unavailable", "Pane observations are unavailable or stale".into())); }
-                let panes: Vec<_> = panes.into_iter().filter(|p| p.kind != "wsl" && p.kind != "other" && p.cwd.as_ref().is_some_and(|cwd| inside(root, cwd))).collect();
-                Ok(json!({ "panes": panes, "observedAt": observed, "project": repo_state::display(root) }))
+                let candidates: Vec<_> = panes.into_iter().filter(|p| p.kind != "other" && root.accepts(p.environment.as_deref(), &p.kind)).collect();
+                let paths:Vec<_> = candidates.iter().filter_map(|p|p.cwd.clone()).collect();
+                let allowed=root.paths(&paths).map_err(|e|("unavailable",e))?;
+                let panes:Vec<_>=candidates.into_iter().filter(|p|p.cwd.as_ref().is_some_and(|cwd|allowed.contains(cwd))).collect();
+                Ok(json!({ "panes": panes, "observedAt": observed, "project": root.project(), "environment":root.environment() }))
             }
             "commands.list" => {
                 let params: List = parse(params)?;
                 let snapshot = records.snapshot();
                 if snapshot.recovery_required { return Err(("unavailable", "Saved command history needs recovery in qterm".into())); }
-                let scoped: Vec<_> = snapshot.runs.iter().filter(|r| native_run(r) && r.cwd.as_ref().is_some_and(|cwd| inside(root, cwd)) && params.pane_id.as_ref().is_none_or(|p| *p == r.pane_id)).collect();
+                let candidates:Vec<_>=snapshot.runs.iter().filter(|r|root.accepts(r.environment.as_deref(),r.shell_kind.as_deref().unwrap_or(""))&&params.pane_id.as_ref().is_none_or(|p|*p==r.pane_id)).collect();
+                let paths:Vec<_>=candidates.iter().filter_map(|r|r.cwd.clone()).collect();
+                let allowed=root.paths(&paths).map_err(|e|("unavailable",e))?;
+                let scoped:Vec<_>=candidates.into_iter().filter(|r|r.cwd.as_ref().is_some_and(|cwd|allowed.contains(cwd))).collect();
                 if params.pane_id.is_some() && scoped.is_empty() {
                     let panes = self.inner.lock().unwrap().panes.clone();
-                    if !panes.iter().any(|p| Some(&p.id) == params.pane_id.as_ref() && p.kind != "wsl" && p.cwd.as_ref().is_some_and(|cwd| inside(root, cwd))) { return Err(("not_available", "Pane is unknown or outside this grant".into())); }
+                    let pane=panes.iter().find(|p|Some(&p.id)==params.pane_id.as_ref()&&p.kind!="other"&&root.accepts(p.environment.as_deref(),&p.kind));
+                    let paths:Vec<_>=pane.and_then(|p|p.cwd.clone()).into_iter().collect();
+                    if paths.is_empty()||root.paths(&paths).map_err(|e|("unavailable",e))?.is_empty(){return Err(("not_available", "Pane is unknown or outside this grant".into()));}
                 }
                 let start = match params.after { None => 0, Some(id) => scoped.iter().position(|r| r.id == id).map(|i| i+1).ok_or(("cursor_expired", "The previous command is no longer retained in this project".into()))? };
                 let limit = params.limit.unwrap_or(25).clamp(1,25);
@@ -785,7 +829,10 @@ impl Access {
             "commands.result" => {
                 let params: ResultRequest = parse(params)?;
                 let snapshot = records.snapshot();
-                let run = snapshot.runs.iter().find(|r| r.id == params.command_id && native_run(r) && r.cwd.as_ref().is_some_and(|cwd| inside(root,cwd))).ok_or(("not_available", "Command is unknown, outside this grant, or no longer retained".into()))?;
+                if snapshot.recovery_required {return Err(("unavailable","Saved command history needs recovery in qterm".into()));}
+                let run=snapshot.runs.iter().find(|r|r.id==params.command_id&&root.accepts(r.environment.as_deref(),r.shell_kind.as_deref().unwrap_or(""))).ok_or(("not_available","Command is unknown, outside this grant, or no longer retained".into()))?;
+                let paths:Vec<_>=run.cwd.clone().into_iter().collect();
+                if paths.is_empty()||root.paths(&paths).map_err(|e|("unavailable",e))?.is_empty(){return Err(("not_available","Command is unknown, outside this grant, or no longer retained".into()));}
                 if params.offset > run.output.len() || !run.output.is_char_boundary(params.offset) { return Err(("invalid_params", "Output offset must be a UTF-8 boundary within the capture".into())); }
                 let mut end = params.offset.saturating_add(params.limit.unwrap_or(65536).clamp(4,65536)).min(run.output.len());
                 while !run.output.is_char_boundary(end) { end-=1; }
@@ -794,7 +841,13 @@ impl Access {
             "tasks.list" => {
                 use sha2::{Digest, Sha256};
                 let params: Page = parse(params)?;
-                let tasks = crate::project::tasks(root);
+                let tasks = match root {
+                    Scope::Native(path)=>crate::project::tasks(path),
+                    Scope::Linux(project)=>{
+                        let found=project.discover(&project.path).map_err(|e|("unavailable",e))?;
+                        Some(crate::project::Tasks{dir:found.directory.path,tasks:found.tasks})
+                    }
+                };
                 let values: Vec<_> = tasks.as_ref().map(|found| found.tasks.iter().map(|task| {
                     let id = format!("{:x}", Sha256::digest(format!("{}\0{}", task.source, task.name)));
                     let name: String = task.name.chars().take(512).collect(); let command: String = task.command.chars().take(1024).collect();
@@ -803,13 +856,12 @@ impl Access {
                 let start = match params.after { None => 0, Some(id) => values.iter().position(|v| v["id"].as_str() == Some(&id)).map(|i|i+1).ok_or(("cursor_expired", "The previous task is no longer discovered".into()))? };
                 let page: Vec<_> = values.iter().skip(start).take(params.limit.unwrap_or(25).clamp(1,25)).collect();
                 let next = if start + page.len() < values.len() { values.get(start+page.len()-1).map(|v| &v["id"]) } else { None };
-                Ok(json!({ "project": repo_state::display(root), "directory": tasks.map(|t| t.dir), "tasks": page, "next": next, "executionAllowed": false }))
+                Ok(json!({ "project": root.project(), "environment":root.environment(), "directory": tasks.map(|t| t.dir), "tasks": page, "next": next, "executionAllowed": false }))
             }
             _ => Err(("method_unavailable", "This session grant permits panes.list, commands.list, commands.result and tasks.list".into())),
         }
     }
 }
-fn native_run(run:&run_records::Run)->bool{run.shell_kind.as_deref()!=Some("wsl")&&run.environment.as_deref().is_none_or(|environment|environment=="native")}
 fn metadata(run: &run_records::Run) -> Value {
     let command: String = run.command.chars().take(512).collect();
     json!({ "id": run.id, "paneId": run.pane_id, "appRunId": run.app_run_id, "profileId": run.profile_id, "shellKind": run.shell_kind, "environment":run.environment, "cwd": run.cwd, "commandPreviewTruncated": command.len() < run.command.len(), "command": command, "commandTruncated": run.command_truncated, "exitCode": run.exit_code, "startedAt": run.started_at, "finishedAt": run.finished_at, "captureIncomplete": run.output_truncated, "requester":run.requester })
@@ -867,6 +919,7 @@ pub fn run_client(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use crate::repo_state::tests::{Repo, until};
     struct Case {
         access: Arc<Access>,
@@ -933,6 +986,23 @@ mod tests {
         }
     }
     #[test]
+    fn grant_commit_rechecks_cancellation_expiry_and_single_use_after_validation() {
+        let c=Case::new();
+        for action in ["cancel","expire","used"] {
+            let review=c.access.review(&repo_state::display(&c.repo.dir)).unwrap();
+            let pending=c.access.inner.lock().unwrap().reviews.get(&review.id).unwrap().clone();
+            pending.scope.validate().unwrap();
+            match action {
+                "cancel"=>c.access.cancel_review(&review.id),
+                "expire"=>{c.access.inner.lock().unwrap().reviews.get_mut(&review.id).unwrap().at=Instant::now()-Duration::from_secs(601);},
+                _=>{c.access.grant(&review.id,"first grant",Arc::new(|_|json!({}))).unwrap();},
+            }
+            let failure=c.access.commit_grant(&review.id,pending,None,"stale grant",Arc::new(|_|json!({}))).err().expect("cancelled or expired review committed a session grant");
+            assert!(failure.contains("cancelled or expired"));
+        }
+        assert_eq!(c.access.snapshot().grants.len(),1);
+    }
+    #[test]
     fn access_starts_off_and_reviews_are_read_only_expire_and_cancel() {
         let c = Case::new();
         assert!(!c.access.snapshot().listening);
@@ -986,6 +1056,7 @@ mod tests {
                     label: "project a".into(),
                     profile_id: "pwsh".into(),
                     kind: "powershell".into(),
+                    environment: Some("native".into()),
                 },
                 Pane {
                     id: "pane-b".into(),
@@ -993,6 +1064,7 @@ mod tests {
                     label: "project b".into(),
                     profile_id: "pwsh".into(),
                     kind: "powershell".into(),
+                    environment: Some("native".into()),
                 },
             ])
             .unwrap();

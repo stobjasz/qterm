@@ -83,6 +83,13 @@ unit tests can't reproduce. One spec per risk.
 | R56 | Failed worktree-history writes block creation until recovered, and unreadable history is backed up before recovery. | `worktree-recovery.spec.ts` |
 | R57 | Explicit session grants expose only their project through the real CLI/pipe; revocation and app exit remove credentials and block further reads. | `agent-access.spec.ts` |
 | R58 | Only separately granted named tasks launch through the CLI, in a new visible tab, with idempotent request IDs, requester attribution and retained results. | `agent-task-run.spec.ts` |
+| R117 | A WSL client uses the actual Windows CLI route to execute an explicitly selected Linux named task once in its own pane, retaining environment, requester and repository evidence across restart without replay. | `wsl-agent-task-run.spec.ts` |
+| R118 | Linux read grants preserve case-sensitive project and canonical symlink boundaries, expose no outside pane/results and grant no execution authority. | `wsl-agent-read-scope.spec.ts` |
+| R119 | Changed Linux task manifests reject execution and revoking a grant during actual shell startup prevents its delayed command from running. | `wsl-agent-task-grant.spec.ts` |
+| R120 | Stopping a granted Linux task ends its original process, preserves the source program and leaves its task shell usable. | `wsl-agent-task-stop.spec.ts` |
+| R121 | A Linux task waiting for its prompt rejects changed profile/distribution or replaced task-directory identities without executing the reviewed command. | `wsl-agent-task-delayed.spec.ts` |
+| R122 | Concurrent Linux clients retrying stable request IDs create exactly one invocation and visible pane per intended run, preserving attribution and the source program. | `wsl-agent-task-concurrent.spec.ts` |
+| R123 | A Linux task shell exiting before its prompt cancels the invocation, retains the visible failure, executes no task and never replays the cancelled request. | `wsl-agent-task-startup.spec.ts` |
 | R59 | Changed manifests or shell definitions invalidate task execution; revoking a grant while its new tab waits for a prompt prevents launch. | `agent-task-grant.spec.ts` |
 | R60 | Revoking access leaves an accepted running task visible, and the developer can explicitly stop it without targeting another pane. | `agent-task-stop.spec.ts` |
 | R61 | Reviewed tasks use the selected Command Prompt/Git Bash shell, preserve folder/requester and reported exit status, and leave that shell usable after targeted stop. | `agent-task-shells.spec.ts` |
@@ -95,9 +102,9 @@ unit tests can't reproduce. One spec per risk.
 | R68 | Disabling provider history clears its library data and prevents further discovery, resume or handoff while retaining only explicit pin identities. | `session-library-retention.spec.ts` |
 | R69 | An explicitly selected WSL distribution reports its real cwd, discovers Linux project settings/tasks without executing Git hooks/filters, and opens case-sensitive diagnostic files using the saved distribution context. | `wsl-project.spec.ts` |
 | R70 | A restored WSL pane retains its original distribution and output; editing or removing its profile cannot launch another environment with the saved Linux folder. The user can explicitly switch the pane to recover. | `wsl-restore.spec.ts` |
-| R71 | Windows/WSL folder transfers and pasted image paths use the selected distribution's actual filesystem mapping, including a Linux alias outside /mnt; the real shell can read the pasted PNG and transfer back to the original Windows folder. | `wsl-paths.spec.ts` |
+| R71 | Windows/WSL folder transfers and pasted image paths use the selected distribution's actual filesystem mapping, including a Linux alias outside /mnt; the real shell can read the pasted PNG and transfer its idle pane back to the original Windows folder without a spurious program-confirmation dialog. | `wsl-paths.spec.ts` |
 | R72 | A clipboard image broadcast to mixed Windows and WSL shells is translated and quoted separately, arrives exactly once in each pane, and both real interpreters read the same PNG bytes without another pane's terminal protocol replies corrupting input. | `broadcast-files.spec.ts` |
-| R73 | Switching from a Linux folder that Windows cannot represent reports the conversion error and preserves the original running pane instead of silently opening a profile's home. | `wsl-unrepresentable.spec.ts` |
+| R73 | Switching an idle pane from a Linux folder that Windows cannot represent reports the conversion error without a spurious program-confirmation dialog, and preserves the original running pane instead of silently opening a profile's home. | `wsl-unrepresentable.spec.ts` |
 | R74 | Named WSL transcript sources require explicit source and provider-history opt-in, keep native/WSL UUIDs separate, invalidate changed/disabled source context, and report unavailable distros without default fallback. | `wsl-sources.spec.ts` |
 | R75 | Resuming a WSL library session uses its selected distribution, literal provider home and exact Linux project, without typing into the existing pane. | `wsl-resume.spec.ts` |
 | R76 | A WSL session handoff delivers exactly the reviewed literal brief to its chosen provider in the selected distribution and project. | `wsl-session-handoff.spec.ts` |
@@ -111,6 +118,36 @@ unit tests can't reproduce. One spec per risk.
 | R84 | Legacy menu resume uses the verified distribution/home/folder for both providers, waits through a new shell's startup program and safely reuses an actual idle prompt. | `provider-menu-resume.spec.ts` |
 | R85 | Disabling an already-discovered WSL source or selecting an unavailable distribution blocks remembered-menu resume without a fallback launch or cached source reuse. | `provider-menu-gates.spec.ts` |
 | R86 | Fresh-session menu actions use their folder group's exact environment and profile configuration; a missing matching distribution cannot fall back to another shell. | `provider-menu-new.spec.ts` |
+| R87 | WSL close confirmation names actual Linux programs, and explicit Stop ends only that pane's foreground/background/adopted descendants while preserving its shell and another pane. | `wsl-programs.spec.ts` |
+| R88 | A failed WSL program probe requires explicit close confirmation, reports Stop failure without claiming idle, and leaves the pane intact when cancelled; a timed-out queued Stop cannot end a newly started program after the supervisor resumes. | `wsl-program-probe.spec.ts` |
+| R89 | A client that knows a supervisor socket address but supplies no valid request proof cannot stop its programs or disrupt subsequent authenticated UI operations. | `wsl-owner-control.spec.ts` |
+| R90 | A WSL profile running a program directly names that root program before close and refuses shell-preserving Stop rather than falsely reporting an idle shell. | `wsl-direct-program.spec.ts` |
+| R91 | A delayed close/switch probe cannot act after terminal input, session identity or tab membership changes; accepting an already-open confirmation rechecks the same context. | `close-context.spec.ts` |
+| R92 | A shell executable invoked with a command or script is treated as the pane's root program, not an idle interactive shell; normal interactive flags and source files retain shell-preserving Stop. | `wsl-shell-invocation.spec.ts` |
+| R93 | Concurrent granted task requests each retain their own startup reservation until their native shell pane exists, execute exactly once and leave the requesting source program alive. | `agent-task-concurrent.spec.ts` |
+| R94 | Closing an already-mounted task pane waiting for its startup prompt cancels its request without executing the granted command or closing the source pane. | `agent-task-pending-close.spec.ts` |
+| R95 | A quiet provider process in a WSL pane gets process-sourced unknown status without hooks, remains separate from a same-folder pane, and disappears when it ends at a shell prompt. | `wsl-provider-presence.spec.ts` |
+| R96 | A failed WSL provider probe retains unknown status with an error for its pane, preserves a healthy same-distribution pane's process evidence and recovers without a default-environment fallback. | `wsl-provider-probe.spec.ts` |
+| R97 | Windows programs launched through a WSL pane, including detached Windows children, end on qterm quit or a direct app crash while unrelated Windows programs remain running. | `wsl-interop-ownership.spec.ts` |
+| R98 | Closing one WSL pane ends its Windows interoperability programs and detached children while preserving Windows programs in another WSL pane and unrelated Windows programs. | `wsl-interop-close.spec.ts` |
+| R99 | Stop in a WSL pane ends its Windows interoperability programs and detached children while preserving the interactive shell, another pane and unrelated Windows programs. | `wsl-interop-stop.spec.ts` |
+| R100 | A pending WSL Stop reserves its pane's user input without blocking another pane; a failed Stop releases input and an expired request cannot consume commands entered afterward. | `wsl-stop-input.spec.ts` |
+| R101 | A reviewed WSL worktree preserves dirty Linux source, launches only a separate prompt-gated agent with literal data, and retains environment-scoped task/run history across restart. | `wsl-worktree-task.spec.ts` |
+| R102 | Editing a WSL task's exact shell command after preview or creation prevents checkout or opening in the changed profile, even when its distribution is unchanged. | `wsl-worktree-profile.spec.ts` |
+| R103 | A task agent delayed by a real WSL startup read cannot launch after its reviewed profile changes; validation leaves its original shell usable and sends no agent request. | `wsl-worktree-startup.spec.ts` |
+| R104 | A reviewed WSL check acquires Linux repository evidence, retains it across restart and becomes stale after source edits; ignored build output does not invalidate it. | `wsl-verification.spec.ts` |
+| R105 | A source edit restored before a real WSL check finishes remains stale despite the successful command and identical final file bytes. | `wsl-verification-during-run.spec.ts` |
+| R106 | A WSL verification shell held before its first prompt cannot execute its reviewed check after the shell profile changes, and remains usable for manual commands. | `wsl-verification-profile.spec.ts` |
+| R107 | Closing a pending WSL verification pane or directly crashing qterm ends its own Linux repository monitor without executing the check. | `wsl-verification-lifetime.spec.ts` |
+| R108 | Losing the actual Linux verification monitor before launch prevents execution; losing it during a successful check produces unknown evidence. | `wsl-verification-monitor-loss.spec.ts` |
+| R109 | A verification shell that exits unsuccessfully before its first prompt releases its Linux monitor while preserving the failed pane for inspection. | `wsl-verification-shell-exit.spec.ts` |
+| R110 | WSL verification refuses Linux-only evidence for Windows-mounted source or shared Git metadata, leaves the preview open and executes no extra check. | `wsl-verification-mount.spec.ts` |
+| R111 | A recorded WSL check cannot launch through a profile changed to an unavailable distribution or fall back to a native/default shell. | `wsl-verification-environment.spec.ts` |
+| R112 | A WSL verification shell entering a differently cased Linux folder cancels its reviewed command and releases its monitor without losing interactive shell use. | `wsl-verification-folder.spec.ts` |
+| R113 | A reviewed WSL recipe preserves Linux step folders, dependency order and environment-bound command evidence across restart without replay. | `wsl-recipe-order.spec.ts` |
+| R114 | Changed WSL recipe definitions or shell profiles prevent a delayed dependent command from executing and leave its pane usable. | `wsl-recipe-guard.spec.ts` |
+| R115 | WSL recipe readiness unlocks only eligible dependents; cancellation or timeout blocks them and explicit Stop ends only that workflow's programs. | `wsl-recipe-readiness.spec.ts` |
+| R116 | Restarting during an active WSL recipe ends its old program and restores fresh environment-correct shells without replaying running or pending commands. | `wsl-recipe-restart.spec.ts` |
 
 Claude Code itself isn't needed for R23 and R24: its hook and status line input is piped
 in by hand, and a copy of Node named `claude.exe` (see `startFakeClaude` in `qterm.ts`)
@@ -123,5 +160,9 @@ isolated app's `notification-attempts.jsonl`; the E2E identifier returns before
 Windows toast delivery or app-ID registration. This guard is always enabled for
 test builds, including deliberate negative tests. Never disable it to test alert
 policy: the user's desktop must not receive synthetic permission requests.
+App startup waits for processes using the exact isolated WebView2 profile to
+exit. A closed CDP port alone does not prove that profile has been released;
+rapid relaunches otherwise can fail with HRESULT 0x800700AA. This is a read-only
+process-state gate, with no startup retries or termination of other WebViews.
 "Stop what runs in this pane" is covered by a Rust test on a real ConPTY
 (`pty::tests::stopping_ends_the_program_and_keeps_the_shell`).

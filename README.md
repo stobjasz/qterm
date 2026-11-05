@@ -7,6 +7,10 @@ A quake-style drop-down terminal for Windows 11: the **~** key (left of 1) slide
 translucent console down from the top of the screen.
 
 How to use it, every feature and setting: **[User guide](docs/user-guide.md)**.
+Practical developer and agent workflows, with configuration examples:
+**[Scenario cookbook](docs/developer-workflows.md)**.
+Copyable layouts, profiles, snippets and other configuration:
+**[Feature samples](docs/feature-samples.md)**.
 
 ## Download
 

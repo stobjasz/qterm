@@ -85,6 +85,13 @@ describe("run-scoped results", () => {
     expect(lost.diagnostics.truncated).toBe(true);
     expect(lost.diagnostics.recognized).toBe(false);
   });
+  it("keeps checks in different environments even when command, folder and profile spellings match", () => {
+    const native = run("check", "/repo");
+    const ubuntu = { ...run("check", "/repo"), environment: "wsl:ubuntu" };
+    const debian = { ...run("check", "/repo"), environment: "wsl:debian" };
+    const latestUbuntu = { ...run("check", "/repo"), environment: "wsl:ubuntu" };
+    expect(latestRuns([latestUbuntu, debian, ubuntu, native]).map(r => r.id)).toEqual([latestUbuntu.id, debian.id, native.id]);
+  });
   it("restores native IDs and unknown exit status without converting null to success", () => {
     const restored = restoreRun({ id: "stable-run", paneId: "closed-pane", profileId: null, cwd: null, command: "check", exitCode: null, startedAt: 1, finishedAt: 2, output: "file.ts(2,3): error TS2322: Wrong value", outputTruncated: false });
     expect(restored.id).toBe("stable-run"); expect(restored.exitCode).toBeUndefined(); expect(restored.cwd).toBeUndefined();

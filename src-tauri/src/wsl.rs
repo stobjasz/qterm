@@ -6,20 +6,40 @@ use std::{
     os::windows::process::CommandExt,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc,
-    },
+    sync::{Arc,Condvar,Mutex,OnceLock,mpsc},
     thread,
     time::{Duration, Instant},
 };
 const SCRIPT: &str = include_str!("wsl_bridge.py");
+const REPOSITORY_SCRIPT:&str=include_str!("wsl_repository.py");
+const VERIFICATION_SCRIPT:&str=include_str!("wsl_verification.py");
+const WORKFLOWS_SCRIPT:&str=include_str!("wsl_workflows.py");
+const TASK_SOURCES_SCRIPT:&str=include_str!("wsl_task_sources.py");
+const BOOTSTRAP:&str=include_str!("wsl_bootstrap.py");
 const OUTPUT: usize = 4 * 1024 * 1024;
-static ACTIVE: AtomicUsize = AtomicUsize::new(0);
-struct Permit;
+#[derive(Default)]
+struct Admission { active:usize, waiting:usize }
+#[derive(Default)]
+struct Gate {state:Mutex<Admission>,changed:Condvar}
+static GATE:OnceLock<Arc<Gate>>=OnceLock::new();
+struct Permit(Arc<Gate>);
+impl Gate {
+    fn acquire(self:&Arc<Self>,deadline:Instant)->Result<Permit,String>{
+        let mut state=self.state.lock().unwrap();
+        if state.waiting>=16{return Err("The WSL data queue is full; try again after pending operations finish".into());}
+        state.waiting+=1;
+        while state.active>=4{
+            let remaining=deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero(){state.waiting-=1;return Err("Timed out waiting for a WSL data operation slot; no operation was started".into());}
+            state=self.changed.wait_timeout(state,remaining).unwrap().0;
+        }
+        state.waiting-=1;state.active+=1;Ok(Permit(Arc::clone(self)))
+    }
+}
 impl Drop for Permit {
     fn drop(&mut self) {
-        ACTIVE.fetch_sub(1, Ordering::AcqRel);
+        let mut state=self.0.state.lock().unwrap();state.active-=1;
+        self.0.changed.notify_one();
     }
 }
 pub(crate) fn program() -> PathBuf {
@@ -51,16 +71,17 @@ fn drain(mut input: impl Read) -> Result<Vec<u8>, String> {
     }
 }
 fn execute(
-    mut command: Command,
+    command: Command,
     input: Option<Vec<u8>>,
     deadline: Duration,
 ) -> Result<Vec<u8>, String> {
-    ACTIVE
-        .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-            (n < 4).then_some(n + 1)
-        })
-        .map_err(|_| "Four WSL data operations are already active")?;
-    let permit = Permit;
+    execute_checked(command,input,deadline,&||Ok(()))
+}
+fn execute_checked(mut command:Command,input:Option<Vec<u8>>,deadline:Duration,validate:&dyn Fn()->Result<(),String>)->Result<Vec<u8>,String>{
+    // Admission happens before spawning a process. Never retry an executed
+    // mutation; retain four active operations and at most sixteen bounded waiters.
+    let permit=GATE.get_or_init(||Arc::new(Gate::default())).acquire(Instant::now()+Duration::from_secs(5))?;
+    validate()?;
     let (tx, rx) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let _permit = permit;
@@ -184,6 +205,16 @@ pub fn context(
     }
 }
 pub fn call(distro: &str, request: Value) -> Result<Value, String> {
+    call_checked(distro,request,&||Ok(()))
+}
+#[cfg(test)]
+pub(crate) fn test_python(distribution:&str,source:&str,request:Value)->Result<Value,String>{
+    let distribution=installed(distribution)?;
+    let mut command=Command::new(program());command.args(["--distribution",&distribution,"--exec","/usr/bin/python3","-I","-S","-c",BOOTSTRAP]);
+    let data=serde_json::to_vec(&json!({"source":source,"request":request})).map_err(|e|e.to_string())?;
+    serde_json::from_slice(&execute(command,Some(data),Duration::from_secs(25))?).map_err(|e|e.to_string())
+}
+pub fn call_checked(distro:&str,request:Value,validate:&dyn Fn()->Result<(),String>)->Result<Value,String>{
     let distro = installed(distro)?;
     let bytes = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
     if bytes.len() > 1_048_576 {
@@ -198,9 +229,11 @@ pub fn call(distro: &str, request: Value) -> Result<Value, String> {
         "-I",
         "-S",
         "-c",
-        SCRIPT,
+        BOOTSTRAP,
     ]);
-    let output = execute(command, Some(bytes), Duration::from_secs(25))?;
+    let envelope=serde_json::to_vec(&json!({"source":format!("{REPOSITORY_SCRIPT}\n{VERIFICATION_SCRIPT}\n{WORKFLOWS_SCRIPT}\n{TASK_SOURCES_SCRIPT}\n{SCRIPT}"),"request":request})).map_err(|e|e.to_string())?;
+    if envelope.len()>2_097_152{return Err("WSL helper envelope exceeds 2 MiB".into());}
+    let output = execute_checked(command, Some(envelope), Duration::from_secs(25),validate)?;
     let response: Value =
         serde_json::from_slice(&output).map_err(|e| format!("Invalid WSL data response: {e}"))?;
     if let Some(error) = response.get("error").and_then(Value::as_str) {
@@ -251,7 +284,7 @@ pub fn project(distro: &str, cwd: &str) -> Result<crate::project::ProjectInfo, S
         serde_json::from_value(call(&distro, json!({"method":"project","cwd":cwd}))?)
             .map_err(|e| e.to_string())?;
     let root = unc(&distro, &folder.cwd)?;
-    let mut info = crate::project::files_info(std::path::Path::new(&root));
+    let mut info = crate::project::files_info_environment(std::path::Path::new(&root),true);
     if let Some(tasks) = &mut info.tasks {
         tasks.dir = linux(&distro, &tasks.dir)?;
     }
@@ -325,6 +358,23 @@ pub fn brief(distro: &str, text: &str) -> Result<Brief, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_admission_waits_for_a_released_slot_and_expires_without_starting(){
+        let gate=Arc::new(Gate::default());
+        let mut held:Vec<_>=(0..4).map(|_|gate.acquire(Instant::now()).unwrap()).collect();
+        assert!(gate.acquire(Instant::now()).err().unwrap().contains("no operation was started"));
+        assert_eq!(gate.state.lock().unwrap().waiting,0);
+        let pending=Arc::clone(&gate);let(tx,rx)=mpsc::channel();
+        let worker=thread::spawn(move||{let permit=pending.acquire(Instant::now()+Duration::from_secs(3)).unwrap();assert!(tx.send(permit).is_ok());});
+        let end=Instant::now()+Duration::from_secs(2);
+        while gate.state.lock().unwrap().waiting==0{assert!(Instant::now()<end,"waiter never entered admission");thread::yield_now();}
+        assert!(rx.try_recv().is_err());drop(held.pop());
+        let admitted=rx.recv_timeout(Duration::from_secs(2)).unwrap();worker.join().unwrap();
+        assert_eq!(gate.state.lock().unwrap().active,4);drop(admitted);drop(held);
+        assert_eq!(gate.state.lock().unwrap().active,0);
+        gate.state.lock().unwrap().waiting=16;
+        assert!(gate.acquire(Instant::now()).err().unwrap().contains("queue is full"));
+    }
     #[test]
     fn distro_paths_preserve_linux_case_and_do_not_become_windows_drive_paths() {
         assert_eq!(
@@ -401,6 +451,68 @@ mod tests {
             let _ = execute(command, None, Duration::from_secs(10));
         }
     }
+    #[test]
+    #[ignore = "requires installed Ubuntu; run explicitly for WSL validation"]
+    fn real_task_sources_use_the_production_bundle_and_shared_parsers(){
+        use base64::{Engine,engine::general_purpose::STANDARD};
+        use std::collections::HashMap;
+        let distro=installed("Ubuntu").unwrap();
+        let created=test_python(&distro,r#"import os,json,tempfile,subprocess
+root=tempfile.mkdtemp(prefix='qterm-wsl-test-');cwd=root+'/Case task';os.mkdir(cwd)
+subprocess.run(['/usr/bin/git','-c','core.hooksPath=/dev/null','-c','init.templateDir=','init','--quiet',cwd],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+files={'package.json':'{"scripts":{"check":"forbidden project command"}}','Cargo.toml':'[package]\nname="fixture"\n','Makefile':'verify:\n\t@echo forbidden\n','justfile':'lint:\n    echo forbidden\n','composer.json':'{"scripts":{"test":"forbidden"}}','pyproject.toml':'[tool.poe.tasks]\nfmt="forbidden"\n'}
+for name,text in files.items():open(cwd+'/'+name,'w').write(text)
+open(cwd+'/pnpm-lock.yaml','w').write('presence only')
+open(cwd+'/Cargo.toml','wb').write(b'\xff'*1048576)
+print(json.dumps({'root':root,'cwd':cwd}))"#,Value::Null).unwrap();
+        let fixture=Fixture{distro:distro.clone(),root:created["root"].as_str().unwrap().into(),cwd:created["cwd"].as_str().unwrap().into()};
+        let context=call(&distro,json!({"method":"task_project","cwd":fixture.cwd})).unwrap();
+        let snapshot=call(&distro,json!({"method":"task_directory","project":context["project"],"directory":context["directory"]})).unwrap();
+        let mut sources:HashMap<String,Vec<u8>>=HashMap::new();
+        for (name,fact) in snapshot["files"].as_object().unwrap(){
+            if fact.is_null(){continue;}
+            let value=call(&distro,json!({"method":"task_source","project":context["project"],"directory":snapshot["directory"],"name":name,"expected":fact})).unwrap();
+            sources.insert(name.clone(),STANDARD.decode(value["base64"].as_str().unwrap()).unwrap());
+        }
+        let tasks=crate::project::tasks_from_sources(
+            &|name|sources.get(name).and_then(|bytes|serde_json::from_slice(bytes).ok()),
+            &|name|sources.get(name).and_then(|bytes|String::from_utf8(bytes.clone()).ok()),
+            &|name|sources.contains_key(name)||snapshot["locks"].as_array().unwrap().iter().any(|lock|lock.as_str()==Some(name)),
+            &|package|crate::project::package_manager_from_sources(package,&||crate::project::package_manager_lock(&|name|snapshot["locks"].as_array().unwrap().iter().any(|lock|lock.as_str()==Some(name))))
+        );
+        assert_eq!(sources["Cargo.toml"].len(),1_048_576);
+        assert!(sources["Cargo.toml"].iter().all(|byte|*byte==255));
+        assert_eq!(tasks.iter().map(|task|task.command.as_str()).collect::<Vec<_>>(),["pnpm run check","cargo build","cargo check","cargo test","cargo run","cargo clippy","make verify","just lint","composer run-script test","poe fmt"]);
+        test_python(&distro,&format!("open({}+'/package.json','w').write('{{}}');print('null')",json!(fixture.cwd)),Value::Null).unwrap();
+        assert!(call(&distro,json!({"method":"task_source","project":context["project"],"directory":snapshot["directory"],"name":"package.json","expected":snapshot["files"]["package.json"]})).unwrap_err().contains("manifest changed"));
+    }
+
+    #[test]
+    #[ignore = "requires installed Ubuntu; run explicitly for WSL validation"]
+    fn real_workflow_source_and_directories_use_the_production_bundle() {
+        let distro = installed("Ubuntu").unwrap();
+        let created = test_python(&distro, r#"import os,json,tempfile
+root=tempfile.mkdtemp(prefix='qterm-wsl-test-'); cwd=root+'/Case workflow';os.mkdir(cwd);os.mkdir(cwd+'/child')
+text='[workflows]\nversion=1\n[[workflows.recipes]]\nname="check"\n[[workflows.recipes.steps]]\nname="check"\ncommand="printf literal"\n'
+open(cwd+'/.qterm.toml','w',encoding='utf8').write(text)
+print(json.dumps({'root':root,'cwd':cwd,'text':text}))"#, Value::Null).unwrap();
+        let fixture = Fixture {
+            distro: distro.clone(),
+            root: created["root"].as_str().unwrap().into(),
+            cwd: created["cwd"].as_str().unwrap().into(),
+        };
+        let source=call(&distro,json!({"method":"workflow_source","cwd":format!("{}/child",fixture.cwd)})).unwrap();
+        assert_eq!(source["project"],fixture.cwd);
+        assert_eq!(source["text"],created["text"]);
+        let definitions=crate::project::parse_settings(source["text"].as_str().unwrap()).unwrap().workflows.unwrap();
+        assert_eq!(definitions.recipes[0].steps[0].command,"printf literal");
+        let directories=call(&distro,json!({"method":"workflow_directories","source":source,"paths":[".","child"]})).unwrap();
+        assert_eq!(directories[1]["directory"],format!("{}/child",fixture.cwd));
+        assert_eq!(call(&distro,json!({"method":"workflow_validate","source":source,"directories":directories})).unwrap()["valid"],true);
+        test_python(&distro,&format!("import os;root={};os.rename(root+'/child',root+'/old');os.mkdir(root+'/child');print('null')",json!(fixture.cwd)),Value::Null).unwrap();
+        assert!(call(&distro,json!({"method":"workflow_validate","source":source,"directories":directories})).unwrap_err().contains("step folder changed"));
+    }
+
     #[test]
     #[ignore = "requires installed Ubuntu; run explicitly for WSL validation"]
     fn real_ubuntu_project_inspection_file_resolution_and_literal_briefs() {
