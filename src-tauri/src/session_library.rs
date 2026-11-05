@@ -928,7 +928,8 @@ mod tests {
     fn discovery_is_explicit_and_reported_branches_and_native_data_never_cross_environment_identity()
      {
         let repo = Repo::new();
-        let cwd = repo_state::display(&repo.dir);
+        // Canonical, like project_folder: %TEMP% can be an 8.3 short path (CI runners).
+        let cwd = repo_state::display(&repo.dir.canonicalize().unwrap());
         let store = Store::load(repo.dir.join("pins.json"));
         let remembered = vec![
             (
